@@ -8,9 +8,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
-import net.minecraft.world.item.Item;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -19,6 +16,7 @@ import net.minecraft.world.phys.shapes.Shapes;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -56,6 +54,8 @@ public final class MarkerManager {
     public static final Set<BlockPos> startMarkers = new LinkedHashSet<>();
     public static final Set<BlockPos> endMarkers = new LinkedHashSet<>();
 
+    private static String currentKey = null; // world+dimension key the loaded markers belong to
+
     private static Kind dragKind = Kind.NONE;
     private static BlockPos dragOrigin;
     private static boolean dragRemoving; // whole drag removes (origin was marked) vs adds
@@ -66,20 +66,47 @@ public final class MarkerManager {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return false;
         if (ConfigManager.get().mode != ToolMode.MARKER) return false;
-        return holdingSelectedTool(mc);
+        return Gradient.isHoldingTool(mc);
     }
 
-    private static boolean holdingSelectedTool(Minecraft mc) {
-        String sel = ConfigManager.get().selectedTool;
-        if (sel == null || sel.isEmpty()) return false;
-        Item item = mc.player.getMainHandItem().getItem();
-        Identifier id = BuiltInRegistries.ITEM.getKey(item);
-        return id != null && id.toString().equals(sel);
+    /** Remove every marker (used by the settings screen's Clear Markers button) and persist. */
+    public static void clearAll() {
+        startMarkers.clear();
+        endMarkers.clear();
+        cancelDrag();
+        saveCurrent();
+    }
+
+    // ---- persistence ----------------------------------------------------------------------------
+
+    private static void syncWorld(Minecraft mc) {
+        String key = worldKey(mc);
+        if (!Objects.equals(key, currentKey)) {
+            currentKey = key;
+            MarkerStore.loadInto(key, startMarkers, endMarkers); // null key → clears (e.g. main menu)
+            cancelDrag();
+        }
+    }
+
+    /** Stable per-world, per-dimension key, or null when not in a world. */
+    private static String worldKey(Minecraft mc) {
+        if (mc.level == null) return null;
+        String dim = mc.level.dimension().identifier().toString();
+        var singleplayer = mc.getSingleplayerServer();
+        if (singleplayer != null) return "sp:" + singleplayer.getWorldData().getLevelName() + "|" + dim;
+        var server = mc.getCurrentServer();
+        if (server != null) return "mp:" + server.ip + "|" + dim;
+        return "local|" + dim;
+    }
+
+    private static void saveCurrent() {
+        MarkerStore.store(currentKey, startMarkers, endMarkers);
     }
 
     // ---- input / drag (client tick) -------------------------------------------------------------
 
     public static void tick(Minecraft mc) {
+        syncWorld(mc); // load this world's saved markers when the world/dimension changes
         if (mc.player == null || mc.level == null || mc.gui.screen() != null || !active()) {
             cancelDrag();
             return;
@@ -157,6 +184,7 @@ public final class MarkerManager {
             }
             // Removing start markers can orphan end markers — drop any that lost their start.
             if (removedStart) endMarkers.removeIf(p -> !isEndAllowed(p));
+            saveCurrent();
         }
         cancelDrag();
     }

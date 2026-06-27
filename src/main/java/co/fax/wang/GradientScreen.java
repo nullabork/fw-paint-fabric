@@ -40,9 +40,10 @@ public class GradientScreen extends Screen {
     private static final int HOVER_BG = 0x33FFFFFF;
     private static final int SELECTED_BG = 0x3355FF55;
 
-    private static final int LIST_TOP = 116;
-    private static final int LIST_W = 200;
-    private static final int BOTTOM_MARGIN = 40; // space reserved below the list (Done button + hint)
+    private static final int PANEL_W = 150;  // width of each side panel (list + buttons)
+    private static final int GAP = 8;        // gap between the two panels
+    private static final int LIST_TOP = 66;  // y where the item list starts (below the filter box)
+    private static final int BOTTOM_MARGIN = 40; // space reserved below the list (Done button)
 
     /** One filtered match: registry id + display name. */
     private record Row(String id, String name) {}
@@ -52,6 +53,7 @@ public class GradientScreen extends Screen {
     private final List<Row> matches = new ArrayList<>();
     private String filter = "";
     private int rowHeight = 12;
+    private int listX = 0;   // left edge of the left-hand list panel (set in init)
     private boolean truncated = false;
 
     public GradientScreen() {
@@ -63,16 +65,12 @@ public class GradientScreen extends Screen {
         int cx = this.width / 2;
         rowHeight = this.font.lineHeight + 3;
 
-        // Mode button — reflects the current mode and cycles it on click (same state the keybind drives).
-        modeButton = addRenderableWidget(Button.builder(modeLabel(), b -> {
-            GradientConfig cfg = ConfigManager.get();
-            cfg.mode = cfg.mode.next();
-            ConfigManager.save();
-            b.setMessage(modeLabel());
-        }).bounds(cx - 100, 50, 200, 20).build());
+        // Two side-by-side panels: tool filter + list on the LEFT, setting buttons on the RIGHT.
+        listX = cx - PANEL_W - GAP / 2; // left panel x
+        int rx = cx + GAP / 2;          // right panel (buttons) x
 
-        // Filter box — type to narrow the item list.
-        filterBox = new EditBox(this.font, cx - 100, 90, 200, 20, Component.literal("Filter"));
+        // Filter box (left panel, above the list).
+        filterBox = new EditBox(this.font, listX, 40, PANEL_W, 20, Component.literal("Filter"));
         filterBox.setHint(Component.literal("Filter items…"));
         filterBox.setMaxLength(64);
         filterBox.setValue(filter);
@@ -82,11 +80,63 @@ public class GradientScreen extends Screen {
         });
         addRenderableWidget(filterBox);
         setInitialFocus(filterBox);
-
         rebuildMatches();
+
+        // Setting buttons (right panel, stacked). Mode keeps a field so the keybind can sync it.
+        modeButton = addRenderableWidget(Button.builder(modeLabel(), b -> {
+            GradientConfig cfg = ConfigManager.get();
+            cfg.mode = cfg.mode.next();
+            ConfigManager.save();
+            b.setMessage(modeLabel());
+        }).bounds(rx, 40, PANEL_W, 20).build());
+
+        cycleButton(rx, 64, PANEL_W, this::gradientLabel,
+                () -> { GradientConfig c = ConfigManager.get(); c.gradientMode = c.gradientMode.next(); });
+        cycleButton(rx, 88, PANEL_W, this::curveLabel,
+                () -> { GradientConfig c = ConfigManager.get(); c.curve = c.curve.next(); });
+        cycleButton(rx, 112, PANEL_W, this::sourceLabel,
+                () -> { GradientConfig c = ConfigManager.get(); c.source = c.source.next(); });
+        cycleButton(rx, 136, PANEL_W, this::cleanLabel,
+                () -> { GradientConfig c = ConfigManager.get(); c.clean = !c.clean; });
+
+        // Clear all markers (persisted), separated below the settings.
+        addRenderableWidget(Button.builder(clearMarkersLabel(), b -> {
+            MarkerManager.clearAll();
+            b.setMessage(clearMarkersLabel());
+        }).bounds(rx, 164, PANEL_W, 20).build());
 
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
                 .bounds(cx - 100, this.height - 28, 200, 20).build());
+    }
+
+    private Component clearMarkersLabel() {
+        int n = MarkerManager.startMarkers.size() + MarkerManager.endMarkers.size();
+        return Component.literal("Clear Markers (" + n + ")");
+    }
+
+    /** Build a button at (x,y,w) that runs {@code onCycle}, saves, and refreshes its label. */
+    private void cycleButton(int x, int y, int w, java.util.function.Supplier<Component> label, Runnable onCycle) {
+        addRenderableWidget(Button.builder(label.get(), b -> {
+            onCycle.run();
+            ConfigManager.save();
+            b.setMessage(label.get());
+        }).bounds(x, y, w, 20).build());
+    }
+
+    private Component gradientLabel() {
+        return Component.literal("Gradient: " + ConfigManager.get().gradientMode.displayName());
+    }
+
+    private Component curveLabel() {
+        return Component.literal("Curve: " + ConfigManager.get().curve.displayName());
+    }
+
+    private Component sourceLabel() {
+        return Component.literal("Source: " + ConfigManager.get().source.displayName());
+    }
+
+    private Component cleanLabel() {
+        return Component.literal("Cleanliness: " + (ConfigManager.get().clean ? "Clean" : "Unclean"));
     }
 
     /** Recompute the filtered match list, capped to however many rows fit in the window. */
@@ -121,8 +171,7 @@ public class GradientScreen extends Screen {
 
     /** Index of the result row at the given screen coords, or -1 if none. */
     private int rowIndexAt(double mouseX, double mouseY) {
-        int x0 = this.width / 2 - LIST_W / 2;
-        if (mouseX < x0 || mouseX > x0 + LIST_W || mouseY < LIST_TOP) return -1;
+        if (mouseX < listX || mouseX > listX + PANEL_W || mouseY < LIST_TOP) return -1;
         int idx = (int) ((mouseY - LIST_TOP) / rowHeight);
         return (idx >= 0 && idx < matches.size()) ? idx : -1;
     }
@@ -150,44 +199,38 @@ public class GradientScreen extends Screen {
     public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(g, mouseX, mouseY, partialTick); // background + widgets
         int cx = this.width / 2;
-        int x0 = cx - LIST_W / 2;
+        int x0 = listX;
 
-        g.centeredText(this.font, this.title, cx, 16, WHITE);
+        g.centeredText(this.font, this.title, cx, 12, WHITE);
 
-        // Selected tool — read live so it updates the instant a row is clicked.
+        // Selected tool — read live so it updates the instant a row is clicked (left panel header).
         String sel = ConfigManager.get().selectedTool;
-        String selName = sel.isEmpty() ? "(none — pick one below)" : Gradient.toolDisplayName(sel);
-        g.centeredText(this.font, Component.literal("Selected tool: " + selName), cx, 32, WHITE);
+        String selName = sel.isEmpty() ? "(none — pick below)" : Gradient.toolDisplayName(sel);
+        g.text(this.font, "Tool: " + selName, x0, 30, WHITE);
 
         // Keep the mode button label in sync if the keybind changed the mode while open.
         modeButton.setMessage(modeLabel());
-
-        g.centeredText(this.font,
-                Component.literal("Type to filter, click an item to set it as your tool"),
-                cx, 78, GREY);
 
         // Result rows.
         for (int i = 0; i < matches.size(); i++) {
             Row row = matches.get(i);
             int y = LIST_TOP + i * rowHeight;
-            boolean hover = mouseX >= x0 && mouseX <= x0 + LIST_W && mouseY >= y && mouseY < y + rowHeight;
+            boolean hover = mouseX >= x0 && mouseX <= x0 + PANEL_W && mouseY >= y && mouseY < y + rowHeight;
             boolean selected = row.id().equals(sel);
 
             if (selected) {
-                g.fill(x0, y, x0 + LIST_W, y + rowHeight, SELECTED_BG);
+                g.fill(x0, y, x0 + PANEL_W, y + rowHeight, SELECTED_BG);
             } else if (hover) {
-                g.fill(x0, y, x0 + LIST_W, y + rowHeight, HOVER_BG);
+                g.fill(x0, y, x0 + PANEL_W, y + rowHeight, HOVER_BG);
             }
             int color = selected ? ROW_SELECTED : (hover ? WHITE : ROW_DIM);
-            String label = this.font.plainSubstrByWidth(row.name(), LIST_W - 8);
+            String label = this.font.plainSubstrByWidth(row.name(), PANEL_W - 8);
             g.text(this.font, label, x0 + 4, y + 2, color);
         }
 
         if (truncated) {
             int hintY = LIST_TOP + matches.size() * rowHeight + 1;
-            g.centeredText(this.font,
-                    Component.literal("More matches… refine the filter to narrow it down"),
-                    cx, hintY, GREY);
+            g.text(this.font, "More matches… refine the filter", x0, hintY, GREY);
         }
     }
 

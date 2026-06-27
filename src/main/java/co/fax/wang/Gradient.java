@@ -52,14 +52,18 @@ public class Gradient implements ClientModInitializer {
                 cycleMode();
             }
             MarkerManager.tick(client);
+            GradientPlacer.tick(client);
         });
 
-        // Left/right click place markers (and must NOT break/use the world) while marking is live.
-        // Cancel client-side only — in singleplayer that stops the action packet from being sent.
+        // While the tool is engaged (Marker or Place mode), suppress vanilla left/right click so it
+        // doesn't break/use the world — Marker mode marks, Place mode places. Cancel client-side
+        // only (stops the action packet). The !isPlacing() guard lets our OWN synthesized placement
+        // interaction through instead of cancelling it.
         AttackBlockCallback.EVENT.register((player, level, hand, pos, dir) ->
-                (level.isClientSide() && MarkerManager.active()) ? InteractionResult.FAIL : InteractionResult.PASS);
+                (level.isClientSide() && toolEngaged()) ? InteractionResult.FAIL : InteractionResult.PASS);
         UseBlockCallback.EVENT.register((player, level, hand, hit) ->
-                (level.isClientSide() && MarkerManager.active()) ? InteractionResult.FAIL : InteractionResult.PASS);
+                (level.isClientSide() && toolEngaged() && !GradientPlacer.isPlacing())
+                        ? InteractionResult.FAIL : InteractionResult.PASS);
 
         // In-world marker rendering (filled committed faces + drag outline preview). Submit during
         // COLLECT_SUBMITS — the same submit-collection phase vanilla uses for entities + the block
@@ -91,6 +95,20 @@ public class Gradient implements ClientModInitializer {
         if (mc.player != null) {
             mc.player.sendOverlayMessage(Component.literal("Gradient: " + cfg.mode.displayName()));
         }
+    }
+
+    /** True when the player's main hand holds the configured tool item. */
+    public static boolean isHoldingTool(Minecraft mc) {
+        if (mc.player == null) return false;
+        String sel = ConfigManager.get().selectedTool;
+        if (sel == null || sel.isEmpty()) return false;
+        Identifier id = BuiltInRegistries.ITEM.getKey(mc.player.getMainHandItem().getItem());
+        return id != null && id.toString().equals(sel);
+    }
+
+    /** True when the tool is held and the mod is active (Marker or Place — not Disabled). */
+    public static boolean toolEngaged() {
+        return ConfigManager.get().mode != ToolMode.DISABLED && isHoldingTool(Minecraft.getInstance());
     }
 
     /**
