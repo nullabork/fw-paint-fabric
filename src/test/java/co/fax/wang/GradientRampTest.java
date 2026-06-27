@@ -7,6 +7,7 @@ import java.util.Arrays;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests for the pure gradient-selection maths across the different settings combinations. */
@@ -160,6 +161,65 @@ class GradientRampTest {
         int easeIn = GradientRamp.rampIndex(count, CurveFunction.EASE_IN.apply(0.25));
         int easeOut = GradientRamp.rampIndex(count, CurveFunction.EASE_OUT.apply(0.25));
         assertTrue(easeIn < easeOut, "ease-in should lag and ease-out should lead at t=0.25");
+    }
+
+    // ---- staying close to the gradient (deviation budget) ---------------------------------------
+
+    @Test
+    void deviationIsZeroOnTheGradientAndLargeOffAxis() {
+        int midPinkGreen = 0x7FAA66; // ~midpoint of pink→green
+        double onAxis = GradientRamp.deviation(midPinkGreen, PINK, GREEN, GradientMode.COLOR);
+        double offAxis = GradientRamp.deviation(BLUE, PINK, GREEN, GradientMode.COLOR);
+        assertTrue(onAxis < 5.0, "a colour on the gradient should barely deviate, was " + onAxis);
+        assertTrue(offAxis > onAxis + 100, "an off-axis colour should deviate far more, was " + offAxis);
+    }
+
+    @Test
+    void gradientOrderExcludesFarOffAxisColors() {
+        int[] pal = {PINK, GREEN, BLUE}; // blue is nowhere near a pink→green gradient
+        int[] order = GradientRamp.gradientOrder(pal, PINK, GREEN, GradientMode.COLOR);
+        assertArrayEquals(new int[]{0, 1}, order); // only pink + green, blue dropped
+    }
+
+    @Test
+    void everyChosenBlockStaysWithinTheDeviationBudget() {
+        int[] pal = {PINK, GREEN, BLUE, YELLOW, MIDGREEN}; // blue + yellow are off-axis junk
+        int[] grad = GradientRamp.buildGradient(pal, PINK, GREEN, GradientMode.COLOR, CurveFunction.LINEAR, 10);
+        double budget = GradientRamp.maxDeviation(GradientMode.COLOR);
+        for (int idx : grad) {
+            double d = GradientRamp.deviation(pal[idx], PINK, GREEN, GradientMode.COLOR);
+            assertTrue(d <= budget, "chosen block deviates " + d + " > budget " + budget);
+            assertNotEquals(2, idx, "off-axis blue must never be used");
+            assertNotEquals(3, idx, "off-axis yellow must never be used");
+        }
+    }
+
+    @Test
+    void whenOnlyOneBlockIsNearItIsUsedAloneNeverFarColors() {
+        // Pink→green gradient, but only MIDGREEN is near; blue and yellow are far off-axis.
+        int[] pal = {BLUE, YELLOW, MIDGREEN};
+        int[] order = GradientRamp.gradientOrder(pal, PINK, GREEN, GradientMode.COLOR);
+        assertArrayEquals(new int[]{2}, order, "only the near block qualifies");
+        int[] grad = GradientRamp.buildGradient(pal, PINK, GREEN, GradientMode.COLOR, CurveFunction.LINEAR, 6);
+        for (int idx : grad) assertEquals(2, idx, "should repeat the one near block, never the far ones");
+    }
+
+    @Test
+    void fallsBackToLeastBadWhenNothingIsNear() {
+        int[] pal = {BLUE, YELLOW}; // both far from a pink→green gradient
+        int[] order = GradientRamp.gradientOrder(pal, PINK, GREEN, GradientMode.COLOR);
+        assertEquals(1, order.length, "fallback should pick a single least-deviating block");
+        double dBlue = GradientRamp.deviation(BLUE, PINK, GREEN, GradientMode.COLOR);
+        double dYellow = GradientRamp.deviation(YELLOW, PINK, GREEN, GradientMode.COLOR);
+        assertEquals(dBlue < dYellow ? 0 : 1, order[0], "fallback is the closer of the two");
+    }
+
+    @Test
+    void brightnessExcludesBlocksOutsideTheLuminanceRange() {
+        int dark = 0x404040, light = 0xC0C0C0;
+        assertEquals(0.0, GradientRamp.deviation(GRAY, dark, light, GradientMode.BRIGHTNESS), 1e-9);
+        assertTrue(GradientRamp.deviation(WHITE, dark, light, GradientMode.BRIGHTNESS) > 0,
+                "pure white lies above the dark→light range and should deviate");
     }
 
     // ---- edge cases -----------------------------------------------------------------------------

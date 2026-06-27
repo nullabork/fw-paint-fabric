@@ -225,7 +225,8 @@ public final class GradientPlacer {
         int n = palette.size();
         int[] rgbs = new int[n];
         for (int i = 0; i < n; i++) rgbs[i] = palette.get(i).rgb();
-        int[] order = GradientRamp.orderedIndices(rgbs, startRgb, endRgb, cfg.gradientMode);
+        // Only blocks near the gradient are eligible — never reach for off-gradient colours.
+        int[] order = GradientRamp.gradientOrder(rgbs, startRgb, endRgb, cfg.gradientMode);
 
         double tc = cfg.curve.apply(t);
         if (!cfg.clean) {
