@@ -65,6 +65,66 @@ public final class TextureStats {
         return topColor(argb, 1.0, false);
     }
 
+    // ---- texture signatures + difference --------------------------------------------------------
+
+    /**
+     * Downsample a {@code w×h} ARGB image to a {@code grid×grid} signature of average cell colours
+     * (0xRRGGBB), or {@code -1} for a cell with no opaque pixels. Used to compare two textures.
+     */
+    public static int[] downsample(int[] argb, int w, int h, int grid) {
+        int[] sig = new int[grid * grid];
+        for (int cy = 0; cy < grid; cy++) {
+            for (int cx = 0; cx < grid; cx++) {
+                long r = 0, g = 0, b = 0;
+                int n = 0;
+                int x0 = cx * w / grid, x1 = (cx + 1) * w / grid;
+                int y0 = cy * h / grid, y1 = (cy + 1) * h / grid;
+                for (int y = y0; y < y1; y++) {
+                    for (int x = x0; x < x1; x++) {
+                        int p = argb[y * w + x];
+                        if (((p >> 24) & 0xFF) >= ALPHA_THRESHOLD) {
+                            r += (p >> 16) & 0xFF;
+                            g += (p >> 8) & 0xFF;
+                            b += p & 0xFF;
+                            n++;
+                        }
+                    }
+                }
+                sig[cy * grid + cx] = n == 0 ? -1
+                        : (((int) (r / n)) << 16) | (((int) (g / n)) << 8) | (int) (b / n);
+            }
+        }
+        return sig;
+    }
+
+    /** Mean grayscale (brightness) difference between two signatures, 0..255. */
+    public static double bwDiff(int[] a, int[] b) {
+        double sum = 0;
+        int n = 0;
+        for (int i = 0; i < a.length && i < b.length; i++) {
+            if (a[i] < 0 || b[i] < 0) continue;
+            sum += Math.abs(luminance(a[i]) - luminance(b[i]));
+            n++;
+        }
+        return n == 0 ? 0 : sum / n;
+    }
+
+    /** Mean colour difference between two signatures, normalised to 0..255. */
+    public static double colorDiff(int[] a, int[] b) {
+        double sum = 0;
+        int n = 0;
+        for (int i = 0; i < a.length && i < b.length; i++) {
+            if (a[i] < 0 || b[i] < 0) continue;
+            int dr = ((a[i] >> 16) & 0xFF) - ((b[i] >> 16) & 0xFF);
+            int dg = ((a[i] >> 8) & 0xFF) - ((b[i] >> 8) & 0xFF);
+            int db = (a[i] & 0xFF) - (b[i] & 0xFF);
+            sum += Math.sqrt((double) dr * dr + dg * dg + db * db);
+            n++;
+        }
+        double avg = n == 0 ? 0 : sum / n;        // 0..441 (RGB diagonal)
+        return Math.min(255.0, avg * 255.0 / 441.0);
+    }
+
     private static double clamp01(double v) {
         return Math.max(0.0, Math.min(1.0, v));
     }

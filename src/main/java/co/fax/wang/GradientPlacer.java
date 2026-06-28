@@ -108,15 +108,18 @@ public final class GradientPlacer {
             return false;
         }
 
-        List<Palette> palette = sourcePalette(player, level, front.cell());
+        // The start block is the reference for diff-based gradient modes.
+        net.minecraft.world.level.block.Block startBlock = level.getBlockState(seg.s()).getBlock();
+        List<Palette> palette = sourcePalette(player, startBlock);
         if (palette.isEmpty()) {
             if (announce) player.sendOverlayMessage(Component.literal("Gradient: no placeable blocks in source"));
             return false;
         }
 
-        int startRgb = rgbOf(level.getBlockState(seg.s()));
-        int endRgb = rgbOf(level.getBlockState(seg.e()));
-        Palette chosen = pick(palette, ConfigManager.get(), startRgb, endRgb, front.t());
+        GradientConfig cfg = ConfigManager.get();
+        int startRgb = rgbOf(startBlock, startBlock);
+        int endRgb = rgbOf(level.getBlockState(seg.e()).getBlock(), startBlock);
+        Palette chosen = pick(palette, cfg, startRgb, endRgb, front.t());
         place(mc, player, chosen, front);
         return true;
     }
@@ -188,8 +191,8 @@ public final class GradientPlacer {
 
     // ---- palette + gradient selection -----------------------------------------------------------
 
-    /** Candidate blocks from the configured source. Slot index is the inventory slot (0-8 hotbar, 9-35 main). */
-    private static List<Palette> sourcePalette(LocalPlayer player, Level level, BlockPos cell) {
+    /** Candidate blocks from the configured source, valued relative to {@code startBlock}. */
+    private static List<Palette> sourcePalette(LocalPlayer player, Block startBlock) {
         NonNullList<ItemStack> items = player.getInventory().getNonEquipmentItems();
         int from, to;
         switch (ConfigManager.get().source) {
@@ -206,12 +209,10 @@ public final class GradientPlacer {
             ItemStack st = items.get(slot);
             if (!(st.getItem() instanceof BlockItem bi)) continue;
             Block b = bi.getBlock();
-            BlockState ds = b.defaultBlockState();
-            if (ds.isAir() || !seen.add(b)) continue; // dedupe; first (lowest, hotbar-first) slot wins
+            if (b.defaultBlockState().isAir() || !seen.add(b)) continue; // dedupe; hotbar-first slot wins
             Identifier id = BuiltInRegistries.ITEM.getKey(st.getItem());
             if (id != null && excluded.contains(id.toString())) continue; // user-excluded block
-            int rgb = rgbOf(ds);
-            if (rgb == 0) continue; // no usable colour
+            int rgb = rgbOf(b, startBlock);
             palette.add(new Palette(slot, b, rgb));
         }
         return palette;
@@ -292,9 +293,10 @@ public final class GradientPlacer {
 
     // ---- colour helpers -------------------------------------------------------------------------
 
-    private static int rgbOf(BlockState state) {
+    private static int rgbOf(net.minecraft.world.level.block.Block block,
+                            net.minecraft.world.level.block.Block startBlock) {
         GradientConfig cfg = ConfigManager.get();
-        return BlockTextures.gradientRgb(state.getBlock(), cfg.gradientMode, cfg.pixelPercent);
+        return BlockTextures.gradientValue(block, startBlock, cfg.gradientMode, cfg.pixelPercent);
     }
 
     private static double clamp01(double v) {

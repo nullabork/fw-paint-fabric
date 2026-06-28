@@ -61,6 +61,49 @@ class TextureStatsTest {
     }
 
     @Test
+    void downsampleAveragesCells() {
+        // 2x2 image, grid 2 → each pixel is its own cell.
+        int[] img = {BLACK, WHITE, RED, GREEN};
+        int[] sig = TextureStats.downsample(img, 2, 2, 2);
+        assertEquals(0x000000, sig[0]);
+        assertEquals(0xFFFFFF, sig[1]);
+        assertEquals(0xFF0000, sig[2]);
+        assertEquals(0x00FF00, sig[3]);
+    }
+
+    @Test
+    void identicalSignaturesHaveZeroDiff() {
+        int[] sig = TextureStats.downsample(new int[]{BLACK, WHITE, RED, GREEN}, 2, 2, 2);
+        assertEquals(0.0, TextureStats.bwDiff(sig, sig), 1e-9);
+        assertEquals(0.0, TextureStats.colorDiff(sig, sig), 1e-9);
+    }
+
+    @Test
+    void blackVsWhiteIsMaxBwDiff() {
+        int[] black = {0x000000};
+        int[] white = {0xFFFFFF};
+        assertEquals(255.0, TextureStats.bwDiff(black, white), 1e-6);
+    }
+
+    @Test
+    void colorDiffSeesHueWhereBwDiffDoesNot() {
+        // red vs green have similar brightness-ish but very different colour.
+        int[] red = {0xFF0000};
+        int[] green = {0x00FF00};
+        double bw = TextureStats.bwDiff(red, green);
+        double color = TextureStats.colorDiff(red, green);
+        assertTrue(color > bw, "colour diff should exceed b&w diff for same-ish brightness hues");
+        assertTrue(color > 50, "red vs green is a big colour difference");
+    }
+
+    @Test
+    void emptyCellsAreIgnoredInDiff() {
+        int[] a = {0x000000, -1};
+        int[] b = {0x000000, 0xFFFFFF};
+        assertEquals(0.0, TextureStats.bwDiff(a, b), 1e-9); // only the matching black cell counts
+    }
+
+    @Test
     void emptyOrAllTransparentReturnsZero() {
         assertEquals(0, TextureStats.averageColor(new int[]{}));
         assertEquals(0, TextureStats.averageColor(new int[]{TRANSPARENT, TRANSPARENT}));

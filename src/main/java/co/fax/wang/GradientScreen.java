@@ -199,6 +199,8 @@ public class GradientScreen extends Screen {
             case TOP_DARK -> "Brightness of the darkest pixels.";
             case TOP_LIGHT_COLOR -> "Colour of the lightest pixels.";
             case TOP_LIGHT -> "Brightness of the lightest pixels.";
+            case BW_DIFF -> "B&W texture difference from start.";
+            case COLOR_DIFF -> "Colour texture difference from start.";
         };
     }
 
@@ -280,10 +282,9 @@ public class GradientScreen extends Screen {
         return out;
     }
 
-    /** Block's gradient colour under the current mode + pixel %. */
-    private int sbRgb(SourceBlock sb) {
-        GradientConfig cfg = ConfigManager.get();
-        return BlockTextures.gradientRgb(sb.block(), cfg.gradientMode, cfg.pixelPercent);
+    private Block blockOfId(String id, List<SourceBlock> list) {
+        if (id != null) for (SourceBlock sb : list) if (sb.id().equals(id)) return sb.block();
+        return null;
     }
 
     private void rebuildDisplayRows() {
@@ -295,10 +296,16 @@ public class GradientScreen extends Screen {
         for (SourceBlock sb : sourceBlocks) if (!excluded.contains(sb.id())) nonEx.add(sb);
         ensureEndpoints(nonEx);
 
-        int startRgb = rgbOfId(previewStartId, nonEx);
-        int endRgb = rgbOfId(previewEndId, nonEx);
+        Block startBlock = blockOfId(previewStartId, nonEx);
+        Block endBlock = blockOfId(previewEndId, nonEx);
+        GradientMode mode = cfg.gradientMode;
+        double pct = cfg.pixelPercent;
+        int startRgb = startBlock == null ? 0 : BlockTextures.gradientValue(startBlock, startBlock, mode, pct);
+        int endRgb = endBlock == null ? 0 : BlockTextures.gradientValue(endBlock, startBlock, mode, pct);
         int[] rgbs = new int[nonEx.size()];
-        for (int i = 0; i < nonEx.size(); i++) rgbs[i] = sbRgb(nonEx.get(i));
+        for (int i = 0; i < nonEx.size(); i++) {
+            rgbs[i] = BlockTextures.gradientValue(nonEx.get(i).block(), startBlock, mode, pct);
+        }
 
         // Eligible blocks near the gradient, then the max-steps cap = what actually gets placed.
         int[] order = nonEx.isEmpty() ? new int[0]
@@ -353,10 +360,11 @@ public class GradientScreen extends Screen {
         boolean startOk = previewStartId != null && nonEx.stream().anyMatch(s -> s.id().equals(previewStartId));
         boolean endOk = previewEndId != null && nonEx.stream().anyMatch(s -> s.id().equals(previewEndId));
         if (startOk && endOk) return;
+        // Default endpoints use a start-independent brightness so diff modes have a stable reference.
         SourceBlock lightest = null, darkest = null;
         double lightestL = -1, darkestL = Double.MAX_VALUE;
         for (SourceBlock sb : nonEx) {
-            double l = GradientRamp.luminance(sbRgb(sb));
+            double l = BlockTextures.baseLuminance(sb.block());
             if (lightest == null || l > lightestL) { lightest = sb; lightestL = l; }
             if (darkest == null || l < darkestL) { darkest = sb; darkestL = l; }
         }
@@ -364,10 +372,6 @@ public class GradientScreen extends Screen {
         if (!endOk) previewEndId = darkest != null ? darkest.id() : null;       // darkest = end
     }
 
-    private int rgbOfId(String id, List<SourceBlock> list) {
-        if (id != null) for (SourceBlock sb : list) if (sb.id().equals(id)) return sbRgb(sb);
-        return 0;
-    }
 
     private int visibleRows() {
         return Math.max(1, (this.height - 34 - LIST_TOP) / ROW_H);

@@ -11,7 +11,9 @@ public enum GradientMode {
     TOP_DARK_COLOR("Top % Dark Color"),
     TOP_DARK("Top % Dark"),
     TOP_LIGHT_COLOR("Top % Light Color"),
-    TOP_LIGHT("Top % Light");
+    TOP_LIGHT("Top % Light"),
+    BW_DIFF("B&W Diff"),
+    COLOR_DIFF("Color Diff");
 
     private final String displayName;
 
@@ -23,9 +25,14 @@ public enum GradientMode {
         return displayName;
     }
 
-    /** True when the gradient is ordered by brightness rather than colour. */
+    /** True when the gradient is ordered by a single scalar (brightness or a diff) not a colour axis. */
     public boolean usesBrightness() {
-        return this == BRIGHTNESS || this == TOP_DARK || this == TOP_LIGHT;
+        return this == BRIGHTNESS || this == TOP_DARK || this == TOP_LIGHT || this == BW_DIFF || this == COLOR_DIFF;
+    }
+
+    /** True when a block's value is its texture's difference from the start block. */
+    public boolean isStartRelative() {
+        return this == BW_DIFF || this == COLOR_DIFF;
     }
 
     /** True when only a fraction of the texture's pixels is analysed (needs the Pixel % slider). */

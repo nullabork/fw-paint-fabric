@@ -10,14 +10,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Reads a block's actual texture pixels (via its particle sprite → the texture PNG in the resource
- * manager) and derives the colour used for gradients. Pixels are cached per block. No mixin needed —
- * the PNG is read straight from resources, which exposes RGBA pixels.
+ * manager) and derives the colour/value used for gradients. Pixels and signatures are cached per
+ * block. No mixin needed — the PNG is read straight from resources, which exposes RGBA pixels.
  *
  * <p>Falls back to the block's default {@code MapColor} when no texture can be read.
  */
@@ -26,12 +27,30 @@ public final class BlockTextures {
     private BlockTextures() {}
 
     private static final Logger LOG = LoggerFactory.getLogger("gradient/textures");
-    private static final int[] EMPTY = new int[0];
-    private static final Map<Block, int[]> CACHE = new HashMap<>();
+    private static final int SIGNATURE_GRID = 8;
 
-    /** The 0xRRGGBB value a block contributes to the gradient under the given mode + pixel fraction. */
-    public static int gradientRgb(Block block, GradientMode mode, double pixelFraction) {
-        int[] px = pixels(block);
+    private record Tex(int[] argb, int w, int h) {}
+    private static final Tex EMPTY = new Tex(new int[0], 0, 0);
+
+    private static final Map<Block, Tex> TEX_CACHE = new HashMap<>();
+    private static final Map<Block, int[]> SIG_CACHE = new HashMap<>();
+
+    /**
+     * The 0xRRGGBB value a block contributes to the gradient. For most modes this is a texture
+     * colour; for the diff modes it's a grey encoding of how different the block's texture is from
+     * {@code startBlock} (so the gradient sorts by similarity to the start).
+     */
+    public static int gradientValue(Block block, Block startBlock, GradientMode mode, double pixelFraction) {
+        if (mode.isStartRelative() && startBlock != null) {
+            int[] sig = signature(block), start = signature(startBlock);
+            double d = (mode == GradientMode.COLOR_DIFF)
+                    ? TextureStats.colorDiff(sig, start)
+                    : TextureStats.bwDiff(sig, start);
+            int grey = Math.max(0, Math.min(255, (int) Math.round(d)));
+            return (grey << 16) | (grey << 8) | grey; // luminance == the diff
+        }
+
+        int[] px = tex(block).argb();
         if (px.length > 0) {
             if (mode.usesPixelPercent()) {
                 return TextureStats.topColor(px, pixelFraction, mode.selectsLightest());
@@ -42,27 +61,45 @@ public final class BlockTextures {
         return mapColor == null ? 0 : mapColor.col;
     }
 
-    /** Drop cached pixels — call on a resource reload so re-read textures aren't stale. */
-    public static void clearCache() {
-        CACHE.clear();
+    /** Start-independent brightness of a block (its average texture colour) — used for default endpoints. */
+    public static double baseLuminance(Block block) {
+        return TextureStats.luminance(gradientValue(block, null, GradientMode.COLOR, 0.5));
     }
 
-    private static int[] pixels(Block block) {
-        int[] cached = CACHE.get(block);
+    /** Drop caches — call on a resource reload so re-read textures aren't stale. */
+    public static void clearCache() {
+        TEX_CACHE.clear();
+        SIG_CACHE.clear();
+    }
+
+    private static int[] signature(Block block) {
+        return SIG_CACHE.computeIfAbsent(block, b -> {
+            Tex t = tex(b);
+            if (t.argb().length == 0) {
+                int[] empty = new int[SIGNATURE_GRID * SIGNATURE_GRID];
+                Arrays.fill(empty, -1);
+                return empty;
+            }
+            return TextureStats.downsample(t.argb(), t.w(), t.h(), SIGNATURE_GRID);
+        });
+    }
+
+    private static Tex tex(Block block) {
+        Tex cached = TEX_CACHE.get(block);
         if (cached != null) return cached;
-        int[] loaded = load(block);
-        CACHE.put(block, loaded);
+        Tex loaded = load(block);
+        TEX_CACHE.put(block, loaded);
         return loaded;
     }
 
-    private static int[] load(Block block) {
+    private static Tex load(Block block) {
         try {
             Minecraft mc = Minecraft.getInstance();
             if (mc.getModelManager() == null) return EMPTY;
             TextureAtlasSprite sprite = mc.getModelManager().getBlockStateModelSet()
                     .getParticleMaterial(block.defaultBlockState()).sprite();
-            Identifier tex = sprite.contents().name();
-            Identifier png = Identifier.fromNamespaceAndPath(tex.getNamespace(), "textures/" + tex.getPath() + ".png");
+            Identifier name = sprite.contents().name();
+            Identifier png = Identifier.fromNamespaceAndPath(name.getNamespace(), "textures/" + name.getPath() + ".png");
             List<Resource> stack = mc.getResourceManager().getResourceStack(png);
             if (stack.isEmpty()) return EMPTY;
             try (InputStream in = stack.get(stack.size() - 1).open(); NativeImage img = NativeImage.read(in)) {
@@ -73,7 +110,7 @@ public final class BlockTextures {
                         out[y * w + x] = abgrToArgb(img.getPixel(x, y));
                     }
                 }
-                return out;
+                return new Tex(out, w, h);
             }
         } catch (Exception e) {
             LOG.warn("texture read failed for {}: {}", block, e.toString());
