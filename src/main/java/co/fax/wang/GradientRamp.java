@@ -45,7 +45,7 @@ public final class GradientRamp {
 
     /** 1-D position of a colour along the gradient defined by start→end, per mode. */
     public static double position(int rgb, int startRgb, int endRgb, GradientMode mode) {
-        if (mode == GradientMode.BRIGHTNESS) return luminance(rgb);
+        if (mode.usesBrightness()) return luminance(rgb);
 
         double sr = (startRgb >> 16) & 0xFF, sg = (startRgb >> 8) & 0xFF, sb = startRgb & 0xFF;
         double er = (endRgb >> 16) & 0xFF, eg = (endRgb >> 8) & 0xFF, eb = endRgb & 0xFF;
@@ -62,7 +62,7 @@ public final class GradientRamp {
      * gradient; larger means more "off-gradient".
      */
     public static double deviation(int rgb, int startRgb, int endRgb, GradientMode mode) {
-        if (mode == GradientMode.BRIGHTNESS) {
+        if (mode.usesBrightness()) {
             double l = luminance(rgb), a = luminance(startRgb), b = luminance(endRgb);
             double lo = Math.min(a, b), hi = Math.max(a, b);
             if (l < lo) return lo - l;

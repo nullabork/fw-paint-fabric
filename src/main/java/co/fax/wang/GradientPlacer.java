@@ -19,7 +19,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.material.MapColor;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -115,8 +114,8 @@ public final class GradientPlacer {
             return false;
         }
 
-        int startRgb = rgbOf(level.getBlockState(seg.s()), seg.s(), level);
-        int endRgb = rgbOf(level.getBlockState(seg.e()), seg.e(), level);
+        int startRgb = rgbOf(level.getBlockState(seg.s()));
+        int endRgb = rgbOf(level.getBlockState(seg.e()));
         Palette chosen = pick(palette, ConfigManager.get(), startRgb, endRgb, front.t());
         place(mc, player, chosen, front);
         return true;
@@ -211,8 +210,8 @@ public final class GradientPlacer {
             if (ds.isAir() || !seen.add(b)) continue; // dedupe; first (lowest, hotbar-first) slot wins
             Identifier id = BuiltInRegistries.ITEM.getKey(st.getItem());
             if (id != null && excluded.contains(id.toString())) continue; // user-excluded block
-            int rgb = rgbOf(ds, cell, level);
-            if (rgb == 0) continue; // MapColor.NONE — no usable colour
+            int rgb = rgbOf(ds);
+            if (rgb == 0) continue; // no usable colour
             palette.add(new Palette(slot, b, rgb));
         }
         return palette;
@@ -293,9 +292,9 @@ public final class GradientPlacer {
 
     // ---- colour helpers -------------------------------------------------------------------------
 
-    private static int rgbOf(BlockState state, BlockPos pos, Level level) {
-        MapColor mc = state.getMapColor(level, pos);
-        return mc == null ? 0 : mc.col;
+    private static int rgbOf(BlockState state) {
+        GradientConfig cfg = ConfigManager.get();
+        return BlockTextures.gradientRgb(state.getBlock(), cfg.gradientMode, cfg.pixelPercent);
     }
 
     private static double clamp01(double v) {

@@ -1,12 +1,17 @@
 package co.fax.wang;
 
 /**
- * How the gradient between the start and end block is measured: by colour, or by perceived
- * (apparent) brightness only. Cycled by a button on {@link GradientScreen}.
+ * How a block's gradient value is derived. The first two use the block's whole-texture average; the
+ * "top %" modes analyse only the darkest or lightest fraction of the texture's pixels (the fraction
+ * is the Pixel % slider). "Colour" variants sort the gradient by colour; the others by brightness.
  */
 public enum GradientMode {
     COLOR("Color"),
-    BRIGHTNESS("Brightness"); // apparent / perceived brightness
+    BRIGHTNESS("Brightness"),
+    TOP_DARK_COLOR("Top % Dark Color"),
+    TOP_DARK("Top % Dark"),
+    TOP_LIGHT_COLOR("Top % Light Color"),
+    TOP_LIGHT("Top % Light");
 
     private final String displayName;
 
@@ -16,6 +21,21 @@ public enum GradientMode {
 
     public String displayName() {
         return displayName;
+    }
+
+    /** True when the gradient is ordered by brightness rather than colour. */
+    public boolean usesBrightness() {
+        return this == BRIGHTNESS || this == TOP_DARK || this == TOP_LIGHT;
+    }
+
+    /** True when only a fraction of the texture's pixels is analysed (needs the Pixel % slider). */
+    public boolean usesPixelPercent() {
+        return this == TOP_DARK_COLOR || this == TOP_DARK || this == TOP_LIGHT_COLOR || this == TOP_LIGHT;
+    }
+
+    /** For a "top %" mode: whether to take the lightest pixels (else the darkest). */
+    public boolean selectsLightest() {
+        return this == TOP_LIGHT_COLOR || this == TOP_LIGHT;
     }
 
     public GradientMode next() {

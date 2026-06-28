@@ -37,6 +37,9 @@ public class GradientConfig {
     /** Maximum number of distinct gradient steps (1..16). A cap, not a target. */
     public int maxSteps = 16;
 
+    /** Fraction of texture pixels (0..1) analysed by the "top %" gradient modes. */
+    public double pixelPercent = 0.5;
+
     /** Item ids the user has excluded from the palette — never used for gradients or placement. */
     public List<String> excludedBlocks = new ArrayList<>();
 

@@ -38,6 +38,7 @@ public class GradientScreen extends Screen {
     private static final int GREY = 0xFFA0A0A0;
     private static final int BLUE = 0xFF5599FF;   // auto-skipped (deviation)
     private static final int RED = 0xFFFF5555;    // manually excluded
+    private static final int YELLOW = 0xFFFFE34D; // help text
     private static final int HOVER_BG = 0x33FFFFFF;
 
     private static final int LEFT_X = 10;
@@ -51,7 +52,7 @@ public class GradientScreen extends Screen {
     private enum Tab { CONFIGURE, SETTINGS }
     private enum Category { USED, NOTPICKED, EXCLUDED }
 
-    private record SourceBlock(String id, ItemStack stack, int rgb) {}
+    private record SourceBlock(String id, ItemStack stack, Block block) {}
     private record DisplayRow(SourceBlock block, Category category) {}
     private record ToolRow(String id, String name) {}
 
@@ -61,6 +62,7 @@ public class GradientScreen extends Screen {
     private List<SourceBlock> sourceBlocks = new ArrayList<>();
     private List<DisplayRow> displayRows = new ArrayList<>();
     private int whiteCount = 0; // number of leading USED (placed-sequence) rows
+    private int modeDescY, deviationDescY, chaosDescY; // y of the yellow help lines
     private String previewStartId;
     private String previewEndId;
     private int paletteScroll = 0;
@@ -138,26 +140,66 @@ public class GradientScreen extends Screen {
         int rx = rightX(), rw = rightW();
         sourceBlocks = gatherSourceBlocks();
         rebuildDisplayRows();
+        GradientConfig cfg = ConfigManager.get();
+        int y = 42;
 
-        cycleButton(rx, 42, rw, this::gradientLabel, () -> {
-            GradientConfig c = ConfigManager.get(); c.gradientMode = c.gradientMode.next(); rebuildDisplayRows();
-        });
-        cycleButton(rx, 66, rw, this::curveLabel, () -> {
+        // Mode change re-lays-out the tab (so the Pixel % slider shows/hides).
+        addRenderableWidget(Button.builder(gradientLabel(), b -> {
+            GradientConfig c = ConfigManager.get();
+            c.gradientMode = c.gradientMode.next();
+            ConfigManager.save();
+            rebuildWidgets();
+        }).bounds(rx, y, rw, 20).build());
+        y += 24;
+
+        // Pixel % only matters for the "top %" texture modes — sits right under the mode button.
+        if (cfg.gradientMode.usesPixelPercent()) {
+            addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.pixelPercent,
+                    v -> "Pixel %: " + Math.round(v * 100) + "%",
+                    v -> { ConfigManager.get().pixelPercent = v; rebuildDisplayRows(); }));
+            y += 24;
+        }
+        modeDescY = y;
+        y += 12;
+
+        cycleButton(rx, y, rw, this::curveLabel, () -> {
             GradientConfig c = ConfigManager.get(); c.curve = c.curve.next(); rebuildDisplayRows();
         });
-        cycleButton(rx, 90, rw, this::sourceLabel, () -> {
+        y += 24;
+        cycleButton(rx, y, rw, this::sourceLabel, () -> {
             GradientConfig c = ConfigManager.get(); c.source = c.source.next();
             sourceBlocks = gatherSourceBlocks(); rebuildDisplayRows();
         });
-        addRenderableWidget(new ConfigSlider(rx, 114, rw, ConfigManager.get().deviationBudget,
+        y += 24;
+
+        addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.deviationBudget,
                 v -> "Deviation: " + Math.round(v * 100) + "%",
                 v -> { ConfigManager.get().deviationBudget = v; rebuildDisplayRows(); }));
-        addRenderableWidget(new ConfigSlider(rx, 138, rw, ConfigManager.get().chaos,
+        y += 24;
+        deviationDescY = y;
+        y += 12;
+
+        addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.chaos,
                 v -> "Chaos: " + Math.round(v * 100) + "%",
                 v -> { ConfigManager.get().chaos = v; rebuildDisplayRows(); }));
-        addRenderableWidget(new ConfigSlider(rx, 162, rw, stepsToSlider(ConfigManager.get().maxSteps),
+        y += 24;
+        chaosDescY = y;
+        y += 12;
+
+        addRenderableWidget(new ConfigSlider(rx, y, rw, stepsToSlider(cfg.maxSteps),
                 v -> "Max steps: " + sliderToSteps(v),
                 v -> { ConfigManager.get().maxSteps = sliderToSteps(v); rebuildDisplayRows(); }));
+    }
+
+    private String modeDescription() {
+        return switch (ConfigManager.get().gradientMode) {
+            case COLOR -> "Average texture colour.";
+            case BRIGHTNESS -> "Average texture brightness.";
+            case TOP_DARK_COLOR -> "Colour of the darkest pixels.";
+            case TOP_DARK -> "Brightness of the darkest pixels.";
+            case TOP_LIGHT_COLOR -> "Colour of the lightest pixels.";
+            case TOP_LIGHT -> "Brightness of the lightest pixels.";
+        };
     }
 
     private void initToolTab() {
@@ -217,8 +259,6 @@ public class GradientScreen extends Screen {
         List<SourceBlock> out = new ArrayList<>();
         if (this.minecraft == null || this.minecraft.player == null) return out;
         var player = this.minecraft.player;
-        var level = player.level();
-        BlockPos pos = player.blockPosition();
         var items = player.getInventory().getNonEquipmentItems();
         int from, to;
         switch (ConfigManager.get().source) {
@@ -235,11 +275,15 @@ public class GradientScreen extends Screen {
             if (b.defaultBlockState().isAir()) continue;
             Identifier id = BuiltInRegistries.ITEM.getKey(st.getItem());
             if (id == null || !seen.add(id.toString())) continue;
-            var mapColor = b.defaultBlockState().getMapColor(level, pos);
-            int rgb = mapColor == null ? 0 : mapColor.col;
-            out.add(new SourceBlock(id.toString(), st.copy(), rgb));
+            out.add(new SourceBlock(id.toString(), st.copy(), b));
         }
         return out;
+    }
+
+    /** Block's gradient colour under the current mode + pixel %. */
+    private int sbRgb(SourceBlock sb) {
+        GradientConfig cfg = ConfigManager.get();
+        return BlockTextures.gradientRgb(sb.block(), cfg.gradientMode, cfg.pixelPercent);
     }
 
     private void rebuildDisplayRows() {
@@ -254,27 +298,29 @@ public class GradientScreen extends Screen {
         int startRgb = rgbOfId(previewStartId, nonEx);
         int endRgb = rgbOfId(previewEndId, nonEx);
         int[] rgbs = new int[nonEx.size()];
-        for (int i = 0; i < nonEx.size(); i++) rgbs[i] = nonEx.get(i).rgb();
+        for (int i = 0; i < nonEx.size(); i++) rgbs[i] = sbRgb(nonEx.get(i));
 
         // Eligible blocks near the gradient, then the max-steps cap = what actually gets placed.
         int[] order = nonEx.isEmpty() ? new int[0]
                 : GradientRamp.gradientOrder(rgbs, startRgb, endRgb, cfg.gradientMode, cfg.deviationBudget);
         int[] used = GradientRamp.subsample(order, cfg.maxSteps);
 
-        Set<Integer> usedSet = new HashSet<>();
-        for (int i : used) usedSet.add(i);
-
         // White = the actual placement SEQUENCE (start pinned first → end pinned last), so curve and
         // chaos show up as repeats/skips in the middle. New random each rebuild so sliding chaos
         // shows different outcomes.
         int[] seq = used.length == 0 ? new int[0]
                 : GradientRamp.buildSequence(used, cfg.curve, used.length, cfg.chaos, new java.util.Random());
-        for (int idx : seq) displayRows.add(new DisplayRow(nonEx.get(idx), Category.USED));
+        Set<Integer> inSequence = new HashSet<>();
+        for (int idx : seq) {
+            displayRows.add(new DisplayRow(nonEx.get(idx), Category.USED));
+            inSequence.add(idx);
+        }
         whiteCount = seq.length;
 
-        // Blue = source blocks not eligible (outside the budget/range, or cut by the max-steps cap).
+        // Blue = source blocks not in THIS preview — either ineligible (budget/range/max-steps) or
+        // dropped this round because chaos replaced their step with a duplicate.
         for (int i = 0; i < nonEx.size(); i++) {
-            if (!usedSet.contains(i)) displayRows.add(new DisplayRow(nonEx.get(i), Category.NOTPICKED));
+            if (!inSequence.contains(i)) displayRows.add(new DisplayRow(nonEx.get(i), Category.NOTPICKED));
         }
         // Red = manually excluded.
         for (SourceBlock sb : sourceBlocks) {
@@ -308,17 +354,18 @@ public class GradientScreen extends Screen {
         boolean endOk = previewEndId != null && nonEx.stream().anyMatch(s -> s.id().equals(previewEndId));
         if (startOk && endOk) return;
         SourceBlock lightest = null, darkest = null;
+        double lightestL = -1, darkestL = Double.MAX_VALUE;
         for (SourceBlock sb : nonEx) {
-            double l = GradientRamp.luminance(sb.rgb());
-            if (lightest == null || l > GradientRamp.luminance(lightest.rgb())) lightest = sb;
-            if (darkest == null || l < GradientRamp.luminance(darkest.rgb())) darkest = sb;
+            double l = GradientRamp.luminance(sbRgb(sb));
+            if (lightest == null || l > lightestL) { lightest = sb; lightestL = l; }
+            if (darkest == null || l < darkestL) { darkest = sb; darkestL = l; }
         }
         if (!startOk) previewStartId = lightest != null ? lightest.id() : null; // lightest = start
         if (!endOk) previewEndId = darkest != null ? darkest.id() : null;       // darkest = end
     }
 
     private int rgbOfId(String id, List<SourceBlock> list) {
-        if (id != null) for (SourceBlock sb : list) if (sb.id().equals(id)) return sb.rgb();
+        if (id != null) for (SourceBlock sb : list) if (sb.id().equals(id)) return sbRgb(sb);
         return 0;
     }
 
@@ -468,6 +515,12 @@ public class GradientScreen extends Screen {
     private void renderGradientTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         int cx0 = contentX();
         g.text(this.font, "Left = start   Right = end   Middle = exclude", cx0, 30, GREY);
+
+        // Yellow help lines under the relevant controls (positions recorded in initGradientTab).
+        int rx = rightX(), rw = rightW();
+        g.text(this.font, this.font.plainSubstrByWidth(modeDescription(), rw), rx, modeDescY, YELLOW);
+        g.text(this.font, this.font.plainSubstrByWidth("Max colour distance from the gradient", rw), rx, deviationDescY, YELLOW);
+        g.text(this.font, this.font.plainSubstrByWidth("Chance to repeat or skip a step", rw), rx, chaosDescY, YELLOW);
 
         int x0 = cx0, w = leftW();
         for (int i = paletteScroll; i < displayRows.size(); i++) {
