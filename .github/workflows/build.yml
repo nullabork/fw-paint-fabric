@@ -1,0 +1,44 @@
+name: Build
+
+on:
+  push:
+    branches: [ "**" ]
+    tags: [ "v*" ]
+  pull_request:
+
+permissions:
+  contents: write # needed to create releases when a v* tag is pushed
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Build (compiles + runs tests)
+        run: |
+          chmod +x ./gradlew
+          ./gradlew build --stacktrace
+
+      # Every build: attach the jar to the workflow run so you can download it.
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradient-jar
+          path: build/libs/*.jar
+          if-no-files-found: error
+
+      # On a v* tag: cut a GitHub Release with the jars + auto-generated notes.
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/libs/*.jar
+          generate_release_notes: true
