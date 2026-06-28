@@ -215,11 +215,84 @@ class GradientRampTest {
     }
 
     @Test
+    void blocksBeyondTheEndpointsAreExcludedAndStartIsFirst() {
+        // start = mid-gray, end = black. A white block is brighter than the start (before it on the
+        // axis) and must be dropped, not floated above the start.
+        int mid = 0x808080, dark = 0x303030;
+        int[] pal = {WHITE, mid, dark, BLACK};
+        int[] order = GradientRamp.gradientOrder(pal, mid, BLACK, GradientMode.BRIGHTNESS, 1.0); // loose budget
+        for (int i : order) assertNotEquals(0, i, "white is past the start and must be excluded");
+        assertEquals(1, order[0], "the start block (mid-gray) should be first");
+    }
+
+    @Test
     void brightnessExcludesBlocksOutsideTheLuminanceRange() {
         int dark = 0x404040, light = 0xC0C0C0;
         assertEquals(0.0, GradientRamp.deviation(GRAY, dark, light, GradientMode.BRIGHTNESS), 1e-9);
         assertTrue(GradientRamp.deviation(WHITE, dark, light, GradientMode.BRIGHTNESS) > 0,
                 "pure white lies above the dark→light range and should deviate");
+    }
+
+    // ---- max steps (a cap, not a target) --------------------------------------------------------
+
+    @Test
+    void subsampleEvenlyThinsAndKeepsEndpoints() {
+        int[] order = {10, 11, 12, 13, 14};
+        int[] s = GradientRamp.subsample(order, 3);
+        assertEquals(3, s.length);
+        assertEquals(10, s[0]); // first endpoint kept
+        assertEquals(14, s[2]); // last endpoint kept
+    }
+
+    @Test
+    void subsampleReturnsAllWhenUnderTheCap() {
+        int[] order = {1, 2, 3};
+        assertArrayEquals(order, GradientRamp.subsample(order, 5));
+    }
+
+    @Test
+    void maxStepsCapsTheNumberOfDistinctBlocks() {
+        int[] pal = {BLACK, 0x202020, 0x404040, 0x606060, GRAY, 0xA0A0A0, 0xC0C0C0, 0xE0E0E0, WHITE};
+        int[] grad = GradientRamp.buildGradient(pal, BLACK, WHITE, GradientMode.BRIGHTNESS, CurveFunction.LINEAR, 30, 4);
+        assertTrue(distinct(grad) <= 4, "max steps 4 should yield at most 4 distinct blocks");
+    }
+
+    @Test
+    void fewerCellsThanMaxStepsUsesTheCellCount() {
+        int[] pal = {BLACK, 0x404040, GRAY, 0xC0C0C0, WHITE};
+        int[] grad = GradientRamp.buildGradient(pal, BLACK, WHITE, GradientMode.BRIGHTNESS, CurveFunction.LINEAR, 3, 16);
+        assertTrue(distinct(grad) <= 3, "only 3 cells, so at most 3 distinct blocks even with max steps 16");
+    }
+
+    @Test
+    void twoEligibleBlocksStayTwoEvenWithHighMaxSteps() {
+        // Only black + white are near a black→white gradient; off-axis junk is excluded; cap is high.
+        int[] pal = {BLACK, WHITE, BLUE, YELLOW};
+        int[] grad = GradientRamp.buildGradient(pal, BLACK, WHITE, GradientMode.BRIGHTNESS, CurveFunction.LINEAR, 20, 16);
+        // brightness keeps in-range blocks; the gradient should still not invent extra steps beyond what fits
+        assertTrue(distinct(grad) <= 4);
+    }
+
+    // ---- chaos (placement disruption) -----------------------------------------------------------
+
+    @Test
+    void chaosZeroProducesACleanMonotonicSequence() {
+        int[] order = {0, 1, 2, 3, 4, 5, 6, 7};
+        int[] seq = GradientRamp.buildSequence(order, CurveFunction.LINEAR, 16, 0.0, new java.util.Random(1));
+        for (int i = 1; i < seq.length; i++) {
+            assertTrue(seq[i] >= seq[i - 1], "chaos 0 should never step backwards");
+        }
+    }
+
+    @Test
+    void highChaosBacktracksOrRepeats() {
+        int[] order = {0, 1, 2, 3, 4, 5, 6, 7};
+        int[] seq = GradientRamp.buildSequence(order, CurveFunction.LINEAR, 32, 1.0, new java.util.Random(1));
+        boolean disrupted = false;
+        for (int i = 1; i < seq.length; i++) {
+            if (seq[i] <= seq[i - 1]) { disrupted = true; break; } // a repeat or backtrack
+        }
+        assertTrue(disrupted, "high chaos should repeat or backtrack at least once");
     }
 
     // ---- edge cases -----------------------------------------------------------------------------

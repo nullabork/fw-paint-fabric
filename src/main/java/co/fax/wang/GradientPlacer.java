@@ -8,6 +8,8 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Inventory;
@@ -50,9 +52,7 @@ public final class GradientPlacer {
     private static final int MAX_SEGMENT = 16;       // matches the end-marker distance cap
     private static final double COLOR_TIE = 24.0;    // RGB distance within which choices are "tied"
     private static final double LUM_TIE = 6.0;       // luminance distance treated as "tied"
-    private static final double UNCLEAN_BACK = 0.15; // chance to repeat the previous step
-    private static final double UNCLEAN_FWD = 0.15;  // chance to skip ahead a step
-    private static final int PLACE_INTERVAL = 2;     // ticks between placements while holding (~10/s)
+    private static final int PLACE_INTERVAL = 2; // ticks between placements while holding (~10/s)
 
     private static final Random RANDOM = new Random();
 
@@ -200,6 +200,7 @@ public final class GradientPlacer {
         }
         to = Math.min(to, items.size());
 
+        List<String> excluded = ConfigManager.get().excludedBlocks;
         List<Palette> palette = new ArrayList<>();
         Set<Block> seen = new HashSet<>();
         for (int slot = from; slot < to; slot++) {
@@ -208,6 +209,8 @@ public final class GradientPlacer {
             Block b = bi.getBlock();
             BlockState ds = b.defaultBlockState();
             if (ds.isAir() || !seen.add(b)) continue; // dedupe; first (lowest, hotbar-first) slot wins
+            Identifier id = BuiltInRegistries.ITEM.getKey(st.getItem());
+            if (id != null && excluded.contains(id.toString())) continue; // user-excluded block
             int rgb = rgbOf(ds, cell, level);
             if (rgb == 0) continue; // MapColor.NONE — no usable colour
             palette.add(new Palette(slot, b, rgb));
@@ -225,15 +228,17 @@ public final class GradientPlacer {
         int n = palette.size();
         int[] rgbs = new int[n];
         for (int i = 0; i < n; i++) rgbs[i] = palette.get(i).rgb();
-        // Only blocks near the gradient are eligible — never reach for off-gradient colours.
-        int[] order = GradientRamp.gradientOrder(rgbs, startRgb, endRgb, cfg.gradientMode);
+        // Only blocks near the gradient are eligible, capped to the max-steps distinct blocks.
+        int[] order = GradientRamp.subsample(
+                GradientRamp.gradientOrder(rgbs, startRgb, endRgb, cfg.gradientMode, cfg.deviationBudget),
+                cfg.maxSteps);
 
         double tc = cfg.curve.apply(t);
-        if (!cfg.clean) {
-            double r = RANDOM.nextDouble();
+        // Chaos = how often a placement deviates (repeat the previous step or skip ahead one), but
+        // never the start/end cells (t == 0 or 1), so the gradient still begins and ends correctly.
+        if (cfg.chaos > 0 && t > 0.0 && t < 1.0 && RANDOM.nextDouble() < cfg.chaos) {
             double stepFrac = order.length > 1 ? 1.0 / (order.length - 1) : 0.1;
-            if (r < UNCLEAN_BACK) tc = clamp01(tc - stepFrac);                     // repeat previous step
-            else if (r < UNCLEAN_BACK + UNCLEAN_FWD) tc = clamp01(tc + stepFrac);  // skip ahead a step
+            tc = clamp01(RANDOM.nextBoolean() ? tc - stepFrac : tc + stepFrac);
         }
 
         int pos = GradientRamp.rampIndex(order.length, tc);

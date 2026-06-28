@@ -3,124 +3,425 @@ package co.fax.wang;
 import co.fax.wang.config.ConfigManager;
 import co.fax.wang.config.GradientConfig;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
-import net.minecraft.world.item.Item;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
- * Settings screen (opened by the K keybind). Lets you:
+ * Two-tab settings screen (opened by the K keybind):
  * <ul>
- *   <li>see and pick the <b>tool</b> item — type in the filter box, click a result row;</li>
- *   <li>cycle the <b>activation mode</b> via a persistent button (mirrors the cycle keybind).</li>
+ *   <li><b>Gradient</b> — the source-block palette (left) in the order it would be placed, plus the
+ *       gradient settings and a live preview (right). Left-click a block = preview start, right = end,
+ *       middle = exclude. Three categories: used (white), auto-skipped by the deviation budget (blue),
+ *       manually excluded (red).</li>
+ *   <li><b>Tool</b> — pick the activation item, switch mode, clear markers.</li>
  * </ul>
- *
- * <p>The result list is drawn as plain clickable text rows (not widgets) so it stays compact and
- * fits more entries — the visible count scales to the window height, so a smaller GUI scale shows
- * more rows. Selection is handled in {@link #mouseClicked}.
- *
- * <p>26.2 GUI notes: override {@code extractRenderState(GuiGraphicsExtractor, ...)} (NOT
- * {@code render}); text colours are ARGB and must include the alpha byte ({@code 0xFF......}).
  */
 public class GradientScreen extends Screen {
 
     private static final int WHITE = 0xFFFFFFFF;
     private static final int GREY = 0xFFA0A0A0;
-    private static final int ROW_DIM = 0xFFC0C0C0;
-    private static final int ROW_SELECTED = 0xFF55FF55;
+    private static final int BLUE = 0xFF5599FF;   // auto-skipped (deviation)
+    private static final int RED = 0xFFFF5555;    // manually excluded
     private static final int HOVER_BG = 0x33FFFFFF;
-    private static final int SELECTED_BG = 0x3355FF55;
 
-    private static final int PANEL_W = 150;  // width of each side panel (list + buttons)
-    private static final int GAP = 8;        // gap between the two panels
-    private static final int LIST_TOP = 66;  // y where the item list starts (below the filter box)
-    private static final int BOTTOM_MARGIN = 40; // space reserved below the list (Done button)
+    private static final int LEFT_X = 10;
+    private static final int LIST_TOP = 42;
+    private static final int ROW_H = 18;
+    private static final int TOOL_LIST_TOP = 66; // settings tab item list start (below the filter)
+    private static final int BAR_H = 22;          // title bar height
+    private static final int BAR_BG = 0x80000000; // semi-transparent black title bar
+    private static final int BAR_LINE = 0x60FFFFFF;
 
-    /** One filtered match: registry id + display name. */
-    private record Row(String id, String name) {}
+    private enum Tab { CONFIGURE, SETTINGS }
+    private enum Category { USED, NOTPICKED, EXCLUDED }
 
+    private record SourceBlock(String id, ItemStack stack, int rgb) {}
+    private record DisplayRow(SourceBlock block, Category category) {}
+    private record ToolRow(String id, String name) {}
+
+    private Tab tab = Tab.CONFIGURE;
+
+    // Gradient tab state.
+    private List<SourceBlock> sourceBlocks = new ArrayList<>();
+    private List<DisplayRow> displayRows = new ArrayList<>();
+    private int whiteCount = 0; // number of leading USED (placed-sequence) rows
+    private String previewStartId;
+    private String previewEndId;
+    private int paletteScroll = 0;
+
+    // Tool tab state.
     private EditBox filterBox;
     private Button modeButton;
-    private final List<Row> matches = new ArrayList<>();
+    private final List<ToolRow> matches = new ArrayList<>();
     private String filter = "";
-    private int rowHeight = 12;
-    private int listX = 0;   // left edge of the left-hand list panel (set in init)
-    private boolean truncated = false;
+    private int toolRowHeight = 12;
 
     public GradientScreen() {
         super(Component.literal("Gradient"));
     }
 
+    // ---- layout ---------------------------------------------------------------------------------
+
     @Override
     protected void init() {
-        int cx = this.width / 2;
-        rowHeight = this.font.lineHeight + 3;
+        toolRowHeight = this.font.lineHeight + 3;
 
-        // Two side-by-side panels: tool filter + list on the LEFT, setting buttons on the RIGHT.
-        listX = cx - PANEL_W - GAP / 2; // left panel x
-        int rx = cx + GAP / 2;          // right panel (buttons) x
+        // Tabs are drawn as text in the title bar (see extractRenderState) and handled in mouseClicked.
+        if (tab == Tab.CONFIGURE) initGradientTab();
+        else initToolTab();
 
-        // Filter box (left panel, above the list).
-        filterBox = new EditBox(this.font, listX, 40, PANEL_W, 20, Component.literal("Filter"));
-        filterBox.setHint(Component.literal("Filter items…"));
-        filterBox.setMaxLength(64);
-        filterBox.setValue(filter);
-        filterBox.setResponder(s -> {
-            filter = s;
-            rebuildMatches();
+        addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
+                .bounds(this.width / 2 - 50, this.height - 26, 100, 20).build());
+    }
+
+    /** Tab label with a » chevron on the selected one. */
+    private String tabText(Tab t) {
+        String name = (t == Tab.CONFIGURE) ? "Configure" : "Settings";
+        return tab == t ? "» " + name : name;
+    }
+
+    /** Right-aligned tab hit-boxes in the title bar: {configureX, configureW, settingsX, settingsW}. */
+    private int[] tabXs() {
+        int cw = this.font.width(tabText(Tab.CONFIGURE));
+        int sw = this.font.width(tabText(Tab.SETTINGS));
+        int gap = 16;
+        int sx = this.width - 10 - sw;
+        int cx = sx - gap - cw;
+        return new int[]{cx, cw, sx, sw};
+    }
+
+    private void setTab(Tab t) {
+        tab = t;
+        rebuildWidgets();
+    }
+
+    // Two columns capped at a max width and centred, so wide windows (small GUI scale) keep tidy
+    // columns with balanced margins instead of stretching to half-width.
+    private static final int COL_W_MAX = 200;
+    private static final int COL_GAP = 12;
+
+    private int colW() {
+        int avail = this.width - 2 * LEFT_X;
+        return Math.max(60, Math.min(COL_W_MAX, (avail - COL_GAP) / 2));
+    }
+
+    private int contentX() {
+        int total = 2 * colW() + COL_GAP;
+        return Math.max(LEFT_X, (this.width - total) / 2);
+    }
+
+    private int rightX() {
+        return contentX() + colW() + COL_GAP;
+    }
+
+    private int rightW() {
+        return colW();
+    }
+
+    private void initGradientTab() {
+        int rx = rightX(), rw = rightW();
+        sourceBlocks = gatherSourceBlocks();
+        rebuildDisplayRows();
+
+        cycleButton(rx, 42, rw, this::gradientLabel, () -> {
+            GradientConfig c = ConfigManager.get(); c.gradientMode = c.gradientMode.next(); rebuildDisplayRows();
         });
-        addRenderableWidget(filterBox);
-        setInitialFocus(filterBox);
-        rebuildMatches();
+        cycleButton(rx, 66, rw, this::curveLabel, () -> {
+            GradientConfig c = ConfigManager.get(); c.curve = c.curve.next(); rebuildDisplayRows();
+        });
+        cycleButton(rx, 90, rw, this::sourceLabel, () -> {
+            GradientConfig c = ConfigManager.get(); c.source = c.source.next();
+            sourceBlocks = gatherSourceBlocks(); rebuildDisplayRows();
+        });
+        addRenderableWidget(new ConfigSlider(rx, 114, rw, ConfigManager.get().deviationBudget,
+                v -> "Deviation: " + Math.round(v * 100) + "%",
+                v -> { ConfigManager.get().deviationBudget = v; rebuildDisplayRows(); }));
+        addRenderableWidget(new ConfigSlider(rx, 138, rw, ConfigManager.get().chaos,
+                v -> "Chaos: " + Math.round(v * 100) + "%",
+                v -> { ConfigManager.get().chaos = v; rebuildDisplayRows(); }));
+        addRenderableWidget(new ConfigSlider(rx, 162, rw, stepsToSlider(ConfigManager.get().maxSteps),
+                v -> "Max steps: " + sliderToSteps(v),
+                v -> { ConfigManager.get().maxSteps = sliderToSteps(v); rebuildDisplayRows(); }));
+    }
 
-        // Setting buttons (right panel, stacked). Mode keeps a field so the keybind can sync it.
+    private void initToolTab() {
+        int rx = rightX(), rw = rightW();
+
+        // Right column: buttons.
         modeButton = addRenderableWidget(Button.builder(modeLabel(), b -> {
             GradientConfig cfg = ConfigManager.get();
             cfg.mode = cfg.mode.next();
             ConfigManager.save();
             b.setMessage(modeLabel());
-        }).bounds(rx, 40, PANEL_W, 20).build());
+        }).bounds(rx, 32, rw, 20).build());
 
-        cycleButton(rx, 64, PANEL_W, this::gradientLabel,
-                () -> { GradientConfig c = ConfigManager.get(); c.gradientMode = c.gradientMode.next(); });
-        cycleButton(rx, 88, PANEL_W, this::curveLabel,
-                () -> { GradientConfig c = ConfigManager.get(); c.curve = c.curve.next(); });
-        cycleButton(rx, 112, PANEL_W, this::sourceLabel,
-                () -> { GradientConfig c = ConfigManager.get(); c.source = c.source.next(); });
-        cycleButton(rx, 136, PANEL_W, this::cleanLabel,
-                () -> { GradientConfig c = ConfigManager.get(); c.clean = !c.clean; });
-
-        // Clear all markers (persisted), separated below the settings.
         addRenderableWidget(Button.builder(clearMarkersLabel(), b -> {
             MarkerManager.clearAll();
             b.setMessage(clearMarkersLabel());
-        }).bounds(rx, 164, PANEL_W, 20).build());
+        }).bounds(rx, 56, rw, 20).build());
 
-        addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
-                .bounds(cx - 100, this.height - 28, 200, 20).build());
+        addRenderableWidget(Button.builder(debugLabel(), b -> {
+            GradientConfig cfg = ConfigManager.get();
+            cfg.debug = !cfg.debug;
+            ConfigManager.save();
+            b.setMessage(debugLabel());
+        }).bounds(rx, 80, rw, 20).build());
+
+        // Left column: filter + tool list.
+        filterBox = new EditBox(this.font, contentX(), 44, leftW(), 20, Component.literal("Filter"));
+        filterBox.setHint(Component.literal("Filter items…"));
+        filterBox.setMaxLength(64);
+        filterBox.setValue(filter);
+        filterBox.setResponder(s -> { filter = s; rebuildMatches(); });
+        addRenderableWidget(filterBox);
+        setInitialFocus(filterBox);
+        rebuildMatches();
     }
 
-    private Component clearMarkersLabel() {
-        int n = MarkerManager.startMarkers.size() + MarkerManager.endMarkers.size();
-        return Component.literal("Clear Markers (" + n + ")");
-    }
 
-    /** Build a button at (x,y,w) that runs {@code onCycle}, saves, and refreshes its label. */
     private void cycleButton(int x, int y, int w, java.util.function.Supplier<Component> label, Runnable onCycle) {
         addRenderableWidget(Button.builder(label.get(), b -> {
             onCycle.run();
             ConfigManager.save();
             b.setMessage(label.get());
         }).bounds(x, y, w, 20).build());
+    }
+
+    private static int sliderToSteps(double v) {
+        return Math.max(1, Math.min(16, 1 + (int) Math.round(v * 15)));
+    }
+
+    private static double stepsToSlider(int steps) {
+        return (Math.max(1, Math.min(16, steps)) - 1) / 15.0;
+    }
+
+    // ---- gradient tab data ----------------------------------------------------------------------
+
+    private List<SourceBlock> gatherSourceBlocks() {
+        List<SourceBlock> out = new ArrayList<>();
+        if (this.minecraft == null || this.minecraft.player == null) return out;
+        var player = this.minecraft.player;
+        var level = player.level();
+        BlockPos pos = player.blockPosition();
+        var items = player.getInventory().getNonEquipmentItems();
+        int from, to;
+        switch (ConfigManager.get().source) {
+            case HOTBAR -> { from = 0; to = 9; }
+            case INVENTORY -> { from = 9; to = 36; }
+            default -> { from = 0; to = 36; }
+        }
+        to = Math.min(to, items.size());
+        Set<String> seen = new HashSet<>();
+        for (int slot = from; slot < to; slot++) {
+            ItemStack st = items.get(slot);
+            if (!(st.getItem() instanceof BlockItem bi)) continue;
+            Block b = bi.getBlock();
+            if (b.defaultBlockState().isAir()) continue;
+            Identifier id = BuiltInRegistries.ITEM.getKey(st.getItem());
+            if (id == null || !seen.add(id.toString())) continue;
+            var mapColor = b.defaultBlockState().getMapColor(level, pos);
+            int rgb = mapColor == null ? 0 : mapColor.col;
+            out.add(new SourceBlock(id.toString(), st.copy(), rgb));
+        }
+        return out;
+    }
+
+    private void rebuildDisplayRows() {
+        displayRows = new ArrayList<>();
+        GradientConfig cfg = ConfigManager.get();
+        Set<String> excluded = new HashSet<>(cfg.excludedBlocks);
+
+        List<SourceBlock> nonEx = new ArrayList<>();
+        for (SourceBlock sb : sourceBlocks) if (!excluded.contains(sb.id())) nonEx.add(sb);
+        ensureEndpoints(nonEx);
+
+        int startRgb = rgbOfId(previewStartId, nonEx);
+        int endRgb = rgbOfId(previewEndId, nonEx);
+        int[] rgbs = new int[nonEx.size()];
+        for (int i = 0; i < nonEx.size(); i++) rgbs[i] = nonEx.get(i).rgb();
+
+        // Eligible blocks near the gradient, then the max-steps cap = what actually gets placed.
+        int[] order = nonEx.isEmpty() ? new int[0]
+                : GradientRamp.gradientOrder(rgbs, startRgb, endRgb, cfg.gradientMode, cfg.deviationBudget);
+        int[] used = GradientRamp.subsample(order, cfg.maxSteps);
+
+        Set<Integer> usedSet = new HashSet<>();
+        for (int i : used) usedSet.add(i);
+
+        // White = the actual placement SEQUENCE (start pinned first → end pinned last), so curve and
+        // chaos show up as repeats/skips in the middle. New random each rebuild so sliding chaos
+        // shows different outcomes.
+        int[] seq = used.length == 0 ? new int[0]
+                : GradientRamp.buildSequence(used, cfg.curve, used.length, cfg.chaos, new java.util.Random());
+        for (int idx : seq) displayRows.add(new DisplayRow(nonEx.get(idx), Category.USED));
+        whiteCount = seq.length;
+
+        // Blue = source blocks not eligible (outside the budget/range, or cut by the max-steps cap).
+        for (int i = 0; i < nonEx.size(); i++) {
+            if (!usedSet.contains(i)) displayRows.add(new DisplayRow(nonEx.get(i), Category.NOTPICKED));
+        }
+        // Red = manually excluded.
+        for (SourceBlock sb : sourceBlocks) {
+            if (excluded.contains(sb.id())) displayRows.add(new DisplayRow(sb, Category.EXCLUDED));
+        }
+
+        paletteScroll = Math.max(0, Math.min(paletteScroll, maxScroll()));
+        logPreview();
+    }
+
+    /** Log the white placement order + flag anomalies (first≠start / last≠end), when debug is on. */
+    private void logPreview() {
+        if (!ConfigManager.get().debug) return;
+        List<String> white = new ArrayList<>();
+        for (int i = 0; i < whiteCount && i < displayRows.size(); i++) white.add(displayRows.get(i).block().id());
+        GradientConfig cfg = ConfigManager.get();
+        Gradient.LOG.info("[preview] start={} end={} steps={} curve={} chaos={} | white={}",
+                previewStartId, previewEndId, white.size(), cfg.curve, Math.round(cfg.chaos * 100) / 100.0, white);
+        if (!white.isEmpty()) {
+            if (!white.get(0).equals(previewStartId)) {
+                Gradient.LOG.warn("[preview] ANOMALY first white {} != start {}", white.get(0), previewStartId);
+            }
+            if (white.size() > 1 && !white.get(white.size() - 1).equals(previewEndId)) {
+                Gradient.LOG.warn("[preview] ANOMALY last white {} != end {}", white.get(white.size() - 1), previewEndId);
+            }
+        }
+    }
+
+    private void ensureEndpoints(List<SourceBlock> nonEx) {
+        boolean startOk = previewStartId != null && nonEx.stream().anyMatch(s -> s.id().equals(previewStartId));
+        boolean endOk = previewEndId != null && nonEx.stream().anyMatch(s -> s.id().equals(previewEndId));
+        if (startOk && endOk) return;
+        SourceBlock lightest = null, darkest = null;
+        for (SourceBlock sb : nonEx) {
+            double l = GradientRamp.luminance(sb.rgb());
+            if (lightest == null || l > GradientRamp.luminance(lightest.rgb())) lightest = sb;
+            if (darkest == null || l < GradientRamp.luminance(darkest.rgb())) darkest = sb;
+        }
+        if (!startOk) previewStartId = lightest != null ? lightest.id() : null; // lightest = start
+        if (!endOk) previewEndId = darkest != null ? darkest.id() : null;       // darkest = end
+    }
+
+    private int rgbOfId(String id, List<SourceBlock> list) {
+        if (id != null) for (SourceBlock sb : list) if (sb.id().equals(id)) return sb.rgb();
+        return 0;
+    }
+
+    private int visibleRows() {
+        return Math.max(1, (this.height - 34 - LIST_TOP) / ROW_H);
+    }
+
+    private int maxScroll() {
+        return Math.max(0, displayRows.size() - visibleRows());
+    }
+
+    private int leftW() {
+        return colW();
+    }
+
+    // ---- input ----------------------------------------------------------------------------------
+
+    @Override
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
+        // Title-bar tabs (text, not widgets).
+        if (event.y() < BAR_H && event.button() == 0) {
+            int[] xs = tabXs();
+            if (event.x() >= xs[0] && event.x() <= xs[0] + xs[1]) { setTab(Tab.CONFIGURE); return true; }
+            if (event.x() >= xs[2] && event.x() <= xs[2] + xs[3]) { setTab(Tab.SETTINGS); return true; }
+        }
+        if (super.mouseClicked(event, doubled)) return true;
+        if (tab == Tab.CONFIGURE) {
+            int idx = paletteRowAt(event.x(), event.y());
+            if (idx >= 0) { handlePaletteClick(displayRows.get(idx), event.button()); return true; }
+        } else if (event.button() == 0) {
+            int idx = toolRowAt(event.x(), event.y());
+            if (idx >= 0) {
+                ConfigManager.get().selectedTool = matches.get(idx).id();
+                ConfigManager.save();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void handlePaletteClick(DisplayRow row, int button) {
+        SourceBlock sb = row.block();
+        if (button == 2) { // middle: toggle exclusion
+            List<String> ex = ConfigManager.get().excludedBlocks;
+            if (ex.contains(sb.id())) ex.remove(sb.id());
+            else ex.add(sb.id());
+            ConfigManager.save();
+            rebuildDisplayRows();
+        } else if (row.category() != Category.EXCLUDED) {
+            if (button == 0) previewStartId = sb.id();      // left: preview start
+            else if (button == 1) previewEndId = sb.id();   // right: preview end
+            rebuildDisplayRows();
+        }
+    }
+
+    private int paletteRowAt(double mouseX, double mouseY) {
+        int cx = contentX();
+        if (mouseX < cx || mouseX > cx + leftW() || mouseY < LIST_TOP) return -1;
+        int idx = paletteScroll + (int) ((mouseY - LIST_TOP) / ROW_H);
+        return (idx >= 0 && idx < displayRows.size() && mouseY < LIST_TOP + visibleRows() * ROW_H) ? idx : -1;
+    }
+
+    private int toolRowAt(double mouseX, double mouseY) {
+        int cx = contentX();
+        if (mouseX < cx || mouseX > cx + leftW() || mouseY < TOOL_LIST_TOP) return -1;
+        int idx = (int) ((mouseY - TOOL_LIST_TOP) / toolRowHeight);
+        return (idx >= 0 && idx < matches.size()) ? idx : -1;
+    }
+
+    @Override
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (tab == Tab.CONFIGURE && scrollY != 0) {
+            paletteScroll = Math.max(0, Math.min(maxScroll(), paletteScroll - (int) Math.signum(scrollY)));
+            return true;
+        }
+        return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+    }
+
+    // ---- tool tab list --------------------------------------------------------------------------
+
+    private void rebuildMatches() {
+        matches.clear();
+        String q = filter.toLowerCase(Locale.ROOT);
+        int available = (this.height - 34) - TOOL_LIST_TOP;
+        int maxRows = Math.max(1, available / toolRowHeight);
+        for (var item : BuiltInRegistries.ITEM.stream().toList()) {
+            Identifier id = BuiltInRegistries.ITEM.getKey(item);
+            if (id == null) continue;
+            String idStr = id.toString();
+            if (idStr.equals("minecraft:air")) continue;
+            String name = new ItemStack(item).getHoverName().getString();
+            if (!q.isEmpty() && !name.toLowerCase(Locale.ROOT).contains(q) && !idStr.toLowerCase(Locale.ROOT).contains(q)) {
+                continue;
+            }
+            if (matches.size() >= maxRows) break;
+            matches.add(new ToolRow(idStr, name));
+        }
+    }
+
+    // ---- labels ---------------------------------------------------------------------------------
+
+    private Component modeLabel() {
+        return Component.literal("Mode: " + ConfigManager.get().mode.displayName());
     }
 
     private Component gradientLabel() {
@@ -135,102 +436,107 @@ public class GradientScreen extends Screen {
         return Component.literal("Source: " + ConfigManager.get().source.displayName());
     }
 
-    private Component cleanLabel() {
-        return Component.literal("Cleanliness: " + (ConfigManager.get().clean ? "Clean" : "Unclean"));
+    private Component clearMarkersLabel() {
+        int n = MarkerManager.startMarkers.size() + MarkerManager.endMarkers.size();
+        return Component.literal("Clear Markers (" + n + ")");
     }
 
-    /** Recompute the filtered match list, capped to however many rows fit in the window. */
-    private void rebuildMatches() {
-        matches.clear();
-        truncated = false;
-
-        String q = filter.toLowerCase(Locale.ROOT);
-        int available = (this.height - BOTTOM_MARGIN) - LIST_TOP;
-        int maxRows = Math.max(1, available / rowHeight);
-
-        for (Item item : BuiltInRegistries.ITEM.stream().toList()) {
-            Identifier id = BuiltInRegistries.ITEM.getKey(item);
-            if (id == null) continue;
-            String idStr = id.toString();
-            if (idStr.equals("minecraft:air")) continue;
-
-            String name = new ItemStack(item).getHoverName().getString();
-            if (!q.isEmpty()
-                    && !name.toLowerCase(Locale.ROOT).contains(q)
-                    && !idStr.toLowerCase(Locale.ROOT).contains(q)) {
-                continue;
-            }
-
-            if (matches.size() >= maxRows) {
-                truncated = true; // more matches than fit on screen
-                break;
-            }
-            matches.add(new Row(idStr, name));
-        }
+    private Component debugLabel() {
+        return Component.literal("Debug logging: " + (ConfigManager.get().debug ? "On" : "Off"));
     }
 
-    /** Index of the result row at the given screen coords, or -1 if none. */
-    private int rowIndexAt(double mouseX, double mouseY) {
-        if (mouseX < listX || mouseX > listX + PANEL_W || mouseY < LIST_TOP) return -1;
-        int idx = (int) ((mouseY - LIST_TOP) / rowHeight);
-        return (idx >= 0 && idx < matches.size()) ? idx : -1;
-    }
-
-    @Override
-    public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
-        if (super.mouseClicked(event, doubled)) return true; // widgets (filter box, buttons) first
-        if (event.button() == 0) {
-            int idx = rowIndexAt(event.x(), event.y());
-            if (idx >= 0) {
-                GradientConfig cfg = ConfigManager.get();
-                cfg.selectedTool = matches.get(idx).id();
-                ConfigManager.save();
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private Component modeLabel() {
-        return Component.literal("Mode: " + ConfigManager.get().mode.displayName());
-    }
+    // ---- rendering ------------------------------------------------------------------------------
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-        super.extractRenderState(g, mouseX, mouseY, partialTick); // background + widgets
-        int cx = this.width / 2;
-        int x0 = listX;
+        super.extractRenderState(g, mouseX, mouseY, partialTick);
+        renderTitleBar(g);
+        if (tab == Tab.CONFIGURE) renderGradientTab(g, mouseX, mouseY);
+        else renderToolTab(g, mouseX, mouseY);
+    }
 
-        g.centeredText(this.font, this.title, cx, 12, WHITE);
+    private void renderTitleBar(GuiGraphicsExtractor g) {
+        g.fill(0, 0, this.width, BAR_H, BAR_BG);
+        g.fill(0, BAR_H, this.width, BAR_H + 1, BAR_LINE); // full-width underline
+        int textY = (BAR_H - this.font.lineHeight) / 2 + 1;
+        g.text(this.font, "Gradient", 8, textY, WHITE); // mod name, left-aligned (not a tab)
+        int[] xs = tabXs();
+        g.text(this.font, tabText(Tab.CONFIGURE), xs[0], textY, tab == Tab.CONFIGURE ? WHITE : GREY);
+        g.text(this.font, tabText(Tab.SETTINGS), xs[2], textY, tab == Tab.SETTINGS ? WHITE : GREY);
+    }
 
-        // Selected tool — read live so it updates the instant a row is clicked (left panel header).
+    private void renderGradientTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        int cx0 = contentX();
+        g.text(this.font, "Left = start   Right = end   Middle = exclude", cx0, 30, GREY);
+
+        int x0 = cx0, w = leftW();
+        for (int i = paletteScroll; i < displayRows.size(); i++) {
+            int rowIndex = i - paletteScroll;
+            int y = LIST_TOP + rowIndex * ROW_H;
+            if (y + ROW_H > LIST_TOP + visibleRows() * ROW_H) break;
+            DisplayRow row = displayRows.get(i);
+            boolean hover = mouseX >= x0 && mouseX <= x0 + w && mouseY >= y && mouseY < y + ROW_H;
+            if (hover) g.fill(x0, y, x0 + w, y + ROW_H, HOVER_BG);
+
+            g.item(row.block().stack(), x0 + 1, y + 1);
+
+            int color = switch (row.category()) {
+                case USED -> WHITE;
+                case NOTPICKED -> BLUE;
+                case EXCLUDED -> RED;
+            };
+            // Exactly one [S] (first white row) and one [E] (last white row).
+            String tag = (i == 0 && whiteCount > 0) ? " [S]"
+                    : (i == whiteCount - 1 && whiteCount > 1) ? " [E]" : "";
+            String name = row.block().stack().getHoverName().getString();
+            String label = this.font.plainSubstrByWidth(name, w - 26 - this.font.width(tag)) + tag;
+            g.text(this.font, label, x0 + 20, y + 5, color);
+        }
+    }
+
+    private void renderToolTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         String sel = ConfigManager.get().selectedTool;
-        String selName = sel.isEmpty() ? "(none — pick below)" : Gradient.toolDisplayName(sel);
-        g.text(this.font, "Tool: " + selName, x0, 30, WHITE);
-
-        // Keep the mode button label in sync if the keybind changed the mode while open.
+        String selName = sel.isEmpty() ? "(none)" : Gradient.toolDisplayName(sel);
+        int cx0 = contentX();
+        g.text(this.font, "Tool: " + selName, cx0, 32, WHITE);
         modeButton.setMessage(modeLabel());
 
-        // Result rows.
+        int x0 = cx0, w = leftW(), top = TOOL_LIST_TOP;
         for (int i = 0; i < matches.size(); i++) {
-            Row row = matches.get(i);
-            int y = LIST_TOP + i * rowHeight;
-            boolean hover = mouseX >= x0 && mouseX <= x0 + PANEL_W && mouseY >= y && mouseY < y + rowHeight;
+            int y = top + i * toolRowHeight;
+            ToolRow row = matches.get(i);
+            boolean hover = mouseX >= x0 && mouseX <= x0 + w && mouseY >= y && mouseY < y + toolRowHeight;
             boolean selected = row.id().equals(sel);
+            if (hover || selected) g.fill(x0, y, x0 + w, y + toolRowHeight, hover ? HOVER_BG : 0x3355FF55);
+            int color = selected ? 0xFF55FF55 : (hover ? WHITE : 0xFFC0C0C0);
+            g.text(this.font, this.font.plainSubstrByWidth(row.name(), w - 8), x0 + 4, y + 2, color);
+        }
+    }
 
-            if (selected) {
-                g.fill(x0, y, x0 + PANEL_W, y + rowHeight, SELECTED_BG);
-            } else if (hover) {
-                g.fill(x0, y, x0 + PANEL_W, y + rowHeight, HOVER_BG);
-            }
-            int color = selected ? ROW_SELECTED : (hover ? WHITE : ROW_DIM);
-            String label = this.font.plainSubstrByWidth(row.name(), PANEL_W - 8);
-            g.text(this.font, label, x0 + 4, y + 2, color);
+    // ---- slider widget --------------------------------------------------------------------------
+
+    private static final class ConfigSlider extends AbstractSliderButton {
+        private final java.util.function.DoubleConsumer onChange;
+        private final java.util.function.DoubleFunction<String> labelFn;
+
+        ConfigSlider(int x, int y, int w, double initial,
+                     java.util.function.DoubleFunction<String> labelFn,
+                     java.util.function.DoubleConsumer onChange) {
+            super(x, y, w, 20, Component.empty(), initial);
+            this.labelFn = labelFn;
+            this.onChange = onChange;
+            updateMessage();
         }
 
-        if (truncated) {
-            int hintY = LIST_TOP + matches.size() * rowHeight + 1;
-            g.text(this.font, "More matches… refine the filter", x0, hintY, GREY);
+        @Override
+        protected void updateMessage() {
+            setMessage(Component.literal(labelFn.apply(this.value)));
+        }
+
+        @Override
+        protected void applyValue() {
+            onChange.accept(this.value);
+            ConfigManager.save();
         }
     }
 

@@ -3,6 +3,7 @@ package co.fax.wang;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Random;
 
 /**
  * Pure gradient-selection maths (no Minecraft dependencies, so it's unit-testable).
@@ -24,12 +25,16 @@ public final class GradientRamp {
 
     private GradientRamp() {}
 
-    /** How far a block may sit from the gradient and still be eligible. */
-    public static final double COLOR_MAX_DEVIATION = 110.0;      // RGB distance
-    public static final double BRIGHTNESS_MAX_DEVIATION = 60.0;  // luminance distance
+    /** Default deviation budget fraction (≈110 RGB distance) when the caller doesn't supply one. */
+    public static final double DEFAULT_DEVIATION_BUDGET = 0.43;
+
+    /** Absolute deviation allowed for a budget fraction in [0,1] (scaled to the colour/luminance range). */
+    public static double maxDeviation(GradientMode mode, double budget) {
+        return clamp01(budget) * 255.0;
+    }
 
     public static double maxDeviation(GradientMode mode) {
-        return mode == GradientMode.BRIGHTNESS ? BRIGHTNESS_MAX_DEVIATION : COLOR_MAX_DEVIATION;
+        return maxDeviation(mode, DEFAULT_DEVIATION_BUDGET);
     }
 
     /** Perceived (apparent) brightness of a 0xRRGGBB colour. */
@@ -88,9 +93,19 @@ public final class GradientRamp {
      * something rather than nothing.
      */
     public static int[] gradientOrder(int[] paletteRgb, int startRgb, int endRgb, GradientMode mode) {
-        double max = maxDeviation(mode);
+        return gradientOrder(paletteRgb, startRgb, endRgb, mode, DEFAULT_DEVIATION_BUDGET);
+    }
+
+    public static int[] gradientOrder(int[] paletteRgb, int startRgb, int endRgb, GradientMode mode, double budget) {
+        double max = maxDeviation(mode, budget);
+        // The gradient runs from start to end, so a block must sit within that position range (not
+        // before the start nor past the end) AND be near enough to the gradient line.
+        double lo = Math.min(position(startRgb, startRgb, endRgb, mode), position(endRgb, startRgb, endRgb, mode)) - 1.0;
+        double hi = Math.max(position(startRgb, startRgb, endRgb, mode), position(endRgb, startRgb, endRgb, mode)) + 1.0;
         List<Integer> kept = new ArrayList<>();
         for (int i = 0; i < paletteRgb.length; i++) {
+            double p = position(paletteRgb[i], startRgb, endRgb, mode);
+            if (p < lo || p > hi) continue;
             if (deviation(paletteRgb[i], startRgb, endRgb, mode) <= max) kept.add(i);
         }
         if (kept.isEmpty()) {
@@ -129,13 +144,54 @@ public final class GradientRamp {
      */
     public static int[] buildGradient(int[] paletteRgb, int startRgb, int endRgb,
                                       GradientMode mode, CurveFunction curve, int cells) {
-        int[] order = gradientOrder(paletteRgb, startRgb, endRgb, mode);
+        return buildGradient(paletteRgb, startRgb, endRgb, mode, curve, cells, Integer.MAX_VALUE);
+    }
+
+    /** As above, but capping the gradient to at most {@code maxSteps} distinct blocks. */
+    public static int[] buildGradient(int[] paletteRgb, int startRgb, int endRgb,
+                                      GradientMode mode, CurveFunction curve, int cells, int maxSteps) {
+        int[] order = subsample(gradientOrder(paletteRgb, startRgb, endRgb, mode), maxSteps);
         int[] result = new int[Math.max(0, cells)];
         for (int c = 0; c < result.length; c++) {
             double t = result.length <= 1 ? 0.0 : (double) c / (result.length - 1);
-            result[c] = order[rampIndex(order.length, curve.apply(t))];
+            result[c] = order.length == 0 ? 0 : order[rampIndex(order.length, curve.apply(t))];
         }
         return result;
+    }
+
+    /**
+     * The actual placement sequence over {@code cells} cells: distributes {@code order} via the curve
+     * and applies chaos — each cell has a {@code chaos} probability of repeating the previous step or
+     * skipping ahead one. Deterministic for a given {@code rng}. Returns palette indices.
+     */
+    public static int[] buildSequence(int[] order, CurveFunction curve, int cells, double chaos, Random rng) {
+        int[] result = new int[Math.max(0, cells)];
+        for (int c = 0; c < result.length; c++) {
+            double t = result.length <= 1 ? 0.0 : (double) c / (result.length - 1);
+            double tc = curve.apply(t);
+            boolean endpoint = (c == 0 || c == result.length - 1); // pin start/end, chaos only in the middle
+            if (!endpoint && chaos > 0 && rng.nextDouble() < chaos) {
+                double stepFrac = order.length > 1 ? 1.0 / (order.length - 1) : 0.1;
+                tc = clamp01(rng.nextBoolean() ? tc - stepFrac : tc + stepFrac);
+            }
+            result[c] = order.length == 0 ? 0 : order[rampIndex(order.length, tc)];
+        }
+        return result;
+    }
+
+    /**
+     * Evenly thin {@code order} down to at most {@code maxCount} entries, keeping the two endpoints.
+     * Returns the array unchanged when it already fits.
+     */
+    public static int[] subsample(int[] order, int maxCount) {
+        if (maxCount <= 0 || order.length == 0) return new int[0];
+        if (order.length <= maxCount) return order;
+        if (maxCount == 1) return new int[]{order[0]};
+        int[] out = new int[maxCount];
+        for (int i = 0; i < maxCount; i++) {
+            out[i] = order[(int) Math.round((double) i / (maxCount - 1) * (order.length - 1))];
+        }
+        return out;
     }
 
     /**
