@@ -93,10 +93,19 @@ public final class GradientRamp {
      * something rather than nothing.
      */
     public static int[] gradientOrder(int[] paletteRgb, int startRgb, int endRgb, GradientMode mode) {
-        return gradientOrder(paletteRgb, startRgb, endRgb, mode, DEFAULT_DEVIATION_BUDGET);
+        return gradientOrder(paletteRgb, startRgb, endRgb, mode, DEFAULT_DEVIATION_BUDGET, null);
     }
 
     public static int[] gradientOrder(int[] paletteRgb, int startRgb, int endRgb, GradientMode mode, double budget) {
+        return gradientOrder(paletteRgb, startRgb, endRgb, mode, budget, null);
+    }
+
+    /**
+     * @param forced palette indices that are always eligible (must-use blocks) — they bypass the
+     *               deviation budget and the start→end range, but are still ordered by position.
+     */
+    public static int[] gradientOrder(int[] paletteRgb, int startRgb, int endRgb, GradientMode mode,
+                                      double budget, java.util.Set<Integer> forced) {
         double max = maxDeviation(mode, budget);
         // The gradient runs from start to end, so a block must sit within that position range (not
         // before the start nor past the end) AND be near enough to the gradient line.
@@ -104,6 +113,7 @@ public final class GradientRamp {
         double hi = Math.max(position(startRgb, startRgb, endRgb, mode), position(endRgb, startRgb, endRgb, mode)) + 1.0;
         List<Integer> kept = new ArrayList<>();
         for (int i = 0; i < paletteRgb.length; i++) {
+            if (forced != null && forced.contains(i)) { kept.add(i); continue; } // must-use: always in
             double p = position(paletteRgb[i], startRgb, endRgb, mode);
             if (p < lo || p > hi) continue;
             if (deviation(paletteRgb[i], startRgb, endRgb, mode) <= max) kept.add(i);

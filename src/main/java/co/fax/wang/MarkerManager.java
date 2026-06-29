@@ -30,7 +30,7 @@ import java.util.Set;
  * <p>A drag (or single click) selects or deselects based on the block it starts on: starting on an
  * unmarked block adds the line, starting on a marked block removes it. An end marker is only
  * allowed on a block that is axis-aligned with an existing start marker and within
- * {@value #MAX_END_DISTANCE} blocks of it; removing a start marker auto-deselects any end marker
+ * the configured max distance of it; removing a start marker auto-deselects any end marker
  * left without a valid start.
  *
  * <p>All state is client-side and per-session (not persisted). Tick + render both run on the client
@@ -47,7 +47,10 @@ public final class MarkerManager {
     private static final int END_LINE = 0xFFFFB000;
     private static final float EXPAND = 0.005f;        // grow the box slightly to avoid z-fighting
     private static final float LINE_WIDTH = 2.0f;
-    private static final int MAX_END_DISTANCE = 16;    // an end marker must be ≤ this from a start
+
+    private static int maxEndDistance() {              // an end marker must be ≤ this from a start
+        return Math.max(1, ConfigManager.get().maxMarkerDistance);
+    }
 
     private enum Kind { NONE, START, END }
 
@@ -61,12 +64,11 @@ public final class MarkerManager {
     private static boolean dragRemoving; // whole drag removes (origin was marked) vs adds
     private static final List<BlockPos> dragLine = new ArrayList<>();
 
-    /** True when marking is currently live (MARKER mode + holding the configured tool). */
+    /** True when marking is currently live (held tool in MARKER mode). Markers are shared by tools. */
     public static boolean active() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return false;
-        if (ConfigManager.get().mode != ToolMode.MARKER) return false;
-        return Gradient.isHoldingTool(mc);
+        return Gradient.currentMode(mc) == ToolMode.MARKER;
     }
 
     /** Remove every marker (used by the settings screen's Clear Markers button) and persist. */
@@ -184,9 +186,29 @@ public final class MarkerManager {
             }
             // Removing start markers can orphan end markers — drop any that lost their start.
             if (removedStart) endMarkers.removeIf(p -> !isEndAllowed(p));
+
+            // Auto-place end: a single start click can also drop an end marker along the look axis.
+            if (!dragRemoving && dragKind == Kind.START && dragLine.size() == 1
+                    && ConfigManager.get().autoPlaceEnd) {
+                autoPlaceEndFor(dragLine.get(0));
+            }
             saveCurrent();
         }
         cancelDrag();
+    }
+
+    /** Drop an end marker {@code maxMarkerDistance} blocks from {@code start} along the look axis. */
+    private static void autoPlaceEndFor(BlockPos start) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) return;
+        Vec3 look = mc.player.getViewVector(1.0f);
+        double ax = Math.abs(look.x), ay = Math.abs(look.y), az = Math.abs(look.z);
+        int ux = 0, uy = 0, uz = 0;
+        if (ax >= ay && ax >= az) ux = look.x >= 0 ? 1 : -1;
+        else if (ay >= az) uy = look.y >= 0 ? 1 : -1;
+        else uz = look.z >= 0 ? 1 : -1;
+        int d = maxEndDistance();
+        endMarkers.add(new BlockPos(start.getX() + ux * d, start.getY() + uy * d, start.getZ() + uz * d));
     }
 
     private static void cancelDrag() {
@@ -198,9 +220,10 @@ public final class MarkerManager {
 
     /**
      * An end marker is allowed only where a start marker is axis-aligned (shares ≥2 coordinates, so
-     * same row/column) AND within {@link #MAX_END_DISTANCE} blocks along that line.
+     * same row/column) AND within the configured max marker distance along that line.
      */
     private static boolean isEndAllowed(BlockPos p) {
+        int max = maxEndDistance();
         for (BlockPos s : startMarkers) {
             int eq = (s.getX() == p.getX() ? 1 : 0)
                     + (s.getY() == p.getY() ? 1 : 0)
@@ -210,7 +233,7 @@ public final class MarkerManager {
                 int dist = Math.abs(s.getX() - p.getX())
                         + Math.abs(s.getY() - p.getY())
                         + Math.abs(s.getZ() - p.getZ());
-                if (dist <= MAX_END_DISTANCE) return true;
+                if (dist <= max) return true;
             }
         }
         return false;

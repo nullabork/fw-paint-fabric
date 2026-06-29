@@ -70,45 +70,77 @@ public class Gradient implements ClientModInitializer {
         // outline — so our geometry is batched and drawn with the exact same camera (no frame drift).
         LevelRenderEvents.COLLECT_SUBMITS.register(MarkerManager::render);
 
-        // In-game HUD status line (26.2: HudElementRegistry; HudRenderCallback is gone).
+        // In-game HUD status line (26.2: HudElementRegistry; HudRenderCallback is gone). Shows the
+        // mode for whichever tool is held — and nothing when neither tool is in hand.
         HudElementRegistry.addLast(
                 Identifier.fromNamespaceAndPath(MOD_ID, "mode_status"),
                 (g, deltaTracker) -> {
                     Minecraft mc = Minecraft.getInstance();
                     if (mc.player == null || mc.level == null) return; // only while in a world
-                    GradientConfig cfg = ConfigManager.get();
-                    String tool = toolDisplayName(cfg.selectedTool);
-                    String text = "Gradient: " + cfg.mode.displayName()
-                            + (tool.isEmpty() ? "" : "  [" + tool + "]");
-                    g.text(mc.font, text, 4, 4, cfg.mode.color());
+                    HeldTool held = heldTool(mc);
+                    if (held == HeldTool.NONE) return; // no tool selected/held → no status
+                    ToolMode mode = currentMode(mc);
+                    String text = "FW Paint — " + held.label + ": " + mode.displayName();
+                    g.text(mc.font, text, 4, 4, mode.color());
                 });
 
         LOG.info("{} initialised", MOD_ID);
     }
 
-    /** Advance to the next activation mode, persist it, and flash an action-bar message. */
-    public static void cycleMode() {
+    /** Which configured tool the player is currently holding. */
+    public enum HeldTool {
+        NONE(""), GRADIENT("Gradient"), NOISE("Noise");
+        public final String label;
+        HeldTool(String label) { this.label = label; }
+    }
+
+    /** The configured tool the player holds in their main hand, or NONE. */
+    public static HeldTool heldTool(Minecraft mc) {
+        if (mc.player == null) return HeldTool.NONE;
+        Identifier id = BuiltInRegistries.ITEM.getKey(mc.player.getMainHandItem().getItem());
+        if (id == null) return HeldTool.NONE;
+        String s = id.toString();
         GradientConfig cfg = ConfigManager.get();
-        cfg.mode = cfg.mode.next();
-        ConfigManager.save();
+        if (!cfg.gradientTool.isEmpty() && cfg.gradientTool.equals(s)) return HeldTool.GRADIENT;
+        if (!cfg.noiseTool.isEmpty() && cfg.noiseTool.equals(s)) return HeldTool.NOISE;
+        return HeldTool.NONE;
+    }
+
+    /** The activation mode of the held tool (DISABLED when none held). */
+    public static ToolMode currentMode(Minecraft mc) {
+        GradientConfig cfg = ConfigManager.get();
+        return switch (heldTool(mc)) {
+            case GRADIENT -> cfg.gradientToolMode;
+            case NOISE -> cfg.noiseToolMode;
+            case NONE -> ToolMode.DISABLED;
+        };
+    }
+
+    /** Advance the held tool's mode, persist it, and flash an action-bar message. */
+    public static void cycleMode() {
         Minecraft mc = Minecraft.getInstance();
+        GradientConfig cfg = ConfigManager.get();
+        HeldTool held = heldTool(mc);
+        ToolMode next;
+        switch (held) {
+            case GRADIENT -> next = cfg.gradientToolMode = cfg.gradientToolMode.next();
+            case NOISE -> next = cfg.noiseToolMode = cfg.noiseToolMode.next();
+            default -> {
+                if (mc.player != null) {
+                    mc.player.sendOverlayMessage(Component.literal("FW Paint: hold a tool to cycle its mode"));
+                }
+                return;
+            }
+        }
+        ConfigManager.save();
         if (mc.player != null) {
-            mc.player.sendOverlayMessage(Component.literal("Gradient: " + cfg.mode.displayName()));
+            mc.player.sendOverlayMessage(Component.literal("FW Paint — " + held.label + ": " + next.displayName()));
         }
     }
 
-    /** True when the player's main hand holds the configured tool item. */
-    public static boolean isHoldingTool(Minecraft mc) {
-        if (mc.player == null) return false;
-        String sel = ConfigManager.get().selectedTool;
-        if (sel == null || sel.isEmpty()) return false;
-        Identifier id = BuiltInRegistries.ITEM.getKey(mc.player.getMainHandItem().getItem());
-        return id != null && id.toString().equals(sel);
-    }
-
-    /** True when the tool is held and the mod is active (Marker or Place — not Disabled). */
+    /** True when a tool is held and its mode isn't Disabled. */
     public static boolean toolEngaged() {
-        return ConfigManager.get().mode != ToolMode.DISABLED && isHoldingTool(Minecraft.getInstance());
+        return currentMode(Minecraft.getInstance()) != ToolMode.DISABLED;
     }
 
     /**

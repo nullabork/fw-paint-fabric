@@ -48,7 +48,6 @@ public final class GradientPlacer {
 
     private static final double REACH = 6.0;
     private static final double STEP = 0.1;
-    private static final int MAX_SEGMENT = 16;       // matches the end-marker distance cap
     private static final double COLOR_TIE = 24.0;    // RGB distance within which choices are "tied"
     private static final double LUM_TIE = 6.0;       // luminance distance treated as "tied"
     private static final int PLACE_INTERVAL = 2; // ticks between placements while holding (~10/s)
@@ -67,8 +66,10 @@ public final class GradientPlacer {
     // ---- input (client tick) --------------------------------------------------------------------
 
     public static void tick(Minecraft mc) {
+        // Only the GRADIENT tool in PLACE mode fills gradients (the noise tool's placement is TBD).
         if (mc.player == null || mc.level == null || mc.gui.screen() != null
-                || ConfigManager.get().mode != ToolMode.PLACE || !Gradient.isHoldingTool(mc)) {
+                || Gradient.heldTool(mc) != Gradient.HeldTool.GRADIENT
+                || ConfigManager.get().gradientToolMode != ToolMode.PLACE) {
             lastUseDown = false;
             cooldown = 0;
             return;
@@ -141,7 +142,7 @@ public final class GradientPlacer {
         return null;
     }
 
-    /** A segment is a colinear start→end pair (≤ MAX_SEGMENT apart) that {@code cell} sits between. */
+    /** A segment is a colinear start→end pair (within the max marker distance) that {@code cell} sits between. */
     private static Segment segmentForCell(BlockPos cell) {
         for (BlockPos e : MarkerManager.endMarkers) {
             for (BlockPos s : MarkerManager.startMarkers) {
@@ -149,7 +150,7 @@ public final class GradientPlacer {
                 int axes = (dx != 0 ? 1 : 0) + (dy != 0 ? 1 : 0) + (dz != 0 ? 1 : 0);
                 if (axes != 1) continue; // must be a single-axis line
                 int length = Math.abs(dx) + Math.abs(dy) + Math.abs(dz);
-                if (length > MAX_SEGMENT) continue;
+                if (length > Math.max(1, ConfigManager.get().maxMarkerDistance)) continue;
                 int ux = Integer.signum(dx), uy = Integer.signum(dy), uz = Integer.signum(dz);
                 int i = segIndex(s, ux, uy, uz, cell);
                 if (i > 0 && i < length) return new Segment(s, e, ux, uy, uz, length);
@@ -227,10 +228,16 @@ public final class GradientPlacer {
                                 int startRgb, int endRgb, double t) {
         int n = palette.size();
         int[] rgbs = new int[n];
-        for (int i = 0; i < n; i++) rgbs[i] = palette.get(i).rgb();
-        // Only blocks near the gradient are eligible, capped to the max-steps distinct blocks.
+        Set<Integer> forced = new HashSet<>(); // must-use (green) blocks bypass the deviation budget
+        List<String> required = ConfigManager.get().requiredBlocks;
+        for (int i = 0; i < n; i++) {
+            rgbs[i] = palette.get(i).rgb();
+            Identifier id = BuiltInRegistries.ITEM.getKey(palette.get(i).block().asItem());
+            if (id != null && required.contains(id.toString())) forced.add(i);
+        }
+        // Only blocks near the gradient (or forced) are eligible, capped to the max-steps distinct blocks.
         int[] order = GradientRamp.subsample(
-                GradientRamp.gradientOrder(rgbs, startRgb, endRgb, cfg.gradientMode, cfg.deviationBudget),
+                GradientRamp.gradientOrder(rgbs, startRgb, endRgb, cfg.gradientMode, cfg.deviationBudget, forced),
                 cfg.maxSteps);
 
         double tc = cfg.curve.apply(t);

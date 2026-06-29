@@ -13,13 +13,28 @@ import java.util.List;
  * Gson fills missing fields from these defaults, so adding a field stays backwards-compatible.
  */
 public class GradientConfig {
-    /** Registry id of the chosen tool item, e.g. {@code "minecraft:diamond_pickaxe"}. Empty = none. */
-    public String selectedTool = "";
 
-    /** Current activation mode. */
-    public ToolMode mode = ToolMode.DISABLED;
+    // ---- tools (the mod is active only while holding one of these items) ------------------------
 
-    /** Whether the gradient is measured by colour or by apparent brightness. */
+    /** Registry id of the gradient tool item. Empty = none. */
+    public String gradientTool = "";
+    /** Registry id of the noise tool item. Empty = none. */
+    public String noiseTool = "";
+
+    /** Per-tool activation mode (Marker / Place / Disabled). */
+    public ToolMode gradientToolMode = ToolMode.DISABLED;
+    public ToolMode noiseToolMode = ToolMode.DISABLED;
+
+    // ---- markers --------------------------------------------------------------------------------
+
+    /** Max distance (blocks) allowed between a start and end marker. */
+    public int maxMarkerDistance = 64;
+    /** When on, placing a start marker also drops an end marker along the look direction. */
+    public boolean autoPlaceEnd = false;
+
+    // ---- gradient settings ----------------------------------------------------------------------
+
+    /** Whether the gradient is measured by colour, brightness, or a texture analysis. */
     public GradientMode gradientMode = GradientMode.COLOR;
 
     /** Easing curve applied to gradient progress. */
@@ -40,8 +55,17 @@ public class GradientConfig {
     /** Fraction of texture pixels (0..1) analysed by the "top %" gradient modes. */
     public double pixelPercent = 0.5;
 
-    /** Item ids the user has excluded from the palette — never used for gradients or placement. */
+    /** Item ids the user has force-excluded from the palette (red). */
     public List<String> excludedBlocks = new ArrayList<>();
+    /** Item ids the user has marked must-use (green): force-eligible past the deviation budget. */
+    public List<String> requiredBlocks = new ArrayList<>();
+
+    // ---- noise (placeholder — UI/behaviour coming later) ----------------------------------------
+
+    /** Seed for noise generation (persisted). Empty = derive from the world. */
+    public String noiseSeed = "";
+
+    // ---- misc -----------------------------------------------------------------------------------
 
     /** When on, the mod logs debug detail (e.g. the preview block order) to the game log. */
     public boolean debug = false;
