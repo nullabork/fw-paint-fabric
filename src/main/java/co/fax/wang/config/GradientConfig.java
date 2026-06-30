@@ -60,10 +60,20 @@ public class GradientConfig {
     /** Item ids the user has marked must-use (green): force-eligible past the deviation budget. */
     public List<String> requiredBlocks = new ArrayList<>();
 
-    // ---- noise (placeholder — UI/behaviour coming later) ----------------------------------------
+    // ---- noise fill -----------------------------------------------------------------------------
 
-    /** Seed for noise generation (persisted). Empty = derive from the world. */
+    /** Seed for noise generation (persisted). Empty = 0. */
     public String noiseSeed = "";
+    /** Noise function used to drive the fill. */
+    public co.fax.wang.NoiseType noiseType = co.fax.wang.NoiseType.SMOOTH;
+    /** Per-axis feature sizes (blocks) of the noise. */
+    public double noiseScaleX = 12.0;
+    public double noiseScaleY = 12.0;
+    public double noiseScaleZ = 12.0;
+    /** When on, the three axis scales stay locked together (one Scale slider). */
+    public boolean noiseLock = true;
+    /** Block-ordering mode for the noise tool (separate from the gradient tool's). */
+    public GradientMode noiseGradientMode = GradientMode.COLOR;
 
     // ---- misc -----------------------------------------------------------------------------------
 

@@ -72,6 +72,7 @@ public class GradientScreen extends Screen {
     // Picker tabs (Gradient + Noise) state.
     private BlockPickerPanel picker;
     private List<SourceBlock> sourceBlocks = new ArrayList<>();
+    private List<SourceBlock> orderedBlocks = new ArrayList<>(); // distinct gradient order (valley→peak)
     private int whiteCount = 0;
     private final List<String> whiteOrder = new ArrayList<>(); // ids of the placement sequence (for logging)
     private String previewStartId, previewEndId;
@@ -222,15 +223,61 @@ public class GradientScreen extends Screen {
                 v -> { ConfigManager.get().maxSteps = sliderToSteps(v); rebuildDisplayRows(); }));
     }
 
+    private int noisePreviewY;          // y where the noise preview grid starts (set in initNoiseSettings)
+    private double previewOffX, previewOffZ; // pan offset (in cells) for scrubbing the preview
+
     private void initNoiseSettings() {
         int rx = rightX(), rw = rightW();
-        EditBox seed = new EditBox(this.font, rx, 50, rw, 20, Component.literal("Seed"));
+        GradientConfig cfg = ConfigManager.get();
+        int y = 30;
+
+        cycleButton(rx, y, rw, () -> Component.literal("Noise: " + ConfigManager.get().noiseType.displayName()),
+                () -> ConfigManager.get().noiseType = ConfigManager.get().noiseType.next());
+        y += 24;
+        // Block-ordering mode for the noise tool (its own, separate from the gradient tool).
+        cycleButton(rx, y, rw, () -> Component.literal("Order: " + ConfigManager.get().noiseGradientMode.displayName()),
+                () -> { GradientConfig c = ConfigManager.get(); c.noiseGradientMode = c.noiseGradientMode.next(); rebuildDisplayRows(); });
+        y += 24;
+
+        EditBox seed = new EditBox(this.font, rx, y, rw, 20, Component.literal("Seed"));
         seed.setHint(Component.literal("Seed…"));
         seed.setMaxLength(32);
-        seed.setValue(ConfigManager.get().noiseSeed);
+        seed.setValue(cfg.noiseSeed);
         seed.setResponder(s -> { ConfigManager.get().noiseSeed = s; ConfigManager.save(); });
         addRenderableWidget(seed);
+        y += 24;
+
+        if (cfg.noiseLock) {
+            addRenderableWidget(new ConfigSlider(rx, y, rw, scaleToSlider(cfg.noiseScaleX),
+                    v -> "Scale: " + sliderToScale(v),
+                    v -> { GradientConfig c = ConfigManager.get(); double s = sliderToScale(v); c.noiseScaleX = c.noiseScaleY = c.noiseScaleZ = s; }));
+            y += 24;
+        } else {
+            addRenderableWidget(new ConfigSlider(rx, y, rw, scaleToSlider(cfg.noiseScaleX),
+                    v -> "Scale X: " + sliderToScale(v), v -> ConfigManager.get().noiseScaleX = sliderToScale(v)));
+            y += 24;
+            addRenderableWidget(new ConfigSlider(rx, y, rw, scaleToSlider(cfg.noiseScaleY),
+                    v -> "Scale Y: " + sliderToScale(v), v -> ConfigManager.get().noiseScaleY = sliderToScale(v)));
+            y += 24;
+            addRenderableWidget(new ConfigSlider(rx, y, rw, scaleToSlider(cfg.noiseScaleZ),
+                    v -> "Scale Z: " + sliderToScale(v), v -> ConfigManager.get().noiseScaleZ = sliderToScale(v)));
+            y += 24;
+        }
+
+        cycleButton(rx, y, rw, () -> Component.literal("Lock XYZ: " + (ConfigManager.get().noiseLock ? "On" : "Off")),
+                () -> { ConfigManager.get().noiseLock = !ConfigManager.get().noiseLock; rebuildWidgets(); });
+        y += 26;
+        noisePreviewY = y;
     }
+
+    private long noiseSeedLong() {
+        String s = ConfigManager.get().noiseSeed.trim();
+        if (s.isEmpty()) return 0L;
+        try { return Long.parseLong(s); } catch (NumberFormatException e) { return s.hashCode(); }
+    }
+
+    private static int sliderToScale(double v) { return Math.max(1, Math.min(64, 1 + (int) Math.round(v * 63))); }
+    private static double scaleToSlider(double s) { return (Math.max(1, Math.min(64, s)) - 1) / 63.0; }
 
     private List<SourceBlock> gatherSourceBlocks() {
         List<SourceBlock> out = new ArrayList<>();
@@ -261,6 +308,11 @@ public class GradientScreen extends Screen {
         return null;
     }
 
+    /** The block-ordering mode for the active tab (gradient and noise each have their own). */
+    private GradientMode activeMode() {
+        return tab == Tab.NOISE ? ConfigManager.get().noiseGradientMode : ConfigManager.get().gradientMode;
+    }
+
     private void rebuildDisplayRows() {
         if (picker == null) return;
         GradientConfig cfg = ConfigManager.get();
@@ -273,7 +325,7 @@ public class GradientScreen extends Screen {
 
         Block startBlock = blockOfId(previewStartId, nonEx);
         Block endBlock = blockOfId(previewEndId, nonEx);
-        GradientMode mode = cfg.gradientMode;
+        GradientMode mode = activeMode(); // gradient tab vs noise tab use their own ordering mode
         double pct = cfg.pixelPercent;
         int startRgb = startBlock == null ? 0 : BlockTextures.gradientValue(startBlock, startBlock, mode, pct);
         int endRgb = endBlock == null ? 0 : BlockTextures.gradientValue(endBlock, startBlock, mode, pct);
@@ -287,6 +339,8 @@ public class GradientScreen extends Screen {
         int[] order = nonEx.isEmpty() ? new int[0]
                 : GradientRamp.gradientOrder(rgbs, startRgb, endRgb, mode, cfg.deviationBudget, forced);
         int[] used = GradientRamp.subsample(order, cfg.maxSteps);
+        orderedBlocks = new ArrayList<>();
+        for (int idx : used) orderedBlocks.add(nonEx.get(idx)); // distinct valley→peak order for noise
         int[] seq = used.length == 0 ? new int[0]
                 : GradientRamp.buildSequence(used, cfg.curve, used.length, cfg.chaos, new java.util.Random());
 
@@ -537,9 +591,47 @@ public class GradientScreen extends Screen {
     private void renderNoiseTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         if (picker != null) picker.render(g, mouseX, mouseY);
         renderAssignOverlay(g);
+        renderNoisePreview(g);
+    }
+
+    /** Top-down slice of the noise field, each cell drawn as the block it maps to (valley→peak). */
+    private void renderNoisePreview(GuiGraphicsExtractor g) {
+        int rx = rightX(), rw = rightW();
+        g.text(this.font, "Preview:", rx, noisePreviewY, GREY);
+        int gridY = noisePreviewY + 12;
+        if (orderedBlocks.isEmpty()) {
+            g.text(this.font, this.font.plainSubstrByWidth("Select blocks to preview", rw), rx, gridY, YELLOW);
+            return;
+        }
+        GradientConfig cfg = ConfigManager.get();
+        long seed = noiseSeedLong();
+        int cells = Math.max(1, rw / 16);                       // square-ish grid sized to the column
+        int rows = Math.max(1, Math.min(cells, (this.height - 30 - gridY) / 16));
+        for (int gz = 0; gz < rows; gz++) {
+            for (int gx = 0; gx < cells; gx++) {
+                // Top-down (XZ) slice at y=0; drag the grid to pan. Noise.sample is equalised so the
+                // value spreads across [0,1] → the whole block list is used, not just the middle.
+                double v = Noise.sample(cfg.noiseType, gx + previewOffX, 0, gz + previewOffZ, seed,
+                        cfg.noiseScaleX, cfg.noiseScaleY, cfg.noiseScaleZ);
+                int idx = GradientRamp.rampIndex(orderedBlocks.size(), cfg.curve.apply(v));
+                g.item(orderedBlocks.get(idx).stack(), rx + gx * 16, gridY + gz * 16);
+            }
+        }
+    }
+
+    private boolean inNoisePreview(double mx, double my) {
         int rx = rightX();
-        g.text(this.font, "Noise Paint", rx, 34, WHITE);
-        g.text(this.font, this.font.plainSubstrByWidth("Noise settings coming soon", rightW()), rx, 54, YELLOW);
+        return tab == Tab.NOISE && mx >= rx && mx <= rx + rightW() && my >= noisePreviewY + 12 && my < this.height - 30;
+    }
+
+    @Override
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        if (event.button() == 0 && inNoisePreview(event.x(), event.y())) {
+            previewOffX -= dragX / 16.0; // one cell == 16px
+            previewOffZ -= dragY / 16.0;
+            return true;
+        }
+        return super.mouseDragged(event, dragX, dragY);
     }
 
     private void renderSettingsTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
