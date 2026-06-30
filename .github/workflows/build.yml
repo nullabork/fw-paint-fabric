@@ -35,10 +35,22 @@ jobs:
           path: build/libs/*.jar
           if-no-files-found: error
 
-      # On a v* tag: cut a GitHub Release with the jars + auto-generated notes.
+      # On a v* tag: cut a GitHub Release with the jars + target-version notes + auto changelog.
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          name: FW Paint ${{ github.ref_name }} (Minecraft 26.2)
           files: build/libs/*.jar
           generate_release_notes: true
+          body: |
+            **FW Paint** — a client-side Fabric mod for painting block gradients and noise fills.
+
+            Targets:
+            - Minecraft **26.2**
+            - Fabric Loader **0.19.3+**
+            - Fabric API **for 26.2** (must be installed in the instance)
+            - Java **25**
+
+            Install: drop the `gradient-1.0.0.jar` below into a 26.2 Fabric instance's `mods/` folder
+            (alongside Fabric API for 26.2).
