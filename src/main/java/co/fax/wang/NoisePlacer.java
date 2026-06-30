@@ -164,12 +164,16 @@ public final class NoisePlacer {
 
             double t = Noise.sample(cfg.noiseType, c.x(), c.y(), c.z(), seed,
                     cfg.noiseScaleX, cfg.noiseScaleY, cfg.noiseScaleZ);
-            t = cfg.curve.apply(t);
-            if (cfg.chaos > 0 && RANDOM.nextDouble() < cfg.chaos) {
+            if (cfg.noiseChaos > 0 && RANDOM.nextDouble() < cfg.noiseChaos) {
                 double stepFrac = order.size() > 1 ? 1.0 / (order.size() - 1) : 0.1;
                 t = clamp01(RANDOM.nextBoolean() ? t - stepFrac : t + stepFrac);
             }
             int idx = GradientRamp.rampIndex(order.size(), t);
+            // Deviation: a per-placement chance to shift to a colour-adjacent block (±1 in the order),
+            // so a step occasionally varies to a close block without changing the step count.
+            if (cfg.noiseDeviation > 0 && RANDOM.nextDouble() < cfg.noiseDeviation) {
+                idx = Math.max(0, Math.min(order.size() - 1, idx + (RANDOM.nextBoolean() ? 1 : -1)));
+            }
 
             int slot = slotForNearest(player, idx);
             if (slot < 0) continue; // none of the gradient blocks are available
@@ -215,18 +219,21 @@ public final class NoisePlacer {
         }
 
         GradientMode mode = cfg.noiseGradientMode;
-        int startRgb = BlockTextures.gradientValue(startBlock, startBlock, mode, cfg.pixelPercent);
-        int endRgb = BlockTextures.gradientValue(endBlock, startBlock, mode, cfg.pixelPercent);
+        double pct = cfg.noisePixelPercent;
+        int startRgb = BlockTextures.gradientValue(startBlock, startBlock, mode, pct);
+        int endRgb = BlockTextures.gradientValue(endBlock, startBlock, mode, pct);
         int[] rgbs = new int[palette.size()];
         Set<Integer> forced = new HashSet<>();
         List<String> required = cfg.requiredBlocks;
         for (int i = 0; i < palette.size(); i++) {
-            rgbs[i] = BlockTextures.gradientValue(palette.get(i), startBlock, mode, cfg.pixelPercent);
+            rgbs[i] = BlockTextures.gradientValue(palette.get(i), startBlock, mode, pct);
             Identifier id = BuiltInRegistries.ITEM.getKey(palette.get(i).asItem());
             if (id != null && required.contains(id.toString())) forced.add(i);
         }
+        // Full budget: noise deviation is a placement-time variation, not a step-count filter, so the
+        // number of steps depends only on max steps + the eligible blocks — not the deviation slider.
         int[] ord = GradientRamp.subsample(
-                GradientRamp.gradientOrder(rgbs, startRgb, endRgb, mode, cfg.deviationBudget, forced), cfg.maxSteps);
+                GradientRamp.gradientOrder(rgbs, startRgb, endRgb, mode, 1.0, forced), cfg.noiseMaxSteps);
         List<Block> out = new ArrayList<>();
         for (int i : ord) out.add(palette.get(i));
         return out;

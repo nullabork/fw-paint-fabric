@@ -78,6 +78,11 @@ public class GradientConfig {
     public boolean noiseLock = true;
     /** Block-ordering mode for the noise tool (separate from the gradient tool's). */
     public GradientMode noiseGradientMode = GradientMode.COLOR;
+    /** Noise-tool gradient shaping (separate from the gradient tool's same-named settings). */
+    public double noiseDeviation = 0.43;
+    public double noiseChaos = 0.0;
+    public int noiseMaxSteps = 16;
+    public double noisePixelPercent = 0.5;
 
     // ---- misc -----------------------------------------------------------------------------------
 

@@ -67,7 +67,7 @@ public class GradientScreen extends Screen {
     private record SourceBlock(String id, ItemStack stack, Block block) {}
     private record ToolRow(String id, String name) {}
 
-    private Tab tab = Tab.GRADIENT;
+    private static Tab tab = Tab.GRADIENT; // remembered across reopening the screen this session
 
     // Picker tabs (Gradient + Noise) state.
     private BlockPickerPanel picker;
@@ -228,6 +228,7 @@ public class GradientScreen extends Screen {
     }
 
     private int noisePreviewY;          // y where the noise preview grid starts (set in initNoiseSettings)
+    private int noiseModeDescY, noiseDevDescY, noiseChaosDescY; // yellow help lines on the noise tab
     private double previewOffX, previewOffZ; // pan offset (in cells) for scrubbing the preview
 
     private void initNoiseSettings() {
@@ -239,9 +240,19 @@ public class GradientScreen extends Screen {
                 () -> ConfigManager.get().noiseType = ConfigManager.get().noiseType.next());
         y += 24;
         // Block-ordering mode for the noise tool (its own, separate from the gradient tool).
-        cycleButton(rx, y, rw, () -> Component.literal("Order: " + ConfigManager.get().noiseGradientMode.displayName()),
-                () -> { GradientConfig c = ConfigManager.get(); c.noiseGradientMode = c.noiseGradientMode.next(); rebuildDisplayRows(); });
+        addRenderableWidget(Button.builder(Component.literal("Order: " + cfg.noiseGradientMode.displayName()), b -> {
+            GradientConfig c = ConfigManager.get(); c.noiseGradientMode = c.noiseGradientMode.next();
+            ConfigManager.save(); rebuildWidgets(); // relayout so the Pixel % slider shows/hides
+        }).bounds(rx, y, rw, 20).build());
         y += 24;
+        // Pixel % sits directly under the Order button, only for the "top %" texture modes.
+        if (cfg.noiseGradientMode.usesPixelPercent()) {
+            addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.noisePixelPercent,
+                    v -> "Pixel %: " + Math.round(v * 100) + "%",
+                    v -> { ConfigManager.get().noisePixelPercent = v; rebuildDisplayRows(); }));
+            y += 24;
+        }
+        noiseModeDescY = y; y += 12;
 
         EditBox seed = new EditBox(this.font, rx, y, rw, 20, Component.literal("Seed"));
         seed.setHint(Component.literal("Seed…"));
@@ -270,6 +281,20 @@ public class GradientScreen extends Screen {
 
         cycleButton(rx, y, rw, () -> Component.literal("Lock XYZ: " + (ConfigManager.get().noiseLock ? "On" : "Off")),
                 () -> { ConfigManager.get().noiseLock = !ConfigManager.get().noiseLock; rebuildWidgets(); });
+        y += 24;
+
+        // Gradient shaping for the noise tool (its own values, separate from the gradient tool).
+        addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.noiseDeviation,
+                v -> "Deviation: " + Math.round(v * 100) + "%",
+                v -> { ConfigManager.get().noiseDeviation = v; rebuildDisplayRows(); }));
+        y += 24; noiseDevDescY = y; y += 12;
+        addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.noiseChaos,
+                v -> "Chaos: " + Math.round(v * 100) + "%",
+                v -> { ConfigManager.get().noiseChaos = v; rebuildDisplayRows(); }));
+        y += 24; noiseChaosDescY = y; y += 12;
+        addRenderableWidget(new ConfigSlider(rx, y, rw, stepsToSlider(cfg.noiseMaxSteps),
+                v -> "Max steps: " + sliderToSteps(v),
+                v -> { ConfigManager.get().noiseMaxSteps = sliderToSteps(v); rebuildDisplayRows(); }));
         y += 26;
         noisePreviewY = y;
     }
@@ -312,9 +337,31 @@ public class GradientScreen extends Screen {
         return null;
     }
 
-    /** The block-ordering mode for the active tab (gradient and noise each have their own). */
+    // The gradient and noise tools each have their own ordering mode + shaping values; the picker
+    // shows whichever belongs to the active tab.
     private GradientMode activeMode() {
-        return tab == Tab.NOISE ? ConfigManager.get().noiseGradientMode : ConfigManager.get().gradientMode;
+        GradientConfig c = ConfigManager.get();
+        return tab == Tab.NOISE ? c.noiseGradientMode : c.gradientMode;
+    }
+    /**
+     * Budget used to filter eligible blocks when building the order. The gradient tool filters by its
+     * deviation slider; the noise tool does NOT (noise deviation is a placement-time variation, not a
+     * step-count filter), so it uses a full budget — every range-eligible block is a candidate step.
+     */
+    private double orderingBudget() {
+        return tab == Tab.NOISE ? 1.0 : ConfigManager.get().deviationBudget;
+    }
+    private double activeChaos() {
+        GradientConfig c = ConfigManager.get();
+        return tab == Tab.NOISE ? c.noiseChaos : c.chaos;
+    }
+    private int activeMaxSteps() {
+        GradientConfig c = ConfigManager.get();
+        return tab == Tab.NOISE ? c.noiseMaxSteps : c.maxSteps;
+    }
+    private double activePixelPercent() {
+        GradientConfig c = ConfigManager.get();
+        return tab == Tab.NOISE ? c.noisePixelPercent : c.pixelPercent;
     }
 
     private void rebuildDisplayRows() {
@@ -334,7 +381,7 @@ public class GradientScreen extends Screen {
         Block startBlock = blockOfId(previewStartId, nonEx);
         Block endBlock = blockOfId(previewEndId, nonEx);
         GradientMode mode = activeMode(); // gradient tab vs noise tab use their own ordering mode
-        double pct = cfg.pixelPercent;
+        double pct = activePixelPercent();
         int startRgb = startBlock == null ? 0 : BlockTextures.gradientValue(startBlock, startBlock, mode, pct);
         int endRgb = endBlock == null ? 0 : BlockTextures.gradientValue(endBlock, startBlock, mode, pct);
         int[] rgbs = new int[nonEx.size()];
@@ -345,12 +392,12 @@ public class GradientScreen extends Screen {
         }
 
         int[] order = nonEx.isEmpty() ? new int[0]
-                : GradientRamp.gradientOrder(rgbs, startRgb, endRgb, mode, cfg.deviationBudget, forced);
-        int[] used = GradientRamp.subsample(order, cfg.maxSteps);
+                : GradientRamp.gradientOrder(rgbs, startRgb, endRgb, mode, orderingBudget(), forced);
+        int[] used = GradientRamp.subsample(order, activeMaxSteps());
         orderedBlocks = new ArrayList<>();
         for (int idx : used) orderedBlocks.add(nonEx.get(idx)); // distinct valley→peak order for noise
         int[] seq = used.length == 0 ? new int[0]
-                : GradientRamp.buildSequence(used, cfg.curve, used.length, cfg.chaos, new java.util.Random());
+                : GradientRamp.buildSequence(used, cfg.curve, used.length, activeChaos(), new java.util.Random());
 
         List<BlockPickerPanel.Row> rows = new ArrayList<>();
         whiteOrder.clear();
@@ -536,7 +583,7 @@ public class GradientScreen extends Screen {
     }
 
     private String modeDescription() {
-        return switch (ConfigManager.get().gradientMode) {
+        return switch (activeMode()) {
             case COLOR -> "Average texture colour.";
             case BRIGHTNESS -> "Average texture brightness.";
             case TOP_DARK_COLOR -> "Colour of the darkest pixels.";
@@ -599,6 +646,10 @@ public class GradientScreen extends Screen {
     private void renderNoiseTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         if (picker != null) picker.render(g, mouseX, mouseY);
         renderAssignOverlay(g);
+        int rx = rightX(), rw = rightW();
+        g.text(this.font, this.font.plainSubstrByWidth(modeDescription(), rw), rx, noiseModeDescY, YELLOW);
+        g.text(this.font, this.font.plainSubstrByWidth("Chance a block varies to a close one", rw), rx, noiseDevDescY, YELLOW);
+        g.text(this.font, this.font.plainSubstrByWidth("Chance to repeat or skip a step", rw), rx, noiseChaosDescY, YELLOW);
         renderNoisePreview(g);
     }
 
