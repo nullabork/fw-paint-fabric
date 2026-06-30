@@ -56,11 +56,10 @@ public final class GradientPlacer {
 
     private static boolean lastUseDown = false;
     private static int cooldown = 0;
-    private static volatile boolean placing = false;
 
     /** True while we are issuing our own placement interaction (so the click-cancel callbacks pass). */
     public static boolean isPlacing() {
-        return placing;
+        return BlockPlacement.isPlacing();
     }
 
     // ---- input (client tick) --------------------------------------------------------------------
@@ -265,37 +264,7 @@ public final class GradientPlacer {
     // ---- placement ------------------------------------------------------------------------------
 
     private static void place(Minecraft mc, LocalPlayer player, Palette pal, Front front) {
-        Inventory inv = player.getInventory();
-        int selSlot = inv.getSelectedSlot();
-        boolean fromInventory = pal.slot() >= 9; // main inventory needs swapping into the hotbar
-        int menuId = player.inventoryMenu.containerId;
-        placing = true;
-        try {
-            if (fromInventory) {
-                // Litematica-style: swap the inventory block into the held hotbar slot (tool moves
-                // to the inventory slot); in InventoryMenu a main-inventory slot's menu index == its
-                // inventory index, and the button is the target hotbar slot.
-                mc.gameMode.handleContainerInput(menuId, pal.slot(), selSlot, ContainerInput.SWAP, player);
-            } else {
-                inv.setSelectedSlot(pal.slot());
-            }
-
-            BlockPos n = front.support();
-            Direction dir = front.dir();
-            Vec3 loc = new Vec3(
-                    n.getX() + 0.5 + dir.getStepX() * 0.5,
-                    n.getY() + 0.5 + dir.getStepY() * 0.5,
-                    n.getZ() + 0.5 + dir.getStepZ() * 0.5);
-            BlockHitResult hit = new BlockHitResult(loc, dir, n, false);
-            mc.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit);
-        } finally {
-            if (fromInventory) {
-                mc.gameMode.handleContainerInput(menuId, pal.slot(), selSlot, ContainerInput.SWAP, player); // swap back
-            } else {
-                inv.setSelectedSlot(selSlot);
-            }
-            placing = false;
-        }
+        BlockPlacement.place(mc, player, pal.slot(), front.support(), front.dir());
     }
 
     // ---- colour helpers -------------------------------------------------------------------------

@@ -135,6 +135,10 @@ public class GradientScreen extends Screen {
 
     private void initPickerTab() {
         sourceBlocks = gatherSourceBlocks();
+        // Restore the persisted ordering endpoints (shared with the placer).
+        GradientConfig pc = ConfigManager.get();
+        if (previewStartId == null && !pc.orderStartBlock.isEmpty()) previewStartId = pc.orderStartBlock;
+        if (previewEndId == null && !pc.orderEndBlock.isEmpty()) previewEndId = pc.orderEndBlock;
         picker = new BlockPickerPanel(this.font);
         int cx = contentX(), w = leftW(), bw = w / 4;
 
@@ -322,6 +326,10 @@ public class GradientScreen extends Screen {
         List<SourceBlock> nonEx = new ArrayList<>();
         for (SourceBlock sb : sourceBlocks) if (!excluded.contains(sb.id())) nonEx.add(sb);
         ensureEndpoints(nonEx);
+
+        // Persist the endpoints so the noise placer uses the same valley→peak ordering.
+        cfg.orderStartBlock = previewStartId == null ? "" : previewStartId;
+        cfg.orderEndBlock = previewEndId == null ? "" : previewEndId;
 
         Block startBlock = blockOfId(previewStartId, nonEx);
         Block endBlock = blockOfId(previewEndId, nonEx);

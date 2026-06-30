@@ -53,6 +53,7 @@ public class Gradient implements ClientModInitializer {
             }
             MarkerManager.tick(client);
             GradientPlacer.tick(client);
+            NoisePlacer.tick(client);
         });
 
         // While the tool is engaged (Marker or Place mode), suppress vanilla left/right click so it
@@ -62,7 +63,7 @@ public class Gradient implements ClientModInitializer {
         AttackBlockCallback.EVENT.register((player, level, hand, pos, dir) ->
                 (level.isClientSide() && toolEngaged()) ? InteractionResult.FAIL : InteractionResult.PASS);
         UseBlockCallback.EVENT.register((player, level, hand, hit) ->
-                (level.isClientSide() && toolEngaged() && !GradientPlacer.isPlacing())
+                (level.isClientSide() && toolEngaged() && !BlockPlacement.isPlacing())
                         ? InteractionResult.FAIL : InteractionResult.PASS);
 
         // In-world marker rendering (filled committed faces + drag outline preview). Submit during

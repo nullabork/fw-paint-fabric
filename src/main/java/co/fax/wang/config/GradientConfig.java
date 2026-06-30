@@ -60,6 +60,10 @@ public class GradientConfig {
     /** Item ids the user has marked must-use (green): force-eligible past the deviation budget. */
     public List<String> requiredBlocks = new ArrayList<>();
 
+    /** The picker's [S]/[E] ordering endpoints (block ids) — define valley→peak for noise placement. */
+    public String orderStartBlock = "";
+    public String orderEndBlock = "";
+
     // ---- noise fill -----------------------------------------------------------------------------
 
     /** Seed for noise generation (persisted). Empty = 0. */
