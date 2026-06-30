@@ -64,6 +64,9 @@ public class GradientConfig {
     public String orderStartBlock = "";
     public String orderEndBlock = "";
 
+    /** Manual "Pick" order: block id → assigned number (1+). Lowest number = start, highest = end. */
+    public java.util.Map<String, Integer> pickNumbers = new java.util.HashMap<>();
+
     // ---- noise fill -----------------------------------------------------------------------------
 
     /** Seed for noise generation (persisted). Empty = 0. */

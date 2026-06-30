@@ -14,8 +14,8 @@ import java.util.List;
  */
 public final class BlockPickerPanel {
 
-    /** One list entry: the stack, its id, a text colour, and any tag (e.g. " [S]"). */
-    public record Row(net.minecraft.world.item.ItemStack stack, String id, int color, String tag) {}
+    /** One list entry: the stack, its id, a text colour, a tag (e.g. " [S]"), and a name prefix (Pick #). */
+    public record Row(net.minecraft.world.item.ItemStack stack, String id, int color, String tag, String prefix) {}
 
     private static final int ROW_H = 18;
     private static final int HOVER_BG = 0x33FFFFFF;
@@ -61,7 +61,7 @@ public final class BlockPickerPanel {
             boolean hover = mouseX >= x && mouseX <= x + w && mouseY >= ry && mouseY < ry + ROW_H;
             if (hover) g.fill(x, ry, x + w, ry + ROW_H, HOVER_BG);
             g.item(row.stack(), x + 1, ry + 1);
-            String name = row.stack().getHoverName().getString();
+            String name = row.prefix() + row.stack().getHoverName().getString();
             String label = font.plainSubstrByWidth(name, w - 26 - font.width(row.tag())) + row.tag();
             g.text(font, label, x + 20, ry + 5, row.color());
         }

@@ -76,6 +76,7 @@ public class GradientScreen extends Screen {
     private int whiteCount = 0;
     private final List<String> whiteOrder = new ArrayList<>(); // ids of the placement sequence (for logging)
     private String previewStartId, previewEndId;
+    private String pickSelectedId; // the single selected row in Pick mode (»» chevron)
     private int modeDescY, deviationDescY, chaosDescY;
 
     // Settings tab state.
@@ -148,15 +149,25 @@ public class GradientScreen extends Screen {
             sourceBlocks = gatherSourceBlocks(); rebuildDisplayRows(); b.setMessage(sourceLabel());
         }).bounds(cx, PICK_SRC_Y, w, 20).build());
 
-        // Four assign buttons under Source: [S] [E] ✓ ✗ — set the click-assign mode (overlay shows on).
-        addRenderableWidget(Button.builder(Component.literal("[S]"),
-                b -> assign = assign == Assign.START ? Assign.NONE : Assign.START).bounds(cx, PICK_BTN_Y, bw, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("[E]"),
-                b -> assign = assign == Assign.END ? Assign.NONE : Assign.END).bounds(cx + bw, PICK_BTN_Y, bw, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("✓"),
-                b -> assign = assign == Assign.REQUIRE ? Assign.NONE : Assign.REQUIRE).bounds(cx + bw * 2, PICK_BTN_Y, bw, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("✗"),
-                b -> assign = assign == Assign.EXCLUDE ? Assign.NONE : Assign.EXCLUDE).bounds(cx + bw * 3, PICK_BTN_Y, w - bw * 3, 20).build());
+        if (activeMode().isPick()) {
+            // Pick mode: three action buttons (+ / − / ✗) that act on the selected row.
+            assign = Assign.NONE;
+            ensurePickSelection();
+            int bw3 = w / 3;
+            addRenderableWidget(Button.builder(Component.literal("+"), b -> pickAdjust(1)).bounds(cx, PICK_BTN_Y, bw3, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("−"), b -> pickAdjust(-1)).bounds(cx + bw3, PICK_BTN_Y, bw3, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("✗"), b -> pickExclude()).bounds(cx + bw3 * 2, PICK_BTN_Y, w - bw3 * 2, 20).build());
+        } else {
+            // Four assign buttons under Source: [S] [E] ✓ ✗ — set the click-assign mode (overlay shows on).
+            addRenderableWidget(Button.builder(Component.literal("[S]"),
+                    b -> assign = assign == Assign.START ? Assign.NONE : Assign.START).bounds(cx, PICK_BTN_Y, bw, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("[E]"),
+                    b -> assign = assign == Assign.END ? Assign.NONE : Assign.END).bounds(cx + bw, PICK_BTN_Y, bw, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("✓"),
+                    b -> assign = assign == Assign.REQUIRE ? Assign.NONE : Assign.REQUIRE).bounds(cx + bw * 2, PICK_BTN_Y, bw, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("✗"),
+                    b -> assign = assign == Assign.EXCLUDE ? Assign.NONE : Assign.EXCLUDE).bounds(cx + bw * 3, PICK_BTN_Y, w - bw * 3, 20).build());
+        }
 
         picker.setBounds(cx, PICK_LIST_Y, w, (this.height - 30) - PICK_LIST_Y);
         rebuildDisplayRows();
@@ -366,12 +377,15 @@ public class GradientScreen extends Screen {
 
     private void rebuildDisplayRows() {
         if (picker == null) return;
+        if (activeMode().isPick()) { rebuildPickRows(); return; }
+
         GradientConfig cfg = ConfigManager.get();
         Set<String> excluded = new HashSet<>(cfg.excludedBlocks);
         Set<String> required = new HashSet<>(cfg.requiredBlocks);
 
         List<SourceBlock> nonEx = new ArrayList<>();
         for (SourceBlock sb : sourceBlocks) if (!excluded.contains(sb.id())) nonEx.add(sb);
+
         ensureEndpoints(nonEx);
 
         // Persist the endpoints so the noise placer uses the same valley→peak ordering.
@@ -408,7 +422,7 @@ public class GradientScreen extends Screen {
             SourceBlock sb = nonEx.get(idx);
             String tag = (j == 0) ? " [S]" : (j == seq.length - 1 && seq.length > 1) ? " [E]" : "";
             int color = required.contains(sb.id()) ? GREEN : WHITE;
-            rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), color, tag));
+            rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), color, tag, ""));
             whiteOrder.add(sb.id());
         }
         whiteCount = seq.length;
@@ -417,15 +431,90 @@ public class GradientScreen extends Screen {
             if (inSeq.contains(i)) continue;
             SourceBlock sb = nonEx.get(i);
             int color = required.contains(sb.id()) ? GREEN : BLUE;
-            rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), color, ""));
+            rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), color, "", ""));
         }
         // Excluded (red) at the bottom.
         for (SourceBlock sb : sourceBlocks) {
-            if (excluded.contains(sb.id())) rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), RED, ""));
+            if (excluded.contains(sb.id())) rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), RED, "", ""));
         }
 
         picker.setRows(rows);
         logPreview();
+    }
+
+    /**
+     * Pick mode: numbered blocks are white (sorted low→high, with [S]/[E]); everything unnumbered is
+     * red (not used). The selected row shows a »» chevron; the +/−/✗ buttons act on the selection.
+     */
+    private void rebuildPickRows() {
+        GradientConfig cfg = ConfigManager.get();
+        ensurePickSelection();
+        List<String> ids = new ArrayList<>();
+        for (SourceBlock sb : sourceBlocks) ids.add(sb.id());
+        List<List<String>> groups = Picks.groups(ids, cfg.pickNumbers);
+
+        // Flatten to numbered blocks (low→high) and one representative per group for the preview.
+        List<SourceBlock> numbered = new ArrayList<>();
+        orderedBlocks = new ArrayList<>();
+        for (List<String> grp : groups) {
+            SourceBlock rep = sbById(grp.get(0), sourceBlocks);
+            if (rep != null) orderedBlocks.add(rep);
+            for (String id : grp) { SourceBlock sb = sbById(id, sourceBlocks); if (sb != null) numbered.add(sb); }
+        }
+
+        List<BlockPickerPanel.Row> rows = new ArrayList<>();
+        whiteOrder.clear();
+        Set<String> numberedIds = new HashSet<>();
+        for (int j = 0; j < numbered.size(); j++) {
+            SourceBlock sb = numbered.get(j);
+            numberedIds.add(sb.id());
+            String tag = (j == 0) ? " [S]" : (j == numbered.size() - 1 && numbered.size() > 1) ? " [E]" : "";
+            rows.add(pickRow(sb, WHITE, tag, cfg.pickNumbers.get(sb.id()) + " "));
+            whiteOrder.add(sb.id());
+        }
+        whiteCount = numbered.size();
+        // Unnumbered = not used = red.
+        for (SourceBlock sb : sourceBlocks) {
+            if (!numberedIds.contains(sb.id())) rows.add(pickRow(sb, RED, "", ""));
+        }
+        picker.setRows(rows);
+        logPreview();
+    }
+
+    /** Build a Pick row, adding the »» chevron prefix when it's the selected one. */
+    private BlockPickerPanel.Row pickRow(SourceBlock sb, int color, String tag, String numberPrefix) {
+        String prefix = (sb.id().equals(pickSelectedId) ? "» " : "") + numberPrefix;
+        return new BlockPickerPanel.Row(sb.stack(), sb.id(), color, tag, prefix);
+    }
+
+    private SourceBlock sbById(String id, List<SourceBlock> list) {
+        for (SourceBlock sb : list) if (sb.id().equals(id)) return sb;
+        return null;
+    }
+
+    /** Ensure a valid Pick selection (defaults to the first source block). */
+    private void ensurePickSelection() {
+        boolean ok = pickSelectedId != null && sourceBlocks.stream().anyMatch(s -> s.id().equals(pickSelectedId));
+        if (!ok) pickSelectedId = sourceBlocks.isEmpty() ? null : sourceBlocks.get(0).id();
+    }
+
+    /** + / − the selected block's pick number; reaching 0 removes the number (→ unused/red). */
+    private void pickAdjust(int delta) {
+        if (pickSelectedId == null) return;
+        GradientConfig cfg = ConfigManager.get();
+        int next = Math.max(0, cfg.pickNumbers.getOrDefault(pickSelectedId, 0) + delta);
+        if (next == 0) cfg.pickNumbers.remove(pickSelectedId);
+        else cfg.pickNumbers.put(pickSelectedId, next);
+        ConfigManager.save();
+        rebuildDisplayRows();
+    }
+
+    /** ✗ the selected block: just remove its number (→ unused/red). */
+    private void pickExclude() {
+        if (pickSelectedId == null) return;
+        ConfigManager.get().pickNumbers.remove(pickSelectedId);
+        ConfigManager.save();
+        rebuildDisplayRows();
     }
 
     private void ensureEndpoints(List<SourceBlock> nonEx) {
@@ -535,10 +624,17 @@ public class GradientScreen extends Screen {
             if (event.x() >= xs[4] && event.x() <= xs[4] + xs[5]) { setTab(Tab.SETTINGS); return true; }
         }
         if (super.mouseClicked(event, doubled)) return true;
-        if ((tab == Tab.GRADIENT || tab == Tab.NOISE) && picker != null && event.button() == 0) {
+        if ((tab == Tab.GRADIENT || tab == Tab.NOISE) && picker != null
+                && (event.button() == 0 || event.button() == 1)) {
             String id = picker.rowIdAt(event.x(), event.y());
-            if (id != null && assign != Assign.NONE) {
-                GradientConfig cfg = ConfigManager.get();
+            if (id == null) return false;
+            GradientConfig cfg = ConfigManager.get();
+            // Pick mode: clicking a row selects it (one at a time); +/−/✗ buttons act on the selection.
+            if (activeMode().isPick()) {
+                if (event.button() == 0) { pickSelectedId = id; rebuildDisplayRows(); }
+                return true;
+            }
+            if (event.button() == 0 && assign != Assign.NONE) {
                 switch (assign) {
                     case START -> { previewStartId = id; assign = Assign.NONE; rebuildDisplayRows(); }
                     case END -> { previewEndId = id; assign = Assign.NONE; rebuildDisplayRows(); }
@@ -592,6 +688,7 @@ public class GradientScreen extends Screen {
             case TOP_LIGHT -> "Brightness of the lightest pixels.";
             case BW_DIFF -> "B&W texture difference from start.";
             case COLOR_DIFF -> "Colour texture difference from start.";
+            case PICK -> "Left-click to number, right-click to lower.";
         };
     }
 
@@ -630,7 +727,7 @@ public class GradientScreen extends Screen {
 
     /** Darken the active assign button (drawn over the vanilla button) to show it's toggled on. */
     private void renderAssignOverlay(GuiGraphicsExtractor g) {
-        if (assign == Assign.NONE) return;
+        if (assign == Assign.NONE || activeMode().isPick()) return;
         g.fill(assignBtnX(), PICK_BTN_Y, assignBtnX() + assignBtnW(), PICK_BTN_Y + 20, PRESSED_OVERLAY);
     }
 

@@ -40,7 +40,7 @@ public final class NoisePlacer {
     private static final Random RANDOM = new Random();
     private static boolean lastUseDown = false;
     private static final ArrayDeque<FloodFill.Cell> queue = new ArrayDeque<>();
-    private static List<Block> order = new ArrayList<>();
+    private static List<List<Block>> order = new ArrayList<>(); // each entry = a step (a tie group)
 
     public static void tick(Minecraft mc) {
         if (mc.player == null || mc.level == null || mc.gui.screen() != null
@@ -175,7 +175,7 @@ public final class NoisePlacer {
                 idx = Math.max(0, Math.min(order.size() - 1, idx + (RANDOM.nextBoolean() ? 1 : -1)));
             }
 
-            int slot = slotForNearest(player, idx);
+            int slot = chooseSlot(player, idx);
             if (slot < 0) continue; // none of the gradient blocks are available
             Direction dir = Direction.getNearest(c.x() - c.sx(), c.y() - c.sy(), c.z() - c.sz(), Direction.UP);
             BlockPlacement.place(mc, player, slot, support, dir);
@@ -183,14 +183,18 @@ public final class NoisePlacer {
         }
     }
 
-    /** Slot for the order block at {@code idx}, falling back to the nearest available index. */
-    private static int slotForNearest(LocalPlayer player, int idx) {
+    /** Slot of a block for step {@code idx} (random within a tie group), nearest available. */
+    private static int chooseSlot(LocalPlayer player, int idx) {
         for (int step = 0; step < order.size(); step++) {
             for (int sgn = -1; sgn <= 1; sgn += 2) {
                 int i = idx + sgn * step;
                 if (i < 0 || i >= order.size()) continue;
-                int slot = BlockPlacement.findSlot(player, order.get(i));
-                if (slot >= 0) return slot;
+                List<Block> group = new ArrayList<>(order.get(i));
+                java.util.Collections.shuffle(group, RANDOM); // randomise ties on placement
+                for (Block b : group) {
+                    int slot = BlockPlacement.findSlot(player, b);
+                    if (slot >= 0) return slot;
+                }
                 if (step == 0) break; // avoid checking idx twice
             }
         }
@@ -199,10 +203,26 @@ public final class NoisePlacer {
 
     // ---- ordering (valley→peak), mirrors the noise tab preview -----------------------------------
 
-    private static List<Block> computeOrder(LocalPlayer player) {
+    private static List<List<Block>> computeOrder(LocalPlayer player) {
         GradientConfig cfg = ConfigManager.get();
         List<Block> palette = gatherPalette(player);
         if (palette.isEmpty()) return List.of();
+
+        // Pick mode: the order is exactly the numbered blocks (low→high), ties grouped.
+        if (cfg.noiseGradientMode.isPick()) {
+            List<String> ids = new ArrayList<>();
+            for (Block b : palette) {
+                Identifier id = BuiltInRegistries.ITEM.getKey(b.asItem());
+                ids.add(id == null ? "" : id.toString());
+            }
+            List<List<Block>> out = new ArrayList<>();
+            for (List<String> grp : Picks.groups(ids, cfg.pickNumbers)) {
+                List<Block> bg = new ArrayList<>();
+                for (String s : grp) { Block b = byId(s, palette); if (b != null) bg.add(b); }
+                if (!bg.isEmpty()) out.add(bg);
+            }
+            return out;
+        }
 
         Block startBlock = byId(cfg.orderStartBlock, palette);
         Block endBlock = byId(cfg.orderEndBlock, palette);
@@ -234,8 +254,8 @@ public final class NoisePlacer {
         // number of steps depends only on max steps + the eligible blocks — not the deviation slider.
         int[] ord = GradientRamp.subsample(
                 GradientRamp.gradientOrder(rgbs, startRgb, endRgb, mode, 1.0, forced), cfg.noiseMaxSteps);
-        List<Block> out = new ArrayList<>();
-        for (int i : ord) out.add(palette.get(i));
+        List<List<Block>> out = new ArrayList<>();
+        for (int i : ord) out.add(List.of(palette.get(i))); // singleton groups (no ties)
         return out;
     }
 

@@ -120,6 +120,10 @@ public final class GradientPlacer {
         int startRgb = rgbOf(startBlock, startBlock);
         int endRgb = rgbOf(level.getBlockState(seg.e()).getBlock(), startBlock);
         Palette chosen = pick(palette, cfg, startRgb, endRgb, front.t());
+        if (chosen == null) { // Pick mode with no numbered blocks
+            if (announce) player.sendOverlayMessage(Component.literal("Gradient: number some blocks (Pick mode)"));
+            return false;
+        }
         place(mc, player, chosen, front);
         return true;
     }
@@ -225,6 +229,7 @@ public final class GradientPlacer {
      */
     private static Palette pick(List<Palette> palette, GradientConfig cfg,
                                 int startRgb, int endRgb, double t) {
+        if (cfg.gradientMode.isPick()) return pickModeChoice(palette, cfg, t);
         int n = palette.size();
         int[] rgbs = new int[n];
         Set<Integer> forced = new HashSet<>(); // must-use (green) blocks bypass the deviation budget
@@ -259,6 +264,31 @@ public final class GradientPlacer {
             }
         }
         return palette.get(cluster.get(RANDOM.nextInt(cluster.size())));
+    }
+
+    /**
+     * Pick mode: distribute exactly the user-numbered blocks (low→high) across the line — no gradient
+     * computed, max-steps/deviation ignored. Chaos still nudges the step; ties are randomised. Returns
+     * null if no numbered block is available.
+     */
+    private static Palette pickModeChoice(List<Palette> palette, GradientConfig cfg, double t) {
+        // Group palette entries by their pick number (low→high).
+        java.util.TreeMap<Integer, List<Palette>> byNumber = new java.util.TreeMap<>();
+        for (Palette p : palette) {
+            Identifier id = BuiltInRegistries.ITEM.getKey(p.block().asItem());
+            int num = id == null ? 0 : cfg.pickNumbers.getOrDefault(id.toString(), 0);
+            if (num > 0) byNumber.computeIfAbsent(num, k -> new ArrayList<>()).add(p);
+        }
+        if (byNumber.isEmpty()) return null;
+        List<List<Palette>> groups = new ArrayList<>(byNumber.values());
+
+        double tc = cfg.curve.apply(t);
+        if (cfg.chaos > 0 && t > 0.0 && t < 1.0 && RANDOM.nextDouble() < cfg.chaos) {
+            double stepFrac = groups.size() > 1 ? 1.0 / (groups.size() - 1) : 0.1;
+            tc = clamp01(RANDOM.nextBoolean() ? tc - stepFrac : tc + stepFrac);
+        }
+        List<Palette> group = groups.get(GradientRamp.rampIndex(groups.size(), tc));
+        return group.get(RANDOM.nextInt(group.size())); // randomise ties
     }
 
     // ---- placement ------------------------------------------------------------------------------

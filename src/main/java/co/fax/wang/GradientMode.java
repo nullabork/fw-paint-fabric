@@ -13,7 +13,8 @@ public enum GradientMode {
     TOP_LIGHT_COLOR("Top % Light Color"),
     TOP_LIGHT("Top % Light"),
     BW_DIFF("B&W Diff"),
-    COLOR_DIFF("Color Diff");
+    COLOR_DIFF("Color Diff"),
+    PICK("Pick");
 
     private final String displayName;
 
@@ -38,6 +39,11 @@ public enum GradientMode {
     /** True when only a fraction of the texture's pixels is analysed (needs the Pixel % slider). */
     public boolean usesPixelPercent() {
         return this == TOP_DARK_COLOR || this == TOP_DARK || this == TOP_LIGHT_COLOR || this == TOP_LIGHT;
+    }
+
+    /** True for the manual "Pick" mode: the order comes from user-assigned numbers, not texture analysis. */
+    public boolean isPick() {
+        return this == PICK;
     }
 
     /** For a "top %" mode: whether to take the lightest pixels (else the darkest). */
