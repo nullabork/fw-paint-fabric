@@ -410,8 +410,17 @@ public class GradientScreen extends Screen {
         int[] used = GradientRamp.subsample(order, activeMaxSteps());
         orderedBlocks = new ArrayList<>();
         for (int idx : used) orderedBlocks.add(nonEx.get(idx)); // distinct valley→peak order for noise
-        int[] seq = used.length == 0 ? new int[0]
-                : GradientRamp.buildSequence(used, cfg.curve, used.length, activeChaos(), new java.util.Random());
+
+        // White rows: on the gradient tab this is the placement SEQUENCE (curve + chaos → repeats/
+        // skips). On the noise tab there's no linear sequence — the noise maps straight onto the
+        // order — so the white list IS the order, matching the preview exactly.
+        int[] seq;
+        if (tab == Tab.NOISE) {
+            seq = used;
+        } else {
+            seq = used.length == 0 ? new int[0]
+                    : GradientRamp.buildSequence(used, cfg.curve, used.length, activeChaos(), new java.util.Random());
+        }
 
         List<BlockPickerPanel.Row> rows = new ArrayList<>();
         whiteOrder.clear();
