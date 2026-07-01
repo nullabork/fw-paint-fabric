@@ -2,10 +2,16 @@
   "schemaVersion": 1,
   "id": "gradient",
   "version": "${version}",
-  "name": "Gradient",
-  "description": "A client-side Fabric mod starter for Minecraft 26.2.",
+  "name": "FW Paint",
+  "description": "Paint block gradients and 3D-noise fills from your inventory — ordered by colour, brightness, texture analysis, or by hand — and placed the multiplayer-safe way.",
   "authors": ["faxwang"],
+  "contact": {
+    "homepage": "https://github.com/nullabork/fw-paint-fabric",
+    "sources": "https://github.com/nullabork/fw-paint-fabric",
+    "issues": "https://github.com/nullabork/fw-paint-fabric/issues"
+  },
   "license": "MIT",
+  "icon": "assets/gradient/icon.png",
   "environment": "client",
   "entrypoints": {
     "client": ["co.fax.wang.Gradient"]
