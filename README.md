@@ -86,19 +86,19 @@ Both keybinds are rebindable under Options → Controls → Key Binds → MISC.
 ## Build / install
 
 ```bash
-./gradlew build       # -> build/libs/gradient-1.0.0.jar  (also runs tests)
+./gradlew build       # -> build/libs/fw-paint-fabric-1.0.2.jar  (also runs tests)
 ./gradlew runClient   # dev Minecraft 26.2 with the mod loaded
 ./gradlew test        # unit tests
 ```
 
 Requires **JDK 25** (Minecraft 26.2). To install into a real instance, drop
-`build/libs/gradient-1.0.0.jar` into a 26.2 Fabric instance's `mods/` folder (it must already
+`build/libs/fw-paint-fabric-1.0.2.jar` into a 26.2 Fabric instance's `mods/` folder (it must already
 contain Fabric API for 26.2). See `fabric-26.2-mod-starter.md` for the 26.2 API notes.
 
 ### Get a pre-built jar
 
 - Attached to each [GitHub Release](../../releases), and to every CI run under the
-  [Actions tab](../../actions) (download the `gradient-jar` artifact).
+  [Actions tab](../../actions) (download the `fw-paint-jar` artifact).
 - Releases are automated: every push builds + tests, and pushing a tag like `v1.0.0` publishes a
   Release with the jar attached (`.github/workflows/build.yml`).
 
