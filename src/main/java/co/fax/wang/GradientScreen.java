@@ -26,7 +26,8 @@ import java.util.Set;
  * <ul>
  *   <li><b>Gradient</b> — block picker (left) + gradient settings (right);</li>
  *   <li><b>Noise Paint</b> — block picker (left) + noise settings (right, placeholder);</li>
- *   <li><b>Settings</b> — pick the gradient/noise tool items, per-tool mode, marker options.</li>
+ *   <li><b>Settings</b> — pick the paint tool item, per-paint-type mode, marker options,
+ *       helper-text position.</li>
  * </ul>
  * The block list is the modular {@link BlockPickerPanel}.
  */
@@ -46,15 +47,14 @@ public class GradientScreen extends Screen {
     private static final int BAR_LINE = 0x60FFFFFF;
     private static final int COL_W_MAX = 200;
     private static final int COL_GAP = 12;
-    private static final int TOOL_LIST_TOP = 100;
+    private static final int TOOL_LIST_TOP = 78;
 
     private enum Tab { GRADIENT, NOISE, SETTINGS }
-    private enum AssignTarget { NONE, GRADIENT, NOISE }
     private enum Assign { NONE, START, END, REQUIRE, EXCLUDE }
 
-    private static final int TOOL_GRAD_BTN_Y = 30;
-    private static final int TOOL_NOISE_BTN_Y = 52;
+    private static final int TOOL_BTN_Y = 30;
     private static final int TOOL_BTN_H = 20;
+    private static final int TOOL_FILTER_Y = 54;
 
     // Picker-tab left column (aligned with the right column's first button at y=30).
     private static final int PICK_SRC_Y = 30;
@@ -84,7 +84,7 @@ public class GradientScreen extends Screen {
     private final List<ToolRow> matches = new ArrayList<>();
     private String filter = "";
     private int toolRowHeight = 12;
-    private AssignTarget assignTarget = AssignTarget.NONE;
+    private boolean assigningTool = false;
 
     public GradientScreen() {
         super(Component.literal("FW Paint"));
@@ -576,19 +576,19 @@ public class GradientScreen extends Screen {
         y += 24;
         cycleButton(rx, y, rw, () -> Component.literal("Debug logging: " + (ConfigManager.get().debug ? "On" : "Off")),
                 () -> ConfigManager.get().debug = !ConfigManager.get().debug);
+        y += 24;
+        addRenderableWidget(Button.builder(Component.literal("Move helper text…"), b -> {
+            if (this.minecraft != null) this.minecraft.setScreenAndShow(new HudPlacementScreen(this));
+        }).bounds(rx, y, rw, 20).build());
 
-        // Left column: two vanilla tool-assign buttons (overlay shows which is armed) + filter + list.
+        // Left column: the paint-tool assign button (overlay shows it's armed) + filter + list.
         int cx = contentX(), w = leftW();
-        String gt = cfg.gradientTool.isEmpty() ? "(none)" : Gradient.toolDisplayName(cfg.gradientTool);
-        String nt = cfg.noiseTool.isEmpty() ? "(none)" : Gradient.toolDisplayName(cfg.noiseTool);
-        addRenderableWidget(Button.builder(Component.literal("Gradient tool: " + gt),
-                b -> assignTarget = assignTarget == AssignTarget.GRADIENT ? AssignTarget.NONE : AssignTarget.GRADIENT)
-                .bounds(cx, TOOL_GRAD_BTN_Y, w, TOOL_BTN_H).build());
-        addRenderableWidget(Button.builder(Component.literal("Noise tool: " + nt),
-                b -> assignTarget = assignTarget == AssignTarget.NOISE ? AssignTarget.NONE : AssignTarget.NOISE)
-                .bounds(cx, TOOL_NOISE_BTN_Y, w, TOOL_BTN_H).build());
+        String pt = cfg.paintTool.isEmpty() ? "(none)" : Gradient.toolDisplayName(cfg.paintTool);
+        addRenderableWidget(Button.builder(Component.literal("Paint tool: " + pt),
+                b -> assigningTool = !assigningTool)
+                .bounds(cx, TOOL_BTN_Y, w, TOOL_BTN_H).build());
 
-        filterBox = new EditBox(this.font, cx, 76, w, 20, Component.literal("Filter"));
+        filterBox = new EditBox(this.font, cx, TOOL_FILTER_Y, w, 20, Component.literal("Filter"));
         filterBox.setHint(Component.literal("Filter items…"));
         filterBox.setMaxLength(64);
         filterBox.setValue(filter);
@@ -657,12 +657,10 @@ public class GradientScreen extends Screen {
         }
         if (tab == Tab.SETTINGS && event.button() == 0) {
             int idx = toolRowAt(event.x(), event.y());
-            if (idx >= 0 && assignTarget != AssignTarget.NONE) {
-                String id = matches.get(idx).id();
-                if (assignTarget == AssignTarget.GRADIENT) ConfigManager.get().gradientTool = id;
-                else ConfigManager.get().noiseTool = id;
+            if (idx >= 0 && assigningTool) {
+                ConfigManager.get().paintTool = matches.get(idx).id();
                 ConfigManager.save();
-                assignTarget = AssignTarget.NONE; // un-arm + refresh the button label
+                assigningTool = false; // un-arm + refresh the button label
                 rebuildWidgets();
                 return true;
             }
@@ -803,12 +801,11 @@ public class GradientScreen extends Screen {
         GradientConfig cfg = ConfigManager.get();
         int cx = contentX(), w = leftW();
 
-        // Darken whichever tool button is armed (drawn over the vanilla button).
-        if (assignTarget == AssignTarget.GRADIENT) g.fill(cx, TOOL_GRAD_BTN_Y, cx + w, TOOL_GRAD_BTN_Y + TOOL_BTN_H, PRESSED_OVERLAY);
-        if (assignTarget == AssignTarget.NOISE) g.fill(cx, TOOL_NOISE_BTN_Y, cx + w, TOOL_NOISE_BTN_Y + TOOL_BTN_H, PRESSED_OVERLAY);
+        // Darken the tool button while it's armed (drawn over the vanilla button).
+        if (assigningTool) g.fill(cx, TOOL_BTN_Y, cx + w, TOOL_BTN_Y + TOOL_BTN_H, PRESSED_OVERLAY);
 
         int top = TOOL_LIST_TOP;
-        String selId = (assignTarget == AssignTarget.GRADIENT) ? cfg.gradientTool : cfg.noiseTool;
+        String selId = cfg.paintTool;
         for (int i = 0; i < matches.size(); i++) {
             int y = top + i * toolRowHeight;
             ToolRow row = matches.get(i);

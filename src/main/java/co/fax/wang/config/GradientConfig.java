@@ -3,6 +3,7 @@ package co.fax.wang.config;
 import co.fax.wang.CurveFunction;
 import co.fax.wang.GradientMode;
 import co.fax.wang.GradientSource;
+import co.fax.wang.PaintType;
 import co.fax.wang.ToolMode;
 
 import java.util.ArrayList;
@@ -14,16 +15,37 @@ import java.util.List;
  */
 public class GradientConfig {
 
-    // ---- tools (the mod is active only while holding one of these items) ------------------------
+    // ---- tool (the mod is active only while holding this item) ----------------------------------
 
-    /** Registry id of the gradient tool item. Empty = none. */
-    public String gradientTool = "";
-    /** Registry id of the noise tool item. Empty = none. */
-    public String noiseTool = "";
+    /** Registry id of the paint tool item. Empty = none. */
+    public String paintTool = "";
 
-    /** Per-tool activation mode (Marker / Place / Disabled). */
+    /** What the tool currently paints — switched in-game with the paint-type keybind. */
+    public PaintType activePaintType = PaintType.GRADIENT;
+
+    /** Per-paint-type activation mode (Marker / Place / Disabled). */
     public ToolMode gradientToolMode = ToolMode.DISABLED;
     public ToolMode noiseToolMode = ToolMode.DISABLED;
+
+    // ---- HUD helper text --------------------------------------------------------------------------
+
+    /** Helper-text position (px from the top-left), movable via the "Move helper text" screen. */
+    public int hudX = 4;
+    public int hudY = 4;
+
+    /** Index into {@link #HUD_INCREMENTS} controlling how far the HUD move buttons nudge. */
+    public int hudIncrementIndex = 0;
+
+    /** Px steps the helper-text placement screen cycles through (transient: not serialized). */
+    public static final transient int[] HUD_INCREMENTS = {50, 20, 10, 1};
+
+    public int hudIncrement() {
+        return HUD_INCREMENTS[Math.floorMod(hudIncrementIndex, HUD_INCREMENTS.length)];
+    }
+
+    public void cycleHudIncrement() {
+        hudIncrementIndex = Math.floorMod(hudIncrementIndex + 1, HUD_INCREMENTS.length);
+    }
 
     // ---- markers --------------------------------------------------------------------------------
 

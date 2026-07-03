@@ -44,8 +44,8 @@ public final class NoisePlacer {
 
     public static void tick(Minecraft mc) {
         if (mc.player == null || mc.level == null || mc.gui.screen() != null
-                || Gradient.heldTool(mc) != Gradient.HeldTool.NOISE
-                || ConfigManager.get().noiseToolMode != ToolMode.PLACE) {
+                || ConfigManager.get().activePaintType != PaintType.NOISE
+                || Gradient.currentMode(mc) != ToolMode.PLACE) {
             lastUseDown = false;
             queue.clear();
             return;

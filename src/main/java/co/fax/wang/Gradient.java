@@ -23,8 +23,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Client entry point. Registers two keybinds (open settings, cycle mode), an in-game HUD status
- * line, and wires the shared {@link ToolMode} state. See fabric-26.2-mod-starter.md for API notes.
+ * Client entry point. Registers three keybinds (open settings, cycle mode, switch paint type), the
+ * in-game HUD helper text, and wires the shared {@link ToolMode}/{@link PaintType} state. See
+ * fabric-26.2-mod-starter.md for API notes.
  */
 public class Gradient implements ClientModInitializer {
 
@@ -42,6 +43,9 @@ public class Gradient implements ClientModInitializer {
         KeyMapping cycleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
                 "key.gradient.cycle", InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_G, KeyMapping.Category.MISC));
+        KeyMapping paintTypeKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+                "key.gradient.paint_type", InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_V, KeyMapping.Category.MISC));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (openKey.consumeClick()) {
@@ -50,6 +54,9 @@ public class Gradient implements ClientModInitializer {
             }
             while (cycleKey.consumeClick()) {
                 cycleMode();
+            }
+            while (paintTypeKey.consumeClick()) {
+                switchPaintType();
             }
             MarkerManager.tick(client);
             GradientPlacer.tick(client);
@@ -71,71 +78,63 @@ public class Gradient implements ClientModInitializer {
         // outline — so our geometry is batched and drawn with the exact same camera (no frame drift).
         LevelRenderEvents.COLLECT_SUBMITS.register(MarkerManager::render);
 
-        // In-game HUD status line (26.2: HudElementRegistry; HudRenderCallback is gone). Shows the
-        // mode for whichever tool is held — and nothing when neither tool is in hand.
+        // In-game HUD helper text (26.2: HudElementRegistry; HudRenderCallback is gone). Two lines
+        // — active paint type on top, mode below — only while the paint tool is held. Position is
+        // configurable (Settings → Move helper text).
         HudElementRegistry.addLast(
                 Identifier.fromNamespaceAndPath(MOD_ID, "mode_status"),
-                (g, deltaTracker) -> {
-                    Minecraft mc = Minecraft.getInstance();
-                    if (mc.player == null || mc.level == null) return; // only while in a world
-                    HeldTool held = heldTool(mc);
-                    if (held == HeldTool.NONE) return; // no tool selected/held → no status
-                    ToolMode mode = currentMode(mc);
-                    String text = "FW Paint — " + held.label + ": " + mode.displayName();
-                    g.text(mc.font, text, 4, 4, mode.color());
-                });
+                (g, deltaTracker) -> HudOverlay.render(g));
 
         LOG.info("{} initialised", MOD_ID);
     }
 
-    /** Which configured tool the player is currently holding. */
-    public enum HeldTool {
-        NONE(""), GRADIENT("Gradient"), NOISE("Noise");
-        public final String label;
-        HeldTool(String label) { this.label = label; }
-    }
-
-    /** The configured tool the player holds in their main hand, or NONE. */
-    public static HeldTool heldTool(Minecraft mc) {
-        if (mc.player == null) return HeldTool.NONE;
+    /** True when the configured paint tool item is in the player's main hand. */
+    public static boolean holdingPaintTool(Minecraft mc) {
+        if (mc.player == null) return false;
+        GradientConfig cfg = ConfigManager.get();
+        if (cfg.paintTool.isEmpty()) return false;
         Identifier id = BuiltInRegistries.ITEM.getKey(mc.player.getMainHandItem().getItem());
-        if (id == null) return HeldTool.NONE;
-        String s = id.toString();
-        GradientConfig cfg = ConfigManager.get();
-        if (!cfg.gradientTool.isEmpty() && cfg.gradientTool.equals(s)) return HeldTool.GRADIENT;
-        if (!cfg.noiseTool.isEmpty() && cfg.noiseTool.equals(s)) return HeldTool.NOISE;
-        return HeldTool.NONE;
+        return id != null && cfg.paintTool.equals(id.toString());
     }
 
-    /** The activation mode of the held tool (DISABLED when none held). */
+    /** The activation mode of the active paint type (DISABLED when the tool isn't held). */
     public static ToolMode currentMode(Minecraft mc) {
+        if (!holdingPaintTool(mc)) return ToolMode.DISABLED;
         GradientConfig cfg = ConfigManager.get();
-        return switch (heldTool(mc)) {
-            case GRADIENT -> cfg.gradientToolMode;
-            case NOISE -> cfg.noiseToolMode;
-            case NONE -> ToolMode.DISABLED;
-        };
+        return cfg.activePaintType == PaintType.NOISE ? cfg.noiseToolMode : cfg.gradientToolMode;
     }
 
-    /** Advance the held tool's mode, persist it, and flash an action-bar message. */
+    /** Advance the active paint type's mode, persist it, and flash an action-bar message. */
     public static void cycleMode() {
         Minecraft mc = Minecraft.getInstance();
-        GradientConfig cfg = ConfigManager.get();
-        HeldTool held = heldTool(mc);
-        ToolMode next;
-        switch (held) {
-            case GRADIENT -> next = cfg.gradientToolMode = cfg.gradientToolMode.next();
-            case NOISE -> next = cfg.noiseToolMode = cfg.noiseToolMode.next();
-            default -> {
-                if (mc.player != null) {
-                    mc.player.sendOverlayMessage(Component.literal("FW Paint: hold a tool to cycle its mode"));
-                }
-                return;
-            }
+        if (!holdingPaintTool(mc)) {
+            overlay(mc, "FW Paint: hold your paint tool to cycle its mode");
+            return;
         }
+        GradientConfig cfg = ConfigManager.get();
+        ToolMode next = (cfg.activePaintType == PaintType.NOISE)
+                ? (cfg.noiseToolMode = cfg.noiseToolMode.next())
+                : (cfg.gradientToolMode = cfg.gradientToolMode.next());
         ConfigManager.save();
+        overlay(mc, "FW Paint — " + cfg.activePaintType.label() + ": " + next.displayName());
+    }
+
+    /** Toggle Gradient ↔ Noise paint. Only works while the paint tool is held; persisted. */
+    public static void switchPaintType() {
+        Minecraft mc = Minecraft.getInstance();
+        if (!holdingPaintTool(mc)) {
+            overlay(mc, "FW Paint: hold your paint tool to switch paint type");
+            return;
+        }
+        GradientConfig cfg = ConfigManager.get();
+        cfg.activePaintType = cfg.activePaintType.next();
+        ConfigManager.save();
+        overlay(mc, "FW Paint — Paint type: " + cfg.activePaintType.label());
+    }
+
+    private static void overlay(Minecraft mc, String msg) {
         if (mc.player != null) {
-            mc.player.sendOverlayMessage(Component.literal("FW Paint — " + held.label + ": " + next.displayName()));
+            mc.player.sendOverlayMessage(Component.literal(msg));
         }
     }
 

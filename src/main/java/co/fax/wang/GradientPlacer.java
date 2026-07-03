@@ -65,10 +65,10 @@ public final class GradientPlacer {
     // ---- input (client tick) --------------------------------------------------------------------
 
     public static void tick(Minecraft mc) {
-        // Only the GRADIENT tool in PLACE mode fills gradients (the noise tool's placement is TBD).
+        // Only Gradient paint in PLACE mode fills gradients (Noise paint has its own placer).
         if (mc.player == null || mc.level == null || mc.gui.screen() != null
-                || Gradient.heldTool(mc) != Gradient.HeldTool.GRADIENT
-                || ConfigManager.get().gradientToolMode != ToolMode.PLACE) {
+                || ConfigManager.get().activePaintType != PaintType.GRADIENT
+                || Gradient.currentMode(mc) != ToolMode.PLACE) {
             lastUseDown = false;
             cooldown = 0;
             return;

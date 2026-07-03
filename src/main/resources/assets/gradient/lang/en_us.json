@@ -1,5 +1,6 @@
 {
   "category.gradient": "Gradient",
   "key.gradient.open": "Open Gradient settings",
-  "key.gradient.cycle": "Cycle Gradient mode"
+  "key.gradient.cycle": "Cycle Gradient mode",
+  "key.gradient.paint_type": "Switch paint type (Gradient/Noise)"
 }
