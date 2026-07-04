@@ -4,6 +4,7 @@ import co.fax.wang.CurveFunction;
 import co.fax.wang.GradientMode;
 import co.fax.wang.GradientSource;
 import co.fax.wang.PaintType;
+import co.fax.wang.SolidMatch;
 import co.fax.wang.ToolMode;
 
 import java.util.ArrayList;
@@ -23,9 +24,10 @@ public class GradientConfig {
     /** What the tool currently paints — switched in-game with the paint-type keybind. */
     public PaintType activePaintType = PaintType.GRADIENT;
 
-    /** Per-paint-type activation mode (Marker / Place / Disabled). */
+    /** Per-paint-type activation mode (Marker / Place / Extrude / Flood 3D / Disabled). */
     public ToolMode gradientToolMode = ToolMode.DISABLED;
     public ToolMode noiseToolMode = ToolMode.DISABLED;
+    public ToolMode solidToolMode = ToolMode.DISABLED;
 
     // ---- HUD helper text --------------------------------------------------------------------------
 
@@ -64,6 +66,13 @@ public class GradientConfig {
 
     /** Where the candidate-block palette is sourced from. */
     public GradientSource source = GradientSource.HOTBAR_AND_INVENTORY;
+
+    /**
+     * Place-time gradient endpoints: true = the real blocks sitting at the markers in the world
+     * ("Markers"); false = exactly the block list's [S]/[E] from the settings screen ("Block list"),
+     * so what's placed matches the preview regardless of what the markers are made of.
+     */
+    public boolean gradientFromMarkers = true;
 
     /** Dithering amount 0..1: 0 = clean (always the next step), higher = more repeat/skip noise. */
     public double chaos = 0.0;
@@ -108,6 +117,15 @@ public class GradientConfig {
     public double noiseChaos = 0.0;
     public int noiseMaxSteps = 16;
     public double noisePixelPercent = 0.5;
+
+    // ---- solid paint ------------------------------------------------------------------------------
+
+    /** How the Solid paint chooses the block it places. */
+    public SolidMatch solidMatch = SolidMatch.SELECTED;
+    /** Item id of the ✓ block placed in "Selected block" match mode. Empty = none. */
+    public String solidBlock = "";
+    /** Item ids excluded from Solid placement (never placed, even on exact match). */
+    public List<String> solidExcludedBlocks = new ArrayList<>();
 
     // ---- misc -----------------------------------------------------------------------------------
 

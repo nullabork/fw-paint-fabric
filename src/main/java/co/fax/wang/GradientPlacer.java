@@ -108,17 +108,32 @@ public final class GradientPlacer {
             return false;
         }
 
+        // Gradient endpoints: the real blocks at the markers, or — when "From: Block list" — the
+        // [S]/[E] endpoints from the settings screen, so placement matches the preview exactly.
+        GradientConfig cfg = ConfigManager.get();
+        Block startBlock = level.getBlockState(seg.s()).getBlock();
+        Block endBlock = level.getBlockState(seg.e()).getBlock();
+        if (!cfg.gradientFromMarkers && !cfg.gradientMode.isPick()) {
+            Block s = Gradient.blockOfItemId(cfg.orderStartBlock);
+            Block e = Gradient.blockOfItemId(cfg.orderEndBlock);
+            if (s == null || e == null) {
+                if (announce) player.sendOverlayMessage(Component.literal(
+                        "Gradient: no [S]/[E] in the block list — open settings (K) or switch to From: Markers"));
+                return false;
+            }
+            startBlock = s;
+            endBlock = e;
+        }
+
         // The start block is the reference for diff-based gradient modes.
-        net.minecraft.world.level.block.Block startBlock = level.getBlockState(seg.s()).getBlock();
         List<Palette> palette = sourcePalette(player, startBlock);
         if (palette.isEmpty()) {
             if (announce) player.sendOverlayMessage(Component.literal("Gradient: no placeable blocks in source"));
             return false;
         }
 
-        GradientConfig cfg = ConfigManager.get();
         int startRgb = rgbOf(startBlock, startBlock);
-        int endRgb = rgbOf(level.getBlockState(seg.e()).getBlock(), startBlock);
+        int endRgb = rgbOf(endBlock, startBlock);
         Palette chosen = pick(palette, cfg, startRgb, endRgb, front.t());
         if (chosen == null) { // Pick mode with no numbered blocks
             if (announce) player.sendOverlayMessage(Component.literal("Gradient: number some blocks (Pick mode)"));
@@ -255,7 +270,8 @@ public final class GradientPlacer {
         int pos = GradientRamp.rampIndex(order.length, tc);
 
         // Tie: randomise among ordered blocks whose gradient position is ~equal to the chosen one.
-        double tie = (cfg.gradientMode == GradientMode.BRIGHTNESS) ? LUM_TIE : COLOR_TIE;
+        // All scalar modes position by a luminance-scale value, so they use the tighter tie.
+        double tie = cfg.gradientMode.usesBrightness() ? LUM_TIE : COLOR_TIE;
         double target = GradientRamp.position(rgbs[order[pos]], startRgb, endRgb, cfg.gradientMode);
         List<Integer> cluster = new ArrayList<>();
         for (int k = 0; k < order.length; k++) {

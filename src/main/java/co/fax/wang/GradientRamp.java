@@ -15,10 +15,12 @@ import java.util.Random;
  * That uses the intermediate blocks without straying from the gradient.
  *
  * <ul>
- *   <li>Brightness mode: position = perceived luminance; deviation = distance outside the
- *       start..end luminance range.</li>
- *   <li>Colour mode: position = projection onto the (end − start) colour axis; deviation =
- *       distance from the block's RGB to the start→end segment in colour space.</li>
+ *   <li>Scalar modes (brightness / top % / diff): position = the mode's scalar (luminance or the
+ *       diff value).</li>
+ *   <li>Colour modes: position = projection onto the (end − start) colour axis.</li>
+ *   <li>Deviation (all modes): distance from the block's RGB to the start→end segment in colour
+ *       space — in scalar modes this filters blocks whose brightness fits but whose colour is
+ *       nothing like the ramp.</li>
  * </ul>
  */
 public final class GradientRamp {
@@ -59,17 +61,14 @@ public final class GradientRamp {
 
     /**
      * Distance of a colour from the gradient — how far it strays. Zero means it sits exactly on the
-     * gradient; larger means more "off-gradient".
+     * gradient; larger means more "off-gradient". For every mode this is the colour distance from
+     * the block's RGB to the start→end segment in RGB space: in the scalar modes (brightness / top
+     * %) the position range already constrains along the gradient, so this catches blocks whose
+     * brightness fits but whose colour is nothing like the ramp. (In the diff modes all values are
+     * greys on the segment, so deviation is ~0 — similarity there is one-dimensional by design.)
      */
     public static double deviation(int rgb, int startRgb, int endRgb, GradientMode mode) {
-        if (mode.usesBrightness()) {
-            double l = luminance(rgb), a = luminance(startRgb), b = luminance(endRgb);
-            double lo = Math.min(a, b), hi = Math.max(a, b);
-            if (l < lo) return lo - l;
-            if (l > hi) return l - hi;
-            return 0.0; // within the start..end luminance range
-        }
-        // colour: distance from the point to the start→end segment in RGB space
+        // distance from the point to the start→end segment in RGB space
         double pr = (rgb >> 16) & 0xFF, pg = (rgb >> 8) & 0xFF, pb = rgb & 0xFF;
         double sr = (startRgb >> 16) & 0xFF, sg = (startRgb >> 8) & 0xFF, sb = startRgb & 0xFF;
         double er = (endRgb >> 16) & 0xFF, eg = (endRgb >> 8) & 0xFF, eb = endRgb & 0xFF;

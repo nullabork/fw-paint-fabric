@@ -1,129 +1,107 @@
-# FW Paint
+# FW Paint (fw-paint-fabric)
 
 A client-side [Fabric](https://fabricmc.net/) mod for **Minecraft 26.2** that paints with blocks —
-build smooth **colour/brightness gradients** or fill regions with **3D noise patterns**, using the
-blocks already in your inventory. It places blocks the legit, multiplayer-safe way (no cheats), so
-it works on servers too.
+solid extrude/fill, colour/brightness gradients, and 3D noise patterns. This README is the
+**developer/build guide**; user-facing documentation lives in
+[`docs/curseforge-description.md`](docs/curseforge-description.md).
 
-![A noise-filled wall](docs/images/noise%20placed.png)
+## Requirements
 
-## What it does
+| What | Version | Notes |
+|---|---|---|
+| JDK | **25** (Temurin recommended) | Minecraft 26.2 requires Java 25 |
+| Minecraft | 26.2 | pinned in `gradle.properties` |
+| Fabric Loader | 0.19.3+ | pinned in `gradle.properties` |
+| Fabric API | 0.152.0+26.2 | compile dep; also needed in any instance running the jar |
+| Fabric Loom | 1.17-SNAPSHOT | Gradle plugin; 26.2 ships unobfuscated, Loom runs non-remapping |
+| Gradle | — | none needed; the wrapper (`gradlew`) downloads itself |
 
-You mark out a region in the world, pick how blocks should be ordered (by colour, brightness, a
-texture analysis, or by hand), and FW Paint fills the region for you:
+Installing JDK 25:
 
-- **Gradient tool** — a smooth blend from one block to another across a line/wall.
-- **Noise tool** — a natural, blotchy pattern driven by a 3D noise field (great for rock, terrain,
-  abstract textures).
+- **Windows**: `winget install EclipseAdoptium.Temurin.25.JDK` — Gradle auto-detects it from
+  `C:\Program Files\Eclipse Adoptium\`. (Gradle's daemon-JVM auto-download does **not** work on
+  Windows, so install the JDK yourself.)
+- **Linux (Debian/Ubuntu)**: `sudo apt install temurin-25-jdk` (Adoptium repo) or download from
+  [adoptium.net](https://adoptium.net). Any JDK 25 works; the build uses a Java 25 toolchain.
 
-Everything is driven from one screen (press **K**), and the blocks it uses come straight from your
-hotbar/inventory.
-
-## How it works
-
-**1. Mark the area.** Hold your tool in **Marker** mode and click to place **start** markers
-(turquoise) and **end** markers (amber). Together they bound the region you want to fill.
-
-![Start and end markers bounding a wall](docs/images/top%20bottom%20makers.png)
-
-**2. Choose your blocks + style.** Open the screen (**K**). The left side lists the blocks from your
-inventory; the right side is the settings. Pick how the gradient is ordered and tune it.
-
-**3. Fill it.** Switch to **Place** mode and click in the marked region — the blocks get placed for
-you, gradient or noise.
-
-The little status line in the corner always tells you which tool you're holding and what it'll do:
-
-![Marker mode](docs/images/markers%20text.png) &nbsp; ![Place mode](docs/images/noise%20place.png) &nbsp; ![Disabled](docs/images/diabled.png)
-
-## The gradient tool
-
-Mark a start and end, and FW Paint orders your blocks into a smooth ramp between them. You control
-how "distance" is measured (average colour, brightness, the colour of a texture's darkest/lightest
-pixels, or how *different* each texture is from the start), the **curve** (ease in/out, steps),
-**chaos** (how often it scatters a step for a hand-made look), and how many distinct steps to use.
-
-![The Gradient tab](docs/images/defineing%20gradient.png)
-
-The result — a clean blend from dark to light, with a touch of chaos so it doesn't look too perfect:
-
-![A finished gradient wall](docs/images/slightly%20chaotic%20gradient.png)
-
-## The noise tool
-
-Instead of a straight line, the noise tool samples a **3D noise field** at each block's position and
-maps it onto your block order — so valleys get one end of the gradient, peaks get the other. Pick a
-noise type (Smooth / Perlin / Fractal), a **seed**, and the feature **scale**, and a live preview
-shows exactly which blocks will appear.
-
-![The Noise Paint tab with live preview](docs/images/define%20noise.png)
-
-In **Place** mode, right-click flood-fills the region bounded by your markers with the noise pattern:
-
-![A noise-filled wall](docs/images/noise%20placed.png)
-
-## Pick mode
-
-For full manual control, set the order mode to **Pick**: select a block and press **+** / **−** to
-number it. Numbered blocks (lowest → highest) become the exact sequence used — no algorithm, just
-your order. Give two blocks the same number and one is chosen at random each placement.
-
-## Keybinds & quick start
-
-| Key | Action |
-|---|---|
-| **K** | Open / close the FW Paint screen |
-| **G** | Cycle the held tool's mode: `Active: Marker` → `Active: Place` → `Disabled` |
-
-1. On the **Settings** tab, set your **Gradient tool** and/or **Noise tool** to any item — the mod is
-   only active while you hold that item.
-2. Hold the tool, **Marker** mode (**G**), and place start (left-click) + end (right-click) markers.
-3. Open the **Gradient** or **Noise Paint** tab, pick your blocks and style.
-4. Switch to **Place** mode and click in the region to fill it.
-
-Both keybinds are rebindable under Options → Controls → Key Binds → MISC.
-
-## Build / install
+## Build
 
 ```bash
-./gradlew build       # -> build/libs/fw-paint-fabric-1.0.2.jar  (also runs tests)
-./gradlew runClient   # dev Minecraft 26.2 with the mod loaded
-./gradlew test        # unit tests
+# Linux / macOS / Git Bash
+./gradlew build
+
+# Windows (cmd / PowerShell)
+gradlew.bat build
 ```
 
-Requires **JDK 25** (Minecraft 26.2). To install into a real instance, drop
-`build/libs/fw-paint-fabric-1.0.2.jar` into a 26.2 Fabric instance's `mods/` folder (it must already
-contain Fabric API for 26.2). See `fabric-26.2-mod-starter.md` for the 26.2 API notes.
+- Output: `build/libs/fw-paint-fabric-<version>.jar` (plus a `-sources` jar).
+- `build` also runs the unit tests; a red build means failing tests, not just compile errors.
+- First build downloads Minecraft + dependencies — allow a few minutes and disk space under
+  `~/.gradle` / `%USERPROFILE%\.gradle`.
 
-### Get a pre-built jar
+## Run the dev client
 
-- Attached to each [GitHub Release](../../releases), and to every CI run under the
-  [Actions tab](../../actions) (download the `fw-paint-jar` artifact).
-- Releases are automated: every push builds + tests, and pushing a tag like `v1.0.0` publishes a
-  Release with the jar attached (`.github/workflows/build.yml`).
+```bash
+./gradlew runClient
+```
 
-## Settings reference
+Launches Minecraft 26.2 with the mod loaded (offline dev session; Realms/auth warnings in the log
+are normal). The dev instance keeps its own world/config under `run/`.
 
-The block list (left) shows your inventory blocks coloured by role: **white** = used, **blue** = not
-picked, **green** = must-use, **red** = excluded. The four buttons assign those roles: **[S]** start,
-**[E]** end, **✓** must-use, **✗** exclude. (In Pick mode they become **+ / − / ✗**.)
+## Tests
 
-| Setting | What it does |
-|---|---|
-| **Source** | Where palette blocks come from: Hotbar / Inventory / both |
-| **Gradient / Order** | How blocks are ordered: Colour, Brightness, Top-% Dark/Light (Colour or Brightness), B&W/Colour Diff, or Pick |
-| **Curve** | Easing of the blend: Linear / Ease In / Ease Out / Ease In-Out / Step |
-| **Deviation** | Gradient: how far a block may stray from the gradient. Noise: chance a placed block varies to a close neighbour |
-| **Chaos** | Chance a placement repeats or skips a step (a hand-made, less-perfect look) |
-| **Max steps** | Cap on the number of distinct blocks used |
-| **Pixel %** | (Top-% modes) the fraction of each texture's pixels analysed |
-| **Noise / Scale / Seed / Lock** | (Noise tool) the noise type, feature size per axis, seed, and axis lock |
+```bash
+./gradlew test
+```
 
-Markers are saved per world + dimension; **Clear Markers** (Settings) wipes them.
+Unit tests cover the pure, Minecraft-free maths: gradient ordering/deviation (`GradientRampTest`),
+texture pixel analysis (`TextureStatsTest`), noise (`NoiseTest`), flood fill (`FloodFillTest`),
+noise placement ordering (`NoisePlacerTest`), and pick numbering (`PicksTest`). Anything touching
+Minecraft classes is exercised via `runClient`, not tests.
 
-## Notes
+## Install the jar into a real instance
 
-- **Placement is multiplayer-safe** — it selects/swaps the block into your hand and sends a normal
-  "use on block" interaction, so the server validates it (Litematica-style). A server with anti-cheat
-  may rate-limit very fast fills.
-- The gradient/noise/texture maths is pure and **unit-tested** (`./gradlew test`).
+Copy `build/libs/fw-paint-fabric-<version>.jar` into the instance's `mods/` folder. The instance
+must be **Fabric for Minecraft 26.2** and already contain **Fabric API** for 26.2. The mod is
+client-side only (`"environment": "client"`); servers need nothing.
+
+## Versioning & releases
+
+- The version lives in `gradle.properties` (`mod_version`) — bump it there; `fabric.mod.json` picks
+  it up at build time.
+- CI (`.github/workflows/build.yml`): every push builds + tests and uploads the jar as the
+  `fw-paint-jar` artifact; pushing a tag like `v1.1.0` publishes a GitHub Release with the jar
+  attached.
+
+## Project layout
+
+```
+src/main/java/co/fax/wang/
+  Gradient.java          client entrypoint: keybinds, HUD, tick wiring, shared state
+  GradientScreen.java    the K screen (Solid / Gradient / Noise Paint / Settings tabs)
+  BlockPickerPanel.java  reusable scrollable block list
+  HudOverlay.java        helper-text rendering    HudPlacementScreen.java  move-the-text screen
+  MarkerManager.java     marker placement/persistence + in-world rendering
+  GradientPlacer.java    gradient line placement  NoisePlacer.java  noise flood fill
+  SolidPlacer.java       solid extrude + 3D fill  BlockPlacement.java  multiplayer-safe placing
+  GradientRamp.java      gradient-order maths     BlockTextures.java / TextureStats.java  texture analysis
+  Noise.java / NoiseType.java / FloodFill.java / Picks.java / CurveFunction.java
+  ToolMode.java / PaintType.java / SolidMatch.java / GradientMode.java / GradientSource.java
+  config/GradientConfig.java + config/ConfigManager.java   Gson config -> config/gradient.json
+src/test/java/co/fax/wang/   unit tests (pure maths only)
+fabric-26.2-mod-starter.md   26.2 API migration notes (worth reading before touching GUI/render code)
+```
+
+## Gotchas
+
+- **26.2 is unobfuscated** — no mappings/remapping; Loom runs in non-remapping mode. Don't add
+  mapping-dependent tooling.
+- 26.2 renamed/replaced several APIs (`GuiGraphics` → `GuiGraphicsExtractor`, `HudRenderCallback` →
+  `HudElementRegistry`, `setScreen` → `setScreenAndShow`, keybind registration via
+  `KeyMappingHelper`) — see `fabric-26.2-mod-starter.md` before porting snippets from older versions.
+- Config is plain Gson with defaults for every field, so adding config fields is
+  backwards-compatible; removing/renaming needs a migration (see `ConfigManager.migrateLegacyTools`).
+
+## License
+
+MIT.

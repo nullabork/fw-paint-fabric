@@ -61,6 +61,7 @@ public class Gradient implements ClientModInitializer {
             MarkerManager.tick(client);
             GradientPlacer.tick(client);
             NoisePlacer.tick(client);
+            SolidPlacer.tick(client);
         });
 
         // While the tool is engaged (Marker or Place mode), suppress vanilla left/right click so it
@@ -101,7 +102,11 @@ public class Gradient implements ClientModInitializer {
     public static ToolMode currentMode(Minecraft mc) {
         if (!holdingPaintTool(mc)) return ToolMode.DISABLED;
         GradientConfig cfg = ConfigManager.get();
-        return cfg.activePaintType == PaintType.NOISE ? cfg.noiseToolMode : cfg.gradientToolMode;
+        return switch (cfg.activePaintType) {
+            case GRADIENT -> cfg.gradientToolMode;
+            case NOISE -> cfg.noiseToolMode;
+            case SOLID -> cfg.solidToolMode;
+        };
     }
 
     /** Advance the active paint type's mode, persist it, and flash an action-bar message. */
@@ -112,14 +117,16 @@ public class Gradient implements ClientModInitializer {
             return;
         }
         GradientConfig cfg = ConfigManager.get();
-        ToolMode next = (cfg.activePaintType == PaintType.NOISE)
-                ? (cfg.noiseToolMode = cfg.noiseToolMode.next())
-                : (cfg.gradientToolMode = cfg.gradientToolMode.next());
+        ToolMode next = switch (cfg.activePaintType) {
+            case GRADIENT -> cfg.gradientToolMode = cfg.gradientToolMode.nextFor(PaintType.GRADIENT);
+            case NOISE -> cfg.noiseToolMode = cfg.noiseToolMode.nextFor(PaintType.NOISE);
+            case SOLID -> cfg.solidToolMode = cfg.solidToolMode.nextFor(PaintType.SOLID);
+        };
         ConfigManager.save();
         overlay(mc, "FW Paint — " + cfg.activePaintType.label() + ": " + next.displayName());
     }
 
-    /** Toggle Gradient ↔ Noise paint. Only works while the paint tool is held; persisted. */
+    /** Cycle Gradient → Noise → Solid paint. Only works while the paint tool is held; persisted. */
     public static void switchPaintType() {
         Minecraft mc = Minecraft.getInstance();
         if (!holdingPaintTool(mc)) {
@@ -141,6 +148,16 @@ public class Gradient implements ClientModInitializer {
     /** True when a tool is held and its mode isn't Disabled. */
     public static boolean toolEngaged() {
         return currentMode(Minecraft.getInstance()) != ToolMode.DISABLED;
+    }
+
+    /** Resolve an item registry id (as stored in config) to its block, or null. */
+    public static net.minecraft.world.level.block.Block blockOfItemId(String id) {
+        if (id == null || id.isEmpty()) return null;
+        Identifier ident = Identifier.tryParse(id);
+        if (ident == null) return null;
+        return BuiltInRegistries.ITEM.getOptional(ident)
+                .map(item -> item instanceof net.minecraft.world.item.BlockItem bi ? bi.getBlock() : null)
+                .orElse(null);
     }
 
     /**

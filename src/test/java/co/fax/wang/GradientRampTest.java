@@ -233,6 +233,27 @@ class GradientRampTest {
                 "pure white lies above the dark→light range and should deviate");
     }
 
+    @Test
+    void brightnessBudgetFiltersOffColorBlocksWithInRangeLuminance() {
+        // Red's luminance (~54) sits inside black→white, but its colour is far from the grey ramp:
+        // the default budget must drop it, a full budget must keep it (that's the slider working).
+        int[] pal = {BLACK, RED, GRAY, WHITE};
+        int[] tight = GradientRamp.gradientOrder(pal, BLACK, WHITE, GradientMode.BRIGHTNESS);
+        assertArrayEquals(new int[]{0, 2, 3}, tight, "off-colour red must be dropped at the default budget");
+        int[] loose = GradientRamp.gradientOrder(pal, BLACK, WHITE, GradientMode.BRIGHTNESS, 1.0);
+        assertArrayEquals(new int[]{0, 1, 2, 3}, loose, "full budget keeps red, ordered by luminance");
+    }
+
+    @Test
+    void fullBudgetStillClipsToTheEndpointRangeInScalarModes() {
+        // The noise tool passes budget 1.0 and relies on the position range as its eligibility gate:
+        // full budget must never re-admit blocks beyond the endpoints.
+        int mid = 0x808080, dark = 0x303030;
+        int[] pal = {WHITE, mid, dark, BLACK};
+        int[] order = GradientRamp.gradientOrder(pal, mid, BLACK, GradientMode.BRIGHTNESS, 1.0);
+        for (int i : order) assertNotEquals(0, i, "white is past the start even at full budget");
+    }
+
     // ---- max steps (a cap, not a target) --------------------------------------------------------
 
     @Test

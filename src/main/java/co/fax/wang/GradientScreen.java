@@ -22,10 +22,11 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * The FW Paint screen (opened by K). Three tabs:
+ * The FW Paint screen (opened by K). Four tabs:
  * <ul>
  *   <li><b>Gradient</b> — block picker (left) + gradient settings (right);</li>
- *   <li><b>Noise Paint</b> — block picker (left) + noise settings (right, placeholder);</li>
+ *   <li><b>Noise Paint</b> — block picker (left) + noise settings (right);</li>
+ *   <li><b>Solid</b> — block picker with ✓ (one block to place) / ✗ (exclusions) + match mode;</li>
  *   <li><b>Settings</b> — pick the paint tool item, per-paint-type mode, marker options,
  *       helper-text position.</li>
  * </ul>
@@ -49,8 +50,9 @@ public class GradientScreen extends Screen {
     private static final int COL_GAP = 12;
     private static final int TOOL_LIST_TOP = 78;
 
-    private enum Tab { GRADIENT, NOISE, SETTINGS }
+    private enum Tab { GRADIENT, NOISE, SOLID, SETTINGS }
     private enum Assign { NONE, START, END, REQUIRE, EXCLUDE }
+    private enum SolidAssign { NONE, TICK, CROSS }
 
     private static final int TOOL_BTN_Y = 30;
     private static final int TOOL_BTN_H = 20;
@@ -60,6 +62,7 @@ public class GradientScreen extends Screen {
     private static final int PICK_SRC_Y = 30;
     private static final int PICK_BTN_Y = 54;
     private static final int PICK_LIST_Y = 78;
+    private static final int LEGEND_H = 26; // two key lines under the list
     private static final int PRESSED_OVERLAY = 0x80000000; // darkens a vanilla button to show "on"
 
     private Assign assign = Assign.NONE;
@@ -67,7 +70,7 @@ public class GradientScreen extends Screen {
     private record SourceBlock(String id, ItemStack stack, Block block) {}
     private record ToolRow(String id, String name) {}
 
-    private static Tab tab = Tab.GRADIENT; // remembered across reopening the screen this session
+    private static Tab tab = Tab.SOLID; // remembered across reopening the screen this session
 
     // Picker tabs (Gradient + Noise) state.
     private BlockPickerPanel picker;
@@ -77,7 +80,25 @@ public class GradientScreen extends Screen {
     private final List<String> whiteOrder = new ArrayList<>(); // ids of the placement sequence (for logging)
     private String previewStartId, previewEndId;
     private String pickSelectedId; // the single selected row in Pick mode (»» chevron)
-    private int modeDescY, deviationDescY, chaosDescY;
+    private int modeDescY, endpointsDescY, deviationDescY, chaosDescY;
+    private int legendY; // y of the yellow button key under the block list
+
+    // Solid tab state.
+    private SolidAssign solidAssign = SolidAssign.NONE;
+    private int solidMatchDescY;
+
+    // Manual double-click tracking for list rows (the vanilla flag only fires on real widgets).
+    private String lastRowClickId;
+    private long lastRowClickMs;
+
+    /** True when this left-click is the second click on the same row within the double-click window. */
+    private boolean isRowDoubleClick(String id) {
+        long now = System.currentTimeMillis();
+        boolean dbl = id.equals(lastRowClickId) && now - lastRowClickMs < 400;
+        lastRowClickId = dbl ? null : id; // reset after a double so a triple doesn't chain
+        lastRowClickMs = now;
+        return dbl;
+    }
 
     // Settings tab state.
     private EditBox filterBox;
@@ -105,6 +126,7 @@ public class GradientScreen extends Screen {
     protected void init() {
         toolRowHeight = this.font.lineHeight + 3;
         if (tab == Tab.GRADIENT || tab == Tab.NOISE) initPickerTab();
+        else if (tab == Tab.SOLID) initSolidTab();
         else initSettingsTab();
 
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
@@ -116,20 +138,25 @@ public class GradientScreen extends Screen {
     // ---- tabs in the title bar ------------------------------------------------------------------
 
     private String tabName(Tab t) {
-        return switch (t) { case GRADIENT -> "Gradient"; case NOISE -> "Noise Paint"; case SETTINGS -> "Settings"; };
+        return switch (t) {
+            case GRADIENT -> "Gradient"; case NOISE -> "Noise Paint";
+            case SOLID -> "Solid"; case SETTINGS -> "Settings";
+        };
     }
     private String tabText(Tab t) { return tab == t ? "» " + tabName(t) : tabName(t); }
 
-    /** Right-aligned tab x positions: returns {x,width} pairs for GRADIENT, NOISE, SETTINGS. */
+    /** Right-aligned tab x positions: {x,width} pairs in bar order SOLID, GRADIENT, NOISE, SETTINGS. */
     private int[] tabXs() {
         int gap = 14;
         int sw = this.font.width(tabText(Tab.SETTINGS));
         int nw = this.font.width(tabText(Tab.NOISE));
         int gw = this.font.width(tabText(Tab.GRADIENT));
+        int ow = this.font.width(tabText(Tab.SOLID));
         int sx = this.width - 10 - sw;
         int nx = sx - gap - nw;
         int gx = nx - gap - gw;
-        return new int[]{gx, gw, nx, nw, sx, sw};
+        int ox = gx - gap - ow;
+        return new int[]{ox, ow, gx, gw, nx, nw, sx, sw};
     }
 
     // ---- Gradient / Noise tab -------------------------------------------------------------------
@@ -169,7 +196,12 @@ public class GradientScreen extends Screen {
                     b -> assign = assign == Assign.EXCLUDE ? Assign.NONE : Assign.EXCLUDE).bounds(cx + bw * 3, PICK_BTN_Y, w - bw * 3, 20).build());
         }
 
-        picker.setBounds(cx, PICK_LIST_Y, w, (this.height - 30) - PICK_LIST_Y);
+        // List capped at 10½ rows (the half row + scrollbar show it scrolls), leaving room for the
+        // yellow button key underneath.
+        int availH = (this.height - 30) - PICK_LIST_Y;
+        int listH = Math.max(BlockPickerPanel.ROW_H, Math.min(BlockPickerPanel.MAX_H, availH - LEGEND_H));
+        picker.setBounds(cx, PICK_LIST_Y, w, listH);
+        legendY = PICK_LIST_Y + listH + 4;
         rebuildDisplayRows();
 
         if (tab == Tab.GRADIENT) initGradientSettings();
@@ -222,6 +254,9 @@ public class GradientScreen extends Screen {
             GradientConfig c = ConfigManager.get(); c.source = c.source.next();
             sourceBlocks = gatherSourceBlocks(); rebuildDisplayRows(); });
         y += 24;
+        cycleButton(rx, y, rw, this::endpointsLabel, () -> {
+            GradientConfig c = ConfigManager.get(); c.gradientFromMarkers = !c.gradientFromMarkers; });
+        y += 24; endpointsDescY = y; y += 12;
 
         addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.deviationBudget,
                 v -> "Deviation: " + Math.round(v * 100) + "%",
@@ -548,6 +583,124 @@ public class GradientScreen extends Screen {
                 previewStartId, previewEndId, whiteOrder.size(), cfg.curve, Math.round(cfg.chaos * 100) / 100.0, whiteOrder);
     }
 
+    // ---- Solid tab ------------------------------------------------------------------------------
+
+    private void initSolidTab() {
+        sourceBlocks = gatherSourceBlocks();
+        picker = new BlockPickerPanel(this.font);
+        int cx = contentX(), w = leftW();
+
+        addRenderableWidget(Button.builder(sourceLabel(), b -> {
+            GradientConfig c = ConfigManager.get(); c.source = c.source.next(); ConfigManager.save();
+            sourceBlocks = gatherSourceBlocks(); rebuildSolidRows(); b.setMessage(sourceLabel());
+        }).bounds(cx, PICK_SRC_Y, w, 20).build());
+
+        // ✓ arms a one-shot single selection; ✗ stays armed until clicked again.
+        int bw2 = w / 2;
+        addRenderableWidget(Button.builder(Component.literal("✓"),
+                b -> solidAssign = solidAssign == SolidAssign.TICK ? SolidAssign.NONE : SolidAssign.TICK)
+                .bounds(cx, PICK_BTN_Y, bw2, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("✗"),
+                b -> solidAssign = solidAssign == SolidAssign.CROSS ? SolidAssign.NONE : SolidAssign.CROSS)
+                .bounds(cx + bw2, PICK_BTN_Y, w - bw2, 20).build());
+
+        int availH = (this.height - 30) - PICK_LIST_Y;
+        int listH = Math.max(BlockPickerPanel.ROW_H, Math.min(BlockPickerPanel.MAX_H, availH - LEGEND_H));
+        picker.setBounds(cx, PICK_LIST_Y, w, listH);
+        legendY = PICK_LIST_Y + listH + 4;
+        rebuildSolidRows();
+
+        // Right column: how the placed block is chosen.
+        int rx = rightX(), rw = rightW();
+        int y = 30;
+        cycleButton(rx, y, rw, this::matchLabel, () -> {
+            GradientConfig c = ConfigManager.get(); c.solidMatch = c.solidMatch.next();
+            rebuildSolidRows(); // the ✓ row gains/loses its strikethrough with the mode
+        });
+        y += 24; solidMatchDescY = y;
+    }
+
+    /** Rows: ✓ block green (at most one), excluded red at the bottom, the rest white. The ✓ row is
+     *  struck through when the match mode isn't "Selected block" (the selection is inactive). */
+    private void rebuildSolidRows() {
+        if (picker == null) return;
+        GradientConfig cfg = ConfigManager.get();
+        Set<String> excluded = new HashSet<>(cfg.solidExcludedBlocks);
+        boolean selectionActive = cfg.solidMatch == SolidMatch.SELECTED;
+        List<BlockPickerPanel.Row> rows = new ArrayList<>();
+        for (SourceBlock sb : sourceBlocks) {
+            if (excluded.contains(sb.id())) continue;
+            boolean sel = sb.id().equals(cfg.solidBlock);
+            String prefix = (sel && !selectionActive) ? "§m" : "";
+            rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), sel ? GREEN : WHITE, sel ? " ✓" : "", prefix));
+        }
+        for (SourceBlock sb : sourceBlocks) {
+            if (excluded.contains(sb.id())) rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), RED, "", ""));
+        }
+        picker.setRows(rows);
+    }
+
+    /**
+     * Solid-list clicks. Armed ✓ = one-shot single select; armed ✗ = toggle exclusion (stays armed).
+     * Shortcuts: double-click un-excludes / toggles the ✓; middle-click un-ticks / toggles exclusion.
+     */
+    private boolean handleSolidRowClick(String id, int button, boolean doubled) {
+        GradientConfig cfg = ConfigManager.get();
+        if (button == 2) { // middle: ✓ → neutral, neutral ↔ excluded
+            if (id.equals(cfg.solidBlock)) cfg.solidBlock = "";
+            else if (!cfg.solidExcludedBlocks.remove(id)) cfg.solidExcludedBlocks.add(id);
+        } else if (doubled && button == 0 && solidAssign == SolidAssign.NONE) {
+            // double: excluded → neutral, ✓ → neutral, neutral → ✓
+            if (cfg.solidExcludedBlocks.contains(id)) cfg.solidExcludedBlocks.remove(id);
+            else if (id.equals(cfg.solidBlock)) cfg.solidBlock = "";
+            else cfg.solidBlock = id;
+        } else if (button == 0 && solidAssign == SolidAssign.TICK) {
+            cfg.solidBlock = id; // single selection — replaces any previous ✓
+            cfg.solidExcludedBlocks.remove(id);
+            solidAssign = SolidAssign.NONE; // ✓ toggles itself off after one pick
+            lastRowClickId = null; // armed action — don't let a follow-up click read as a double
+        } else if (button == 0 && solidAssign == SolidAssign.CROSS) {
+            if (!cfg.solidExcludedBlocks.remove(id)) {
+                cfg.solidExcludedBlocks.add(id);
+                if (id.equals(cfg.solidBlock)) cfg.solidBlock = "";
+            }
+            lastRowClickId = null;
+        } else {
+            return false;
+        }
+        ConfigManager.save();
+        rebuildSolidRows();
+        return true;
+    }
+
+    private Component matchLabel() {
+        return Component.literal("Match: " + ConfigManager.get().solidMatch.displayName());
+    }
+
+    private String matchDescription() {
+        return switch (ConfigManager.get().solidMatch) {
+            case SELECTED -> "Places the ✓ block from the list";
+            case EXACT -> "Places exactly the block you click";
+            case CLOSEST_COLOR -> "Closest colour to the clicked block";
+            case CLOSEST_BRIGHTNESS -> "Closest brightness to the clicked";
+        };
+    }
+
+    private void renderSolidTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        if (picker != null) picker.render(g, mouseX, mouseY);
+        int cx = contentX(), bw2 = leftW() / 2;
+        if (solidAssign == SolidAssign.TICK) g.fill(cx, PICK_BTN_Y, cx + bw2, PICK_BTN_Y + 20, PRESSED_OVERLAY);
+        if (solidAssign == SolidAssign.CROSS) g.fill(cx + bw2, PICK_BTN_Y, cx + leftW(), PICK_BTN_Y + 20, PRESSED_OVERLAY);
+        renderPickerLegend(g);
+        GradientConfig cfg = ConfigManager.get();
+        int rx = rightX(), rw = rightW();
+        g.text(this.font, this.font.plainSubstrByWidth(matchDescription(), rw), rx, solidMatchDescY, YELLOW);
+        if (cfg.solidMatch == SolidMatch.SELECTED) {
+            String name = cfg.solidBlock.isEmpty() ? "(none)" : Gradient.toolDisplayName(cfg.solidBlock);
+            g.text(this.font, this.font.plainSubstrByWidth("Block: " + name, rw), rx, solidMatchDescY + 12, YELLOW);
+        }
+    }
+
     // ---- Settings tab ---------------------------------------------------------------------------
 
     private void initSettingsTab() {
@@ -556,10 +709,13 @@ public class GradientScreen extends Screen {
         int y = 30;
 
         cycleButton(rx, y, rw, () -> Component.literal("Gradient mode: " + cfg.gradientToolMode.displayName()),
-                () -> { ConfigManager.get().gradientToolMode = ConfigManager.get().gradientToolMode.next(); });
+                () -> { GradientConfig c = ConfigManager.get(); c.gradientToolMode = c.gradientToolMode.nextFor(PaintType.GRADIENT); });
         y += 24;
         cycleButton(rx, y, rw, () -> Component.literal("Noise mode: " + cfg.noiseToolMode.displayName()),
-                () -> { ConfigManager.get().noiseToolMode = ConfigManager.get().noiseToolMode.next(); });
+                () -> { GradientConfig c = ConfigManager.get(); c.noiseToolMode = c.noiseToolMode.nextFor(PaintType.NOISE); });
+        y += 24;
+        cycleButton(rx, y, rw, () -> Component.literal("Solid mode: " + cfg.solidToolMode.displayName()),
+                () -> { GradientConfig c = ConfigManager.get(); c.solidToolMode = c.solidToolMode.nextFor(PaintType.SOLID); });
         y += 24;
 
         addRenderableWidget(new ConfigSlider(rx, y, rw, distToSlider(cfg.maxMarkerDistance),
@@ -628,22 +784,48 @@ public class GradientScreen extends Screen {
     public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
         if (event.y() < BAR_H && event.button() == 0) {
             int[] xs = tabXs();
-            if (event.x() >= xs[0] && event.x() <= xs[0] + xs[1]) { setTab(Tab.GRADIENT); return true; }
-            if (event.x() >= xs[2] && event.x() <= xs[2] + xs[3]) { setTab(Tab.NOISE); return true; }
-            if (event.x() >= xs[4] && event.x() <= xs[4] + xs[5]) { setTab(Tab.SETTINGS); return true; }
+            if (event.x() >= xs[0] && event.x() <= xs[0] + xs[1]) { setTab(Tab.SOLID); return true; }
+            if (event.x() >= xs[2] && event.x() <= xs[2] + xs[3]) { setTab(Tab.GRADIENT); return true; }
+            if (event.x() >= xs[4] && event.x() <= xs[4] + xs[5]) { setTab(Tab.NOISE); return true; }
+            if (event.x() >= xs[6] && event.x() <= xs[6] + xs[7]) { setTab(Tab.SETTINGS); return true; }
         }
         if (super.mouseClicked(event, doubled)) return true;
-        if ((tab == Tab.GRADIENT || tab == Tab.NOISE) && picker != null
-                && (event.button() == 0 || event.button() == 1)) {
+        if ((tab == Tab.GRADIENT || tab == Tab.NOISE || tab == Tab.SOLID) && picker != null
+                && event.button() >= 0 && event.button() <= 2) {
             String id = picker.rowIdAt(event.x(), event.y());
             if (id == null) return false;
+            if (tab == Tab.SOLID) {
+                boolean dbl = event.button() == 0 && (doubled || isRowDoubleClick(id));
+                return handleSolidRowClick(id, event.button(), dbl);
+            }
             GradientConfig cfg = ConfigManager.get();
-            // Pick mode: clicking a row selects it (one at a time); +/−/✗ buttons act on the selection.
+            // Pick mode: clicking a row selects it AND adjusts its number — left +1, right −1
+            // (reaching 0 removes the number). The +/−/✗ buttons still act on the selection.
             if (activeMode().isPick()) {
-                if (event.button() == 0) { pickSelectedId = id; rebuildDisplayRows(); }
+                pickSelectedId = id;
+                if (event.button() == 0) pickAdjust(1);
+                else if (event.button() == 1) pickAdjust(-1);
+                else rebuildDisplayRows(); // middle: just select
+                return true;
+            }
+            if (event.button() == 2) { // middle: ✓ → neutral, neutral ↔ excluded
+                if (cfg.requiredBlocks.contains(id)) cfg.requiredBlocks.remove(id);
+                else if (!cfg.excludedBlocks.remove(id)) cfg.excludedBlocks.add(id);
+                ConfigManager.save();
+                rebuildDisplayRows();
+                return true;
+            }
+            boolean dbl = event.button() == 0 && (doubled || isRowDoubleClick(id));
+            if (dbl && assign == Assign.NONE) {
+                // double: excluded → neutral, ✓ → neutral, neutral → ✓ (must-use)
+                if (cfg.excludedBlocks.contains(id)) cfg.excludedBlocks.remove(id);
+                else if (!cfg.requiredBlocks.remove(id)) cfg.requiredBlocks.add(id);
+                ConfigManager.save();
+                rebuildDisplayRows();
                 return true;
             }
             if (event.button() == 0 && assign != Assign.NONE) {
+                lastRowClickId = null; // armed action — don't let a quick follow-up read as a double
                 switch (assign) {
                     case START -> { previewStartId = id; assign = Assign.NONE; rebuildDisplayRows(); }
                     case END -> { previewEndId = id; assign = Assign.NONE; rebuildDisplayRows(); }
@@ -670,7 +852,8 @@ public class GradientScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if ((tab == Tab.GRADIENT || tab == Tab.NOISE) && picker != null && picker.mouseScrolled(mouseX, mouseY, scrollY)) {
+        if ((tab == Tab.GRADIENT || tab == Tab.NOISE || tab == Tab.SOLID)
+                && picker != null && picker.mouseScrolled(mouseX, mouseY, scrollY)) {
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
@@ -681,6 +864,14 @@ public class GradientScreen extends Screen {
     private Component gradientLabel() { return Component.literal("Gradient: " + ConfigManager.get().gradientMode.displayName()); }
     private Component curveLabel() { return Component.literal("Curve: " + ConfigManager.get().curve.displayName()); }
     private Component sourceLabel() { return Component.literal("Source: " + ConfigManager.get().source.displayName()); }
+    private Component endpointsLabel() {
+        return Component.literal("From: " + (ConfigManager.get().gradientFromMarkers ? "Markers" : "Block list"));
+    }
+    private String endpointsDescription() {
+        return ConfigManager.get().gradientFromMarkers
+                ? "Ends = the real blocks at the markers"
+                : "Places exactly the preview list";
+    }
     private Component clearMarkersLabel() {
         return Component.literal("Clear Markers (" + (MarkerManager.startMarkers.size() + MarkerManager.endMarkers.size()) + ")");
     }
@@ -718,6 +909,7 @@ public class GradientScreen extends Screen {
         renderTitleBar(g);
         if (tab == Tab.GRADIENT) renderGradientTab(g, mouseX, mouseY);
         else if (tab == Tab.NOISE) renderNoiseTab(g, mouseX, mouseY);
+        else if (tab == Tab.SOLID) renderSolidTab(g, mouseX, mouseY);
         else renderSettingsTab(g, mouseX, mouseY);
     }
 
@@ -727,9 +919,10 @@ public class GradientScreen extends Screen {
         int textY = (BAR_H - this.font.lineHeight) / 2 + 1;
         g.text(this.font, "FW Paint", 8, textY, WHITE);
         int[] xs = tabXs();
-        g.text(this.font, tabText(Tab.GRADIENT), xs[0], textY, tab == Tab.GRADIENT ? WHITE : GREY);
-        g.text(this.font, tabText(Tab.NOISE), xs[2], textY, tab == Tab.NOISE ? WHITE : GREY);
-        g.text(this.font, tabText(Tab.SETTINGS), xs[4], textY, tab == Tab.SETTINGS ? WHITE : GREY);
+        g.text(this.font, tabText(Tab.SOLID), xs[0], textY, tab == Tab.SOLID ? WHITE : GREY);
+        g.text(this.font, tabText(Tab.GRADIENT), xs[2], textY, tab == Tab.GRADIENT ? WHITE : GREY);
+        g.text(this.font, tabText(Tab.NOISE), xs[4], textY, tab == Tab.NOISE ? WHITE : GREY);
+        g.text(this.font, tabText(Tab.SETTINGS), xs[6], textY, tab == Tab.SETTINGS ? WHITE : GREY);
     }
 
     /** Darken the active assign button (drawn over the vanilla button) to show it's toggled on. */
@@ -738,11 +931,31 @@ public class GradientScreen extends Screen {
         g.fill(assignBtnX(), PICK_BTN_Y, assignBtnX() + assignBtnW(), PICK_BTN_Y + 20, PRESSED_OVERLAY);
     }
 
+    /** Yellow key under the block list explaining the picker buttons (or Pick-mode clicks). */
+    private void renderPickerLegend(GuiGraphicsExtractor g) {
+        int cx = contentX(), w = leftW();
+        String l1, l2;
+        if (tab == Tab.SOLID) {
+            l1 = "✓ block to place · ✗ exclude";
+            l2 = "Dbl-click: ✓ · middle-click: ✗";
+        } else if (activeMode().isPick()) {
+            l1 = "Click row: +1 · right-click: −1";
+            l2 = "+/− adjust selected · ✗ clear number";
+        } else {
+            l1 = "[S] start block · [E] end block";
+            l2 = "✓ must use · ✗ exclude";
+        }
+        g.text(this.font, this.font.plainSubstrByWidth(l1, w), cx, legendY, YELLOW);
+        g.text(this.font, this.font.plainSubstrByWidth(l2, w), cx, legendY + 11, YELLOW);
+    }
+
     private void renderGradientTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         if (picker != null) picker.render(g, mouseX, mouseY);
         renderAssignOverlay(g);
+        renderPickerLegend(g);
         int rx = rightX(), rw = rightW();
         g.text(this.font, this.font.plainSubstrByWidth(modeDescription(), rw), rx, modeDescY, YELLOW);
+        g.text(this.font, this.font.plainSubstrByWidth(endpointsDescription(), rw), rx, endpointsDescY, YELLOW);
         g.text(this.font, this.font.plainSubstrByWidth("Max colour distance from the gradient", rw), rx, deviationDescY, YELLOW);
         g.text(this.font, this.font.plainSubstrByWidth("Chance to repeat or skip a step", rw), rx, chaosDescY, YELLOW);
     }
@@ -750,6 +963,7 @@ public class GradientScreen extends Screen {
     private void renderNoiseTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         if (picker != null) picker.render(g, mouseX, mouseY);
         renderAssignOverlay(g);
+        renderPickerLegend(g);
         int rx = rightX(), rw = rightW();
         g.text(this.font, this.font.plainSubstrByWidth(modeDescription(), rw), rx, noiseModeDescY, YELLOW);
         g.text(this.font, this.font.plainSubstrByWidth("Chance a block varies to a close one", rw), rx, noiseDevDescY, YELLOW);

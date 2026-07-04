@@ -6,7 +6,8 @@ package co.fax.wang;
  */
 public enum PaintType {
     GRADIENT("Gradient"),
-    NOISE("Noise");
+    NOISE("Noise"),
+    SOLID("Solid");
 
     private final String label;
 
@@ -18,7 +19,7 @@ public enum PaintType {
         return label;
     }
 
-    /** The other paint type (two-entry toggle, written as a wrap so more types can be added). */
+    /** The next paint type, wrapping. */
     public PaintType next() {
         PaintType[] all = values();
         return all[(ordinal() + 1) % all.length];
