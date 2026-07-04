@@ -1,5 +1,7 @@
 # FW Paint
 
+Open source (MIT) — [github.com/nullabork/fw-paint-fabric](https://github.com/nullabork/fw-paint-fabric)
+
 **Paint with blocks.** FW Paint is a client-side Fabric mod with three block-painting tools — **Solid**
 (extrude walls and fill volumes), **Gradient** (smooth colour/brightness blends), and **Noise** (natural,
 blotchy 3D patterns) — all using the blocks already in your inventory. Placement is done the legit,
