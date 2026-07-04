@@ -14,8 +14,19 @@ import java.util.List;
  */
 public final class BlockPickerPanel {
 
-    /** One list entry: the stack, its id, a text colour, a tag (e.g. " [S]"), and a name prefix (Pick #). */
-    public record Row(net.minecraft.world.item.ItemStack stack, String id, int color, String tag, String prefix) {}
+    /**
+     * One list entry: the stack, its id, a text colour, a tag (e.g. " [S]"), a name prefix (Pick #),
+     * and optional extra stacks (a step's band-variation alternates, drawn as icons on the right).
+     */
+    public record Row(net.minecraft.world.item.ItemStack stack, String id, int color, String tag,
+                      String prefix, List<net.minecraft.world.item.ItemStack> extras) {
+        public Row(net.minecraft.world.item.ItemStack stack, String id, int color, String tag, String prefix) {
+            this(stack, id, color, tag, prefix, List.of());
+        }
+    }
+
+    /** Most alternate icons drawn per row (the rest exist, they just aren't shown). */
+    private static final int MAX_EXTRAS = 4;
 
     public static final int ROW_H = 18;
     /** Height cap: 10½ rows — the half-cut row signals the list scrolls even before the bar shows. */
@@ -69,9 +80,15 @@ public final class BlockPickerPanel {
             boolean hover = mouseX >= x && mouseX <= x + w && mouseY >= ry && mouseY < ry + ROW_H;
             if (hover) g.fill(x, ry, x + w, ry + ROW_H, HOVER_BG);
             g.item(row.stack(), x + 1, ry + 1);
+            int nExtras = Math.min(MAX_EXTRAS, row.extras().size());
+            int extrasW = nExtras > 0 ? nExtras * 17 + 4 : 0;
             String name = row.prefix() + row.stack().getHoverName().getString();
-            String label = font.plainSubstrByWidth(name, w - 26 - font.width(row.tag())) + row.tag();
+            String label = font.plainSubstrByWidth(name, w - 26 - font.width(row.tag()) - extrasW) + row.tag();
             g.text(font, label, x + 20, ry + 5, row.color());
+            // The step's swappable alternates (band variation), right-aligned before the scrollbar.
+            for (int e = 0; e < nExtras; e++) {
+                g.item(row.extras().get(e), x + w - 3 - (nExtras - e) * 17, ry + 1);
+            }
         }
         g.disableScissor();
 

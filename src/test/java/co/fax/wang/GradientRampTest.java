@@ -3,6 +3,7 @@ package co.fax.wang;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -252,6 +253,40 @@ class GradientRampTest {
         int[] pal = {WHITE, mid, dark, BLACK};
         int[] order = GradientRamp.gradientOrder(pal, mid, BLACK, GradientMode.BRIGHTNESS, 1.0);
         for (int i : order) assertNotEquals(0, i, "white is past the start even at full budget");
+    }
+
+    // ---- band variation (groups of swappable similar blocks per step) ----------------------------
+
+    @Test
+    void zeroVariationGivesSingletonGroups() {
+        int[] pal = {BLACK, 0x404040, GRAY, 0xC0C0C0, WHITE};
+        int[] steps = GradientRamp.gradientOrder(pal, BLACK, WHITE, GradientMode.BRIGHTNESS, 1.0);
+        for (int[] g : GradientRamp.bandGroups(pal, steps, steps, GradientMode.BRIGHTNESS, 0.0)) {
+            assertEquals(1, g.length, "variation 0 must be a clean, deterministic gradient");
+        }
+    }
+
+    @Test
+    void variationAddsOnlyCloseBlocksAndNeverChangesSteps() {
+        // 0x404040 and 0x484848 are near-identical greys; WHITE is far from both.
+        int[] pal = {BLACK, 0x404040, 0x484848, WHITE};
+        int[] steps = {0, 1, 3}; // pretend max-steps folded 0x484848 out of the ramp
+        List<int[]> groups = GradientRamp.bandGroups(pal, steps, new int[]{0, 1, 2, 3},
+                GradientMode.BRIGHTNESS, 0.1); // threshold ≈ 12.75 luminance
+        assertEquals(steps.length, groups.size(), "variation must never add or remove steps");
+        assertEquals(1, groups.get(0).length, "nothing is close to black");
+        assertArrayEquals(new int[]{1, 2}, groups.get(1), "the dropped near-grey joins its step's band");
+        assertEquals(1, groups.get(2).length, "nothing is close to white");
+    }
+
+    @Test
+    void groupsAlwaysContainTheirOwnStepFirst() {
+        int[] pal = {PINK, MIDGREEN, GREEN};
+        int[] steps = GradientRamp.gradientOrder(pal, PINK, GREEN, GradientMode.COLOR);
+        List<int[]> groups = GradientRamp.bandGroups(pal, steps, steps, GradientMode.COLOR, 1.0);
+        for (int i = 0; i < steps.length; i++) {
+            assertEquals(steps[i], groups.get(i)[0], "a step is always its own group's first member");
+        }
     }
 
     // ---- max steps (a cap, not a target) --------------------------------------------------------

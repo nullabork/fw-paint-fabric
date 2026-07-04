@@ -80,7 +80,7 @@ public class GradientScreen extends Screen {
     private final List<String> whiteOrder = new ArrayList<>(); // ids of the placement sequence (for logging)
     private String previewStartId, previewEndId;
     private String pickSelectedId; // the single selected row in Pick mode (»» chevron)
-    private int modeDescY, endpointsDescY, deviationDescY, chaosDescY;
+    private int modeDescY, endpointsDescY, deviationDescY, chaosDescY, stepWobbleDescY;
     private int legendY; // y of the yellow button key under the block list
 
     // Solid tab state.
@@ -259,7 +259,7 @@ public class GradientScreen extends Screen {
         y += 24; endpointsDescY = y; y += 12;
 
         addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.deviationBudget,
-                v -> "Deviation: " + Math.round(v * 100) + "%",
+                v -> "Variation: " + Math.round(v * 100) + "%",
                 v -> { ConfigManager.get().deviationBudget = v; rebuildDisplayRows(); }));
         y += 24; deviationDescY = y; y += 12;
 
@@ -267,6 +267,11 @@ public class GradientScreen extends Screen {
                 v -> "Chaos: " + Math.round(v * 100) + "%",
                 v -> { ConfigManager.get().chaos = v; rebuildDisplayRows(); }));
         y += 24; chaosDescY = y; y += 12;
+
+        addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.stepWobble,
+                v -> "Step length: " + Math.round(v * 100) + "%",
+                v -> ConfigManager.get().stepWobble = v));
+        y += 24; stepWobbleDescY = y; y += 12;
 
         addRenderableWidget(new ConfigSlider(rx, y, rw, stepsToSlider(cfg.maxSteps),
                 v -> "Max steps: " + sliderToSteps(v),
@@ -331,7 +336,7 @@ public class GradientScreen extends Screen {
 
         // Gradient shaping for the noise tool (its own values, separate from the gradient tool).
         addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.noiseDeviation,
-                v -> "Deviation: " + Math.round(v * 100) + "%",
+                v -> "Variation: " + Math.round(v * 100) + "%",
                 v -> { ConfigManager.get().noiseDeviation = v; rebuildDisplayRows(); }));
         y += 24; noiseDevDescY = y; y += 12;
         addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.noiseChaos,
@@ -390,16 +395,12 @@ public class GradientScreen extends Screen {
         return tab == Tab.NOISE ? c.noiseGradientMode : c.gradientMode;
     }
     /**
-     * Budget used to filter eligible blocks when building the order. The gradient tool filters by its
-     * deviation slider; the noise tool does NOT (noise deviation is a placement-time variation, not a
-     * step-count filter), so it uses a full budget — every range-eligible block is a candidate step.
+     * Budget used to filter eligible blocks when building the order. The gradient tool uses the
+     * FIXED sanity budget (its Variation slider widens step bands, it never gates steps); the noise
+     * tool uses a full budget — every range-eligible block is a candidate step.
      */
     private double orderingBudget() {
-        return tab == Tab.NOISE ? 1.0 : ConfigManager.get().deviationBudget;
-    }
-    private double activeChaos() {
-        GradientConfig c = ConfigManager.get();
-        return tab == Tab.NOISE ? c.noiseChaos : c.chaos;
+        return tab == Tab.NOISE ? 1.0 : GradientRamp.STEP_ELIGIBILITY_BUDGET;
     }
     private int activeMaxSteps() {
         GradientConfig c = ConfigManager.get();
@@ -446,16 +447,24 @@ public class GradientScreen extends Screen {
         orderedBlocks = new ArrayList<>();
         for (int idx : used) orderedBlocks.add(nonEx.get(idx)); // distinct valley→peak order for noise
 
-        // White rows: on the gradient tab this is the placement SEQUENCE (curve + chaos → repeats/
-        // skips). On the noise tab there's no linear sequence — the noise maps straight onto the
-        // order — so the white list IS the order, matching the preview exactly.
-        int[] seq;
-        if (tab == Tab.NOISE) {
-            seq = used;
-        } else {
-            seq = used.length == 0 ? new int[0]
-                    : GradientRamp.buildSequence(used, cfg.curve, used.length, activeChaos(), new java.util.Random());
+        // Each step's band-variation group (its swappable similar blocks), shown as icons on the
+        // step's row — both tabs, each using its own Variation slider.
+        double variation = tab == Tab.NOISE ? cfg.noiseDeviation : cfg.deviationBudget;
+        java.util.Map<Integer, List<ItemStack>> extrasByStep = new java.util.HashMap<>();
+        List<int[]> groups = GradientRamp.bandGroups(rgbs, used, order, mode, variation);
+        for (int i = 0; i < used.length; i++) {
+            List<ItemStack> ex = new ArrayList<>();
+            for (int member : groups.get(i)) {
+                if (member != used[i]) ex.add(nonEx.get(member).stack());
+            }
+            if (!ex.isEmpty()) extrasByStep.put(used[i], ex);
         }
+
+        // White rows: the distinct gradient STEPS, start→end — one row per step, matching exactly
+        // what placement distributes across the fill. (The curve/chaos shape how many cells each
+        // step gets in-world, which depends on the marker distance — they never add, remove, or
+        // reorder steps, so they don't belong in this list.)
+        int[] seq = used;
 
         List<BlockPickerPanel.Row> rows = new ArrayList<>();
         whiteOrder.clear();
@@ -466,7 +475,8 @@ public class GradientScreen extends Screen {
             SourceBlock sb = nonEx.get(idx);
             String tag = (j == 0) ? " [S]" : (j == seq.length - 1 && seq.length > 1) ? " [E]" : "";
             int color = required.contains(sb.id()) ? GREEN : WHITE;
-            rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), color, tag, ""));
+            List<ItemStack> extras = extrasByStep.getOrDefault(idx, List.of());
+            rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), color, tag, "", extras));
             whiteOrder.add(sb.id());
         }
         whiteCount = seq.length;
@@ -956,8 +966,9 @@ public class GradientScreen extends Screen {
         int rx = rightX(), rw = rightW();
         g.text(this.font, this.font.plainSubstrByWidth(modeDescription(), rw), rx, modeDescY, YELLOW);
         g.text(this.font, this.font.plainSubstrByWidth(endpointsDescription(), rw), rx, endpointsDescY, YELLOW);
-        g.text(this.font, this.font.plainSubstrByWidth("Max colour distance from the gradient", rw), rx, deviationDescY, YELLOW);
+        g.text(this.font, this.font.plainSubstrByWidth("Similar blocks swap within each step", rw), rx, deviationDescY, YELLOW);
         g.text(this.font, this.font.plainSubstrByWidth("Chance to repeat or skip a step", rw), rx, chaosDescY, YELLOW);
+        g.text(this.font, this.font.plainSubstrByWidth("Chance steps run longer or shorter", rw), rx, stepWobbleDescY, YELLOW);
     }
 
     private void renderNoiseTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
@@ -966,7 +977,7 @@ public class GradientScreen extends Screen {
         renderPickerLegend(g);
         int rx = rightX(), rw = rightW();
         g.text(this.font, this.font.plainSubstrByWidth(modeDescription(), rw), rx, noiseModeDescY, YELLOW);
-        g.text(this.font, this.font.plainSubstrByWidth("Chance a block varies to a close one", rw), rx, noiseDevDescY, YELLOW);
+        g.text(this.font, this.font.plainSubstrByWidth("Similar blocks swap within each step", rw), rx, noiseDevDescY, YELLOW);
         g.text(this.font, this.font.plainSubstrByWidth("Chance to repeat or skip a step", rw), rx, noiseChaosDescY, YELLOW);
         renderNoisePreview(g);
     }
@@ -983,7 +994,7 @@ public class GradientScreen extends Screen {
         GradientConfig cfg = ConfigManager.get();
         long seed = noiseSeedLong();
         int cells = Math.max(1, rw / 16);                       // square-ish grid sized to the column
-        int rows = Math.max(1, Math.min(cells, (this.height - 30 - gridY) / 16));
+        int rows = Math.max(1, Math.min(cells, (this.height - 30 - gridY - 12) / 16));
         for (int gz = 0; gz < rows; gz++) {
             for (int gx = 0; gx < cells; gx++) {
                 // Top-down (XZ) slice at y=0; drag the grid to pan. Noise.sample is equalised so the
@@ -994,6 +1005,8 @@ public class GradientScreen extends Screen {
                 g.item(orderedBlocks.get(idx).stack(), rx + gx * 16, gridY + gz * 16);
             }
         }
+        g.text(this.font, this.font.plainSubstrByWidth("Click + drag the preview to pan", rw),
+                rx, gridY + rows * 16 + 3, YELLOW);
     }
 
     private boolean inNoisePreview(double mx, double my) {

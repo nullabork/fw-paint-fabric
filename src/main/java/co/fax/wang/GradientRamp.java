@@ -30,6 +30,14 @@ public final class GradientRamp {
     /** Default deviation budget fraction (≈110 RGB distance) when the caller doesn't supply one. */
     public static final double DEFAULT_DEVIATION_BUDGET = 0.43;
 
+    /**
+     * Fixed eligibility budget for gradient steps. The Variation slider does NOT gate which blocks
+     * become steps — the gradient always builds the fullest ramp it can (bounded by the endpoint
+     * range, this sanity budget, and max steps); the slider only widens each step's band of
+     * swappable similar blocks (see {@link #bandGroups}).
+     */
+    public static final double STEP_ELIGIBILITY_BUDGET = DEFAULT_DEVIATION_BUDGET;
+
     /** Absolute deviation allowed for a budget fraction in [0,1] (scaled to the colour/luminance range). */
     public static double maxDeviation(GradientMode mode, double budget) {
         return clamp01(budget) * 255.0;
@@ -139,10 +147,15 @@ public final class GradientRamp {
         return out;
     }
 
-    /** Ordered slot (0..count-1) for a curved gradient fraction in [0,1]. */
+    /**
+     * Ordered slot (0..count-1) for a curved gradient fraction in [0,1]. Floor-based equal-width
+     * bands — NOT rounding: {@code round(t*(count-1))} halves the first/last bands and produces
+     * non-monotonic occupancy jitter (e.g. ease-out giving a middle step fewer cells than an
+     * earlier one). With equal bands, a monotone curve always yields monotone band sizes.
+     */
     public static int rampIndex(int count, double curvedT) {
         if (count <= 1) return 0;
-        int i = (int) Math.round(clamp01(curvedT) * (count - 1));
+        int i = (int) (clamp01(curvedT) * count);
         return Math.max(0, Math.min(count - 1, i));
     }
 
@@ -186,6 +199,46 @@ public final class GradientRamp {
             result[c] = order.length == 0 ? 0 : order[rampIndex(order.length, tc)];
         }
         return result;
+    }
+
+    /**
+     * Band variation: for each step, the palette indices that may stand in for it at placement —
+     * the step's own block plus every candidate whose colour (or brightness, in scalar modes) is
+     * within {@code variation} of it. Candidates are the gradient-eligible blocks (typically the
+     * pre-subsample order, so blocks dropped by max-steps become alternates of the step they were
+     * folded into). At variation 0 every group is just the step itself — a clean, deterministic
+     * gradient; if nothing is close enough, the group stays a singleton (a far colour is never
+     * picked). Widening the bands never adds or removes steps.
+     *
+     * @param variation 0..1; the band half-width is {@code variation × 127.5} (half the colour range)
+     */
+    public static List<int[]> bandGroups(int[] paletteRgb, int[] steps, int[] candidates,
+                                         GradientMode mode, double variation) {
+        double thresh = clamp01(variation) * 127.5;
+        List<int[]> groups = new ArrayList<>(steps.length);
+        for (int s : steps) {
+            List<Integer> g = new ArrayList<>();
+            g.add(s);
+            if (thresh > 0) {
+                for (int c : candidates) {
+                    if (c == s) continue;
+                    if (bandDistance(paletteRgb[c], paletteRgb[s], mode) <= thresh) g.add(c);
+                }
+            }
+            int[] arr = new int[g.size()];
+            for (int i = 0; i < arr.length; i++) arr[i] = g.get(i);
+            groups.add(arr);
+        }
+        return groups;
+    }
+
+    /** Similarity metric for band membership: luminance in scalar modes, RGB distance otherwise. */
+    private static double bandDistance(int a, int b, GradientMode mode) {
+        if (mode.usesBrightness()) return Math.abs(luminance(a) - luminance(b));
+        int dr = ((a >> 16) & 0xFF) - ((b >> 16) & 0xFF);
+        int dg = ((a >> 8) & 0xFF) - ((b >> 8) & 0xFF);
+        int db = (a & 0xFF) - (b & 0xFF);
+        return Math.sqrt((double) dr * dr + dg * dg + db * db);
     }
 
     /**

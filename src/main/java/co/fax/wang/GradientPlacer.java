@@ -48,14 +48,19 @@ public final class GradientPlacer {
 
     private static final double REACH = 6.0;
     private static final double STEP = 0.1;
-    private static final double COLOR_TIE = 24.0;    // RGB distance within which choices are "tied"
-    private static final double LUM_TIE = 6.0;       // luminance distance treated as "tied"
     private static final int PLACE_INTERVAL = 2; // ticks between placements while holding (~10/s)
 
     private static final Random RANDOM = new Random();
 
     private static boolean lastUseDown = false;
     private static int cooldown = 0;
+
+    // Step-length wobble: randomised band boundaries, kept stable for the whole fill of a segment
+    // so its steps stay coherent. Regenerated when the segment, step count, or slider changes.
+    private static Segment wobbleSeg;
+    private static int wobbleCount;
+    private static double wobbleStrength;
+    private static double[] wobbleBounds; // ascending boundaries in curved-t space, length count-1
 
     /** True while we are issuing our own placement interaction (so the click-cancel callbacks pass). */
     public static boolean isPlacing() {
@@ -134,7 +139,7 @@ public final class GradientPlacer {
 
         int startRgb = rgbOf(startBlock, startBlock);
         int endRgb = rgbOf(endBlock, startBlock);
-        Palette chosen = pick(palette, cfg, startRgb, endRgb, front.t());
+        Palette chosen = pick(palette, cfg, startRgb, endRgb, front.t(), seg);
         if (chosen == null) { // Pick mode with no numbered blocks
             if (announce) player.sendOverlayMessage(Component.literal("Gradient: number some blocks (Pick mode)"));
             return false;
@@ -193,7 +198,6 @@ public final class GradientPlacer {
 
     /** First air cell whose start-side neighbour is solid — the next block to place, with its face. */
     private static Front chainFront(Segment seg, Level level) {
-        int fillCount = seg.length() - 1; // cells strictly between the markers
         for (int i = 1; i < seg.length(); i++) {
             BlockPos c = seg.s().offset(seg.ux() * i, seg.uy() * i, seg.uz() * i);
             if (!level.getBlockState(c).isAir()) continue;
@@ -201,8 +205,10 @@ public final class GradientPlacer {
             if (level.getBlockState(n).isAir()) continue; // need a solid block to place against
             Direction dir = Direction.getNearest(
                     c.getX() - n.getX(), c.getY() - n.getY(), c.getZ() - n.getZ(), Direction.UP);
-            // Anchor the ramp to the fill region: cell 0 → start-closest, last → end-closest block.
-            double t = GradientRamp.fillFraction(i - 1, fillCount);
+            // The markers themselves are the gradient's first and last blocks (t=0 and t=1) — the
+            // fill only covers the cells strictly between them, so the first fill cell doesn't
+            // duplicate the start block against the marker.
+            double t = (double) i / seg.length();
             return new Front(c, n, t, dir);
         }
         return null;
@@ -238,48 +244,64 @@ public final class GradientPlacer {
     }
 
     /**
-     * Choose a block for a fill cell at gradient fraction {@code t}: order the whole palette
-     * start→end, distribute evenly, then randomise among blocks of (nearly) the same gradient
-     * position (the "tie" case) and — when Unclean — occasionally repeat or skip a step.
+     * Choose a block for a fill cell at gradient fraction {@code t}. The gradient always builds the
+     * fullest ramp available (endpoint range + the fixed sanity budget + max steps — the Variation
+     * slider never adds/removes steps), distributes it evenly along the fill, then picks randomly
+     * within the step's band group (its block + similar blocks per the Variation slider). At
+     * variation 0 the placement is fully deterministic; Chaos, when set, still nudges the step.
      */
     private static Palette pick(List<Palette> palette, GradientConfig cfg,
-                                int startRgb, int endRgb, double t) {
-        if (cfg.gradientMode.isPick()) return pickModeChoice(palette, cfg, t);
+                                int startRgb, int endRgb, double t, Segment seg) {
+        if (cfg.gradientMode.isPick()) return pickModeChoice(palette, cfg, t, seg);
         int n = palette.size();
         int[] rgbs = new int[n];
-        Set<Integer> forced = new HashSet<>(); // must-use (green) blocks bypass the deviation budget
+        Set<Integer> forced = new HashSet<>(); // must-use (green) blocks bypass the sanity budget
         List<String> required = ConfigManager.get().requiredBlocks;
         for (int i = 0; i < n; i++) {
             rgbs[i] = palette.get(i).rgb();
             Identifier id = BuiltInRegistries.ITEM.getKey(palette.get(i).block().asItem());
             if (id != null && required.contains(id.toString())) forced.add(i);
         }
-        // Only blocks near the gradient (or forced) are eligible, capped to the max-steps distinct blocks.
-        int[] order = GradientRamp.subsample(
-                GradientRamp.gradientOrder(rgbs, startRgb, endRgb, cfg.gradientMode, cfg.deviationBudget, forced),
-                cfg.maxSteps);
+        int[] eligible = GradientRamp.gradientOrder(
+                rgbs, startRgb, endRgb, cfg.gradientMode, GradientRamp.STEP_ELIGIBILITY_BUDGET, forced);
+        int[] steps = GradientRamp.subsample(eligible, cfg.maxSteps);
+        List<int[]> groups = GradientRamp.bandGroups(rgbs, steps, eligible, cfg.gradientMode, cfg.deviationBudget);
 
         double tc = cfg.curve.apply(t);
         // Chaos = how often a placement deviates (repeat the previous step or skip ahead one), but
         // never the start/end cells (t == 0 or 1), so the gradient still begins and ends correctly.
         if (cfg.chaos > 0 && t > 0.0 && t < 1.0 && RANDOM.nextDouble() < cfg.chaos) {
-            double stepFrac = order.length > 1 ? 1.0 / (order.length - 1) : 0.1;
+            double stepFrac = steps.length > 1 ? 1.0 / (steps.length - 1) : 0.1;
             tc = clamp01(RANDOM.nextBoolean() ? tc - stepFrac : tc + stepFrac);
         }
 
-        int pos = GradientRamp.rampIndex(order.length, tc);
+        int[] group = groups.get(stepIndex(cfg, seg, steps.length, tc));
+        return palette.get(group[RANDOM.nextInt(group.length)]);
+    }
 
-        // Tie: randomise among ordered blocks whose gradient position is ~equal to the chosen one.
-        // All scalar modes position by a luminance-scale value, so they use the tighter tie.
-        double tie = cfg.gradientMode.usesBrightness() ? LUM_TIE : COLOR_TIE;
-        double target = GradientRamp.position(rgbs[order[pos]], startRgb, endRgb, cfg.gradientMode);
-        List<Integer> cluster = new ArrayList<>();
-        for (int k = 0; k < order.length; k++) {
-            if (Math.abs(GradientRamp.position(rgbs[order[k]], startRgb, endRgb, cfg.gradientMode) - target) <= tie) {
-                cluster.add(order[k]);
+    /**
+     * Step index for a curved fraction, with the step-length wobble applied. Wobble shifts the
+     * boundary between two steps (by up to half a band), so making one step longer automatically
+     * makes its neighbour shorter — the gradient still starts and ends on time. Boundaries are
+     * rolled once per segment/step-count so a fill stays coherent while you hold the button.
+     */
+    private static int stepIndex(GradientConfig cfg, Segment seg, int count, double tc) {
+        if (cfg.stepWobble <= 0 || count <= 1) return GradientRamp.rampIndex(count, tc);
+        if (!seg.equals(wobbleSeg) || count != wobbleCount || cfg.stepWobble != wobbleStrength) {
+            double band = 1.0 / count;
+            wobbleBounds = new double[count - 1];
+            for (int k = 0; k < count - 1; k++) {
+                double off = RANDOM.nextDouble() < cfg.stepWobble
+                        ? (RANDOM.nextDouble() - 0.5) * band : 0.0;
+                wobbleBounds[k] = (k + 1) * band + off;
             }
+            wobbleSeg = seg;
+            wobbleCount = count;
+            wobbleStrength = cfg.stepWobble;
         }
-        return palette.get(cluster.get(RANDOM.nextInt(cluster.size())));
+        int pos = 0;
+        while (pos < wobbleBounds.length && tc >= wobbleBounds[pos]) pos++;
+        return pos;
     }
 
     /**
@@ -287,7 +309,7 @@ public final class GradientPlacer {
      * computed, max-steps/deviation ignored. Chaos still nudges the step; ties are randomised. Returns
      * null if no numbered block is available.
      */
-    private static Palette pickModeChoice(List<Palette> palette, GradientConfig cfg, double t) {
+    private static Palette pickModeChoice(List<Palette> palette, GradientConfig cfg, double t, Segment seg) {
         // Group palette entries by their pick number (low→high).
         java.util.TreeMap<Integer, List<Palette>> byNumber = new java.util.TreeMap<>();
         for (Palette p : palette) {
@@ -303,7 +325,7 @@ public final class GradientPlacer {
             double stepFrac = groups.size() > 1 ? 1.0 / (groups.size() - 1) : 0.1;
             tc = clamp01(RANDOM.nextBoolean() ? tc - stepFrac : tc + stepFrac);
         }
-        List<Palette> group = groups.get(GradientRamp.rampIndex(groups.size(), tc));
+        List<Palette> group = groups.get(stepIndex(cfg, seg, groups.size(), tc));
         return group.get(RANDOM.nextInt(group.size())); // randomise ties
     }
 

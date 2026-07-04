@@ -168,13 +168,9 @@ public final class NoisePlacer {
                 double stepFrac = order.size() > 1 ? 1.0 / (order.size() - 1) : 0.1;
                 t = clamp01(RANDOM.nextBoolean() ? t - stepFrac : t + stepFrac);
             }
+            // Each step is a band-variation group (built in computeOrder); chooseSlot randomises
+            // within the group, so variation happens without changing the step count.
             int idx = GradientRamp.rampIndex(order.size(), t);
-            // Deviation: a per-placement chance to shift to a colour-adjacent block (±1 in the order),
-            // so a step occasionally varies to a close block without changing the step count.
-            if (cfg.noiseDeviation > 0 && RANDOM.nextDouble() < cfg.noiseDeviation) {
-                idx = Math.max(0, Math.min(order.size() - 1, idx + (RANDOM.nextBoolean() ? 1 : -1)));
-            }
-
             int slot = chooseSlot(player, idx);
             if (slot < 0) continue; // none of the gradient blocks are available
             Direction dir = Direction.getNearest(c.x() - c.sx(), c.y() - c.sy(), c.z() - c.sz(), Direction.UP);
@@ -250,12 +246,17 @@ public final class NoisePlacer {
             Identifier id = BuiltInRegistries.ITEM.getKey(palette.get(i).asItem());
             if (id != null && required.contains(id.toString())) forced.add(i);
         }
-        // Full budget: noise deviation is a placement-time variation, not a step-count filter, so the
-        // number of steps depends only on max steps + the eligible blocks — not the deviation slider.
-        int[] ord = GradientRamp.subsample(
-                GradientRamp.gradientOrder(rgbs, startRgb, endRgb, mode, 1.0, forced), cfg.noiseMaxSteps);
+        // Full budget: the Variation slider never gates steps — the step count depends only on max
+        // steps + the range-eligible blocks. Variation builds each step's band group of similar
+        // blocks (like the gradient tool), randomised at placement by chooseSlot.
+        int[] eligible = GradientRamp.gradientOrder(rgbs, startRgb, endRgb, mode, 1.0, forced);
+        int[] ord = GradientRamp.subsample(eligible, cfg.noiseMaxSteps);
         List<List<Block>> out = new ArrayList<>();
-        for (int i : ord) out.add(List.of(palette.get(i))); // singleton groups (no ties)
+        for (int[] band : GradientRamp.bandGroups(rgbs, ord, eligible, mode, cfg.noiseDeviation)) {
+            List<Block> group = new ArrayList<>(band.length);
+            for (int i : band) group.add(palette.get(i));
+            out.add(group);
+        }
         return out;
     }
 

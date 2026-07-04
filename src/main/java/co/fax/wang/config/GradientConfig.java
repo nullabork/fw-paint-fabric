@@ -77,6 +77,12 @@ public class GradientConfig {
     /** Dithering amount 0..1: 0 = clean (always the next step), higher = more repeat/skip noise. */
     public double chaos = 0.0;
 
+    /**
+     * Chance 0..1 that each step's length is randomly wobbled: a boundary between two steps shifts,
+     * so one step runs longer and its neighbour correspondingly shorter. 1 = every step wobbles.
+     */
+    public double stepWobble = 0.0;
+
     /** How far a block may stray from the gradient and still be used, 0..1 (fraction of full range). */
     public double deviationBudget = 0.43;
 
@@ -112,7 +118,7 @@ public class GradientConfig {
     public boolean noiseLock = true;
     /** Block-ordering mode for the noise tool (separate from the gradient tool's). */
     public GradientMode noiseGradientMode = GradientMode.COLOR;
-    /** Noise-tool gradient shaping (separate from the gradient tool's same-named settings). */
+    /** Noise-tool band variation: similar blocks swap within a step (like the gradient's slider). */
     public double noiseDeviation = 0.43;
     public double noiseChaos = 0.0;
     public int noiseMaxSteps = 16;
