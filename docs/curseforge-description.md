@@ -16,6 +16,8 @@ multiplayer-safe way (normal block-place interactions the server validates), so 
 3. **Marker** mode: left-click places **start** markers (turquoise), right-click places **end**
    markers (amber). Markers bound or constrain what you paint.
 4. Switch to the type's action mode (Place / Extrude / 3D Fill) and right-click to paint.
+5. Lost? The **Help** tab (last in the K screen) is a drill-down in-game manual — every topic shows
+   a one-line summary you can expand for the details.
 
 ## Keybinds
 
@@ -54,13 +56,15 @@ Places one kind of block — great for walls, columns, and filling volumes fast.
     extrudes together, one layer at a time. Markers at a different height/offset aren't part of the
     face and stay put.
   - Re-clicking a half-built wall continues it — each column picks up from its own first air block.
-  - **End markers** (optional, can be scattered): a column that runs into one stops; the rest continue.
+  - **End markers** (optional, can be scattered): a column that runs into one stops — even a marker
+    floating in air — and the rest continue. A column that already reached its marker stays
+    finished; re-clicking never pushes it past.
 - **3D Fill mode** — grows a connected blob of blocks outward from the face you click:
   - Tap = one small fill; **hold** = grows layer by layer. It spreads through open air only, so walls
     contain it.
   - **Start markers constrain it**: each marker casts a constraint space out from all six faces (up
     to the Marker-distance setting). A fill started **inside** that space can't leave it; a fill
-    started **outside** can't enter it. End markers physically stop it.
+    started **outside** can't enter it. End markers stop it, even when they sit in air.
 - **Solid tab list**: **✓** picks the one block to place (press ✓, click a row — single selection,
   auto-disarms). **✗** marks rows excluded (stays armed until you click it again). The ✓ row is
   struck through while the Match mode isn't "Selected block".
@@ -70,7 +74,8 @@ Places one kind of block — great for walls, columns, and filling volumes fast.
 A smooth blend from one block to another along a marked line.
 
 - **Setup**: place a **start** and **end** marker in a straight line (Marker mode), then in **Place**
-  mode right-click along the line — hold to fill block by block from the start side.
+  mode right-click along the line — hold to fill block by block from the start side. The marker
+  blocks themselves count as the gradient's first and last blocks; the fill covers the cells between.
 - **From: Markers / Block list** — where the gradient's endpoints come from:
   - **Markers** — the real blocks sitting at your markers (recalculated as you place).
   - **Block list** — exactly the [S]/[E] and preview order from the screen, no matter what the
@@ -78,9 +83,11 @@ A smooth blend from one block to another along a marked line.
 - **Order modes** (how blocks are sorted): Color, Brightness, Top % Dark/Light (Colour or
   Brightness — analyses only each texture's darkest/lightest pixels, tuned by the **Pixel %**
   slider), B&W/Colour Diff (similarity to the start block), or **Pick** (fully manual).
-- **Shaping**: **Curve** (Linear / Ease In / Ease Out / Ease In-Out / Step), **Deviation** (max
-  colour distance a block may stray from the gradient before it's dropped), **Chaos** (chance to
-  repeat/skip a step for a hand-made look), **Max steps** (cap on distinct blocks).
+- **Shaping**: **Curve** (Linear / Ease In / Ease Out / Ease In-Out / Step), **Variation** (similar
+  blocks randomly stand in for a step — variety without adding or losing steps; each step's
+  swappable alternates show as small icons on its row), **Chaos** (chance to repeat/skip a step for
+  a hand-made look), **Step length** (chance a step runs longer or shorter, its neighbour
+  compensating), **Max steps** (cap on distinct blocks).
 - **Pick mode**: click a row to +1 its number, right-click to −1 (0 removes it). Numbered blocks
   (low → high) become the exact sequence — same number = random pick between them.
 
@@ -93,10 +100,10 @@ end of your block order, peaks the other.
   an end at the other), then in **Place** mode right-click an empty spot inside — it flood-fills the
   region with the pattern.
 - **Noise settings**: type (Smooth / Perlin / Fractal), **Seed**, per-axis **Scale** (feature size,
-  with a Lock XYZ toggle), plus its own Order / Deviation / Chaos / Max steps (separate from the
+  with a Lock XYZ toggle), plus its own Order / Variation / Chaos / Max steps (separate from the
   gradient tool's).
-- Here **Deviation** is a per-placement chance to vary a block to a colour-adjacent one — it doesn't
-  change the step count.
+- **Variation** works like the gradient tool's: similar blocks swap within a step at placement — it
+  never changes the step count.
 - The tab shows a **live preview** grid — drag it to pan around the noise field.
 
 ## The block list (all tabs)
@@ -115,7 +122,10 @@ end of your block order, peaks the other.
 - Markers are saved per world and dimension; **Clear Markers** (Settings tab) wipes them.
 - **Marker dist** — max start↔end distance for gradient/noise lines, and how far Solid marker
   constraints reach.
-- **Auto end marker** — placing a start marker also drops an end marker along your look direction.
+- **Auto end marker** — placing a start marker scans out from **the face you clicked** and marks
+  the first non-air block it finds as the end (all air → max distance). While marking, the aimed
+  face is tinted blue with an arrow showing the scan direction; dragging a line of starts gives a
+  matching line of ends.
 - Each paint type remembers its own mode; the Settings tab also has per-type mode buttons.
 
 ## Requirements
