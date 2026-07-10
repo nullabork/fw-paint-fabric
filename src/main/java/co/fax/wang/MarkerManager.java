@@ -8,6 +8,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -45,6 +46,8 @@ public final class MarkerManager {
     private static final int START_LINE = 0xFF40E0D0;
     private static final int END_FILL = 0x66FFB000;   // amber / orange-yellow
     private static final int END_LINE = 0xFFFFB000;
+    private static final int FACE_FILL = 0x5560A0FF;  // translucent blue — auto-end scan face
+    private static final int ARROW = 0xFF60A0FF;      // the scan-direction arrow off that face
     private static final float EXPAND = 0.005f;        // grow the box slightly to avoid z-fighting
     private static final float LINE_WIDTH = 2.0f;
 
@@ -61,6 +64,7 @@ public final class MarkerManager {
 
     private static Kind dragKind = Kind.NONE;
     private static BlockPos dragOrigin;
+    private static Direction dragFace; // clicked face of the origin (drives the auto end marker)
     private static boolean dragRemoving; // whole drag removes (origin was marked) vs adds
     private static final List<BlockPos> dragLine = new ArrayList<>();
 
@@ -113,14 +117,15 @@ public final class MarkerManager {
             cancelDrag();
             return;
         }
-        BlockPos target = targetedBlock(mc);
+        BlockHitResult hit = targetedHit(mc);
+        BlockPos target = hit == null ? null : hit.getBlockPos();
         boolean left = mc.options.keyAttack.isDown();
         boolean right = mc.options.keyUse.isDown();
 
         switch (dragKind) {
             case NONE -> {
-                if (left && target != null) beginDrag(Kind.START, target);
-                else if (right && target != null) beginDrag(Kind.END, target);
+                if (left && target != null) beginDrag(Kind.START, target, hit.getDirection());
+                else if (right && target != null) beginDrag(Kind.END, target, hit.getDirection());
             }
             case START -> {
                 if (!left) commitDrag();
@@ -133,16 +138,17 @@ public final class MarkerManager {
         }
     }
 
-    private static BlockPos targetedBlock(Minecraft mc) {
+    private static BlockHitResult targetedHit(Minecraft mc) {
         if (mc.hitResult instanceof BlockHitResult bhr && bhr.getType() == HitResult.Type.BLOCK) {
-            return bhr.getBlockPos();
+            return bhr;
         }
         return null;
     }
 
-    private static void beginDrag(Kind kind, BlockPos origin) {
+    private static void beginDrag(Kind kind, BlockPos origin, Direction face) {
         dragKind = kind;
         dragOrigin = origin.immutable();
+        dragFace = face;
         // The whole drag adds or removes, decided by the origin: starting on a marked block removes.
         Set<BlockPos> set = (kind == Kind.START) ? startMarkers : endMarkers;
         dragRemoving = set.contains(dragOrigin);
@@ -187,33 +193,41 @@ public final class MarkerManager {
             // Removing start markers can orphan end markers — drop any that lost their start.
             if (removedStart) endMarkers.removeIf(p -> !isEndAllowed(p));
 
-            // Auto-place end: a single start click can also drop an end marker along the look axis.
-            if (!dragRemoving && dragKind == Kind.START && dragLine.size() == 1
-                    && ConfigManager.get().autoPlaceEnd) {
-                autoPlaceEndFor(dragLine.get(0));
+            // Auto-place end: every added start marker drops an end marker out from the clicked
+            // face (a drag uses the face the drag started on, so a swept line gets a matching
+            // line of ends).
+            if (!dragRemoving && dragKind == Kind.START && ConfigManager.get().autoPlaceEnd) {
+                for (BlockPos p : dragLine) autoPlaceEndFor(p, dragFace);
             }
             saveCurrent();
         }
         cancelDrag();
     }
 
-    /** Drop an end marker {@code maxMarkerDistance} blocks from {@code start} along the look axis. */
-    private static void autoPlaceEndFor(BlockPos start) {
+    /**
+     * Auto end marker: scan out from {@code start} along the clicked face's normal and mark the
+     * first non-air block (click a floor's top face and it finds the ceiling; click a wall's side
+     * and it scans out sideways). Nothing but air within the max marker distance → the marker is
+     * dropped at max distance instead, so the feature still works out in the open.
+     */
+    private static void autoPlaceEndFor(BlockPos start, Direction face) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null) return;
-        Vec3 look = mc.player.getViewVector(1.0f);
-        double ax = Math.abs(look.x), ay = Math.abs(look.y), az = Math.abs(look.z);
-        int ux = 0, uy = 0, uz = 0;
-        if (ax >= ay && ax >= az) ux = look.x >= 0 ? 1 : -1;
-        else if (ay >= az) uy = look.y >= 0 ? 1 : -1;
-        else uz = look.z >= 0 ? 1 : -1;
-        int d = maxEndDistance();
-        endMarkers.add(new BlockPos(start.getX() + ux * d, start.getY() + uy * d, start.getZ() + uz * d));
+        if (mc.level == null || face == null) return;
+        int max = maxEndDistance();
+        for (int k = 1; k <= max; k++) {
+            BlockPos p = start.relative(face, k);
+            if (!mc.level.getBlockState(p).isAir()) {
+                endMarkers.add(p);
+                return;
+            }
+        }
+        endMarkers.add(start.relative(face, max));
     }
 
     private static void cancelDrag() {
         dragKind = Kind.NONE;
         dragOrigin = null;
+        dragFace = null;
         dragRemoving = false;
         dragLine.clear();
     }
@@ -242,7 +256,9 @@ public final class MarkerManager {
     // ---- rendering (level render event) ---------------------------------------------------------
 
     public static void render(LevelRenderContext ctx) {
-        if (startMarkers.isEmpty() && endMarkers.isEmpty() && dragLine.isEmpty()) return;
+        // The auto-end face preview can show before any marker exists (e.g. a fresh world).
+        boolean preview = ConfigManager.get().autoPlaceEnd && active();
+        if (!preview && startMarkers.isEmpty() && endMarkers.isEmpty() && dragLine.isEmpty()) return;
 
         // Submit with a FRESH identity PoseStack (as vanilla's submitFeatures does for block
         // entities + the block outline) and let the collector apply the camera rotation. Using the
@@ -268,6 +284,67 @@ public final class MarkerManager {
                 if (affected) outline(col, ps, cam, p, lineColor);
             }
         }
+
+        if (preview) renderAutoEndPreview(col, ps, cam);
+    }
+
+    // ---- auto-end face preview -------------------------------------------------------------------
+
+    /**
+     * With auto end marker on, show which face the end-marker scan will leave from: the aimed face
+     * is tinted translucent blue with a thin arrow along its normal. Hidden on blocks that are
+     * already start markers (clicking those removes instead of scanning). During an adding start
+     * drag the preview runs down the whole line, using the face the drag began on.
+     */
+    private static void renderAutoEndPreview(SubmitNodeCollector col, PoseStack ps, Vec3 cam) {
+        if (dragKind == Kind.END || (dragKind != Kind.NONE && dragRemoving)) return;
+        if (dragKind == Kind.START) {
+            for (BlockPos p : dragLine) facePreview(col, ps, cam, p, dragFace);
+            return;
+        }
+        BlockHitResult hit = targetedHit(Minecraft.getInstance());
+        if (hit == null || startMarkers.contains(hit.getBlockPos())) return;
+        facePreview(col, ps, cam, hit.getBlockPos(), hit.getDirection());
+    }
+
+    private static void facePreview(SubmitNodeCollector col, PoseStack ps, Vec3 cam, BlockPos pos, Direction face) {
+        if (face == null) return;
+        ps.pushPose();
+        ps.translate(pos.getX() - cam.x, pos.getY() - cam.y, pos.getZ() - cam.z);
+        col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(), (pose, vc) -> emitFacePreview(pose, vc, face));
+        ps.popPose();
+    }
+
+    /** The face tint + normal arrow, in block-local coordinates (the pose already sits at the block). */
+    private static void emitFacePreview(PoseStack.Pose pose, VertexConsumer vc, Direction face) {
+        Vec3 n = new Vec3(face.getStepX(), face.getStepY(), face.getStepZ());
+        // Two unit tangents spanning the face.
+        Vec3 u = n.x != 0 ? new Vec3(0, 1, 0) : new Vec3(1, 0, 0);
+        Vec3 v = n.z != 0 ? new Vec3(0, 1, 0) : new Vec3(0, 0, 1);
+        Vec3 c = new Vec3(0.5, 0.5, 0.5).add(n.scale(0.5 + EXPAND)); // face centre, just off the surface
+
+        quadDS(vc, pose, FACE_FILL,
+                c.subtract(u.scale(0.5)).subtract(v.scale(0.5)),
+                c.add(u.scale(0.5)).subtract(v.scale(0.5)),
+                c.add(u.scale(0.5)).add(v.scale(0.5)),
+                c.subtract(u.scale(0.5)).add(v.scale(0.5)));
+
+        // The arrow: a thin crossed shaft along the normal plus a crossed triangle head, so it
+        // reads as an arrow from any viewing angle.
+        Vec3 shaft = n.scale(0.35), tip = n.scale(0.5);
+        for (Vec3 t : new Vec3[]{u, v}) {
+            Vec3 w = t.scale(0.015), hw = t.scale(0.07);
+            quadDS(vc, pose, ARROW, c.subtract(w), c.add(w), c.add(w).add(shaft), c.subtract(w).add(shaft));
+            quadDS(vc, pose, ARROW, c.subtract(hw).add(shaft), c.add(hw).add(shaft), c.add(tip), c.add(tip));
+        }
+    }
+
+    /** Double-sided quad from Vec3 corners (emitted once per winding so it shows from both sides). */
+    private static void quadDS(VertexConsumer vc, PoseStack.Pose pose, int argb, Vec3 a, Vec3 b, Vec3 c, Vec3 d) {
+        quad(vc, pose, argb, (float) a.x, (float) a.y, (float) a.z, (float) b.x, (float) b.y, (float) b.z,
+                (float) c.x, (float) c.y, (float) c.z, (float) d.x, (float) d.y, (float) d.z);
+        quad(vc, pose, argb, (float) d.x, (float) d.y, (float) d.z, (float) c.x, (float) c.y, (float) c.z,
+                (float) b.x, (float) b.y, (float) b.z, (float) a.x, (float) a.y, (float) a.z);
     }
 
     private static void outline(SubmitNodeCollector col, PoseStack ps, Vec3 cam, BlockPos pos, int argb) {

@@ -22,13 +22,14 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * The FW Paint screen (opened by K). Four tabs:
+ * The FW Paint screen (opened by K). Five tabs:
  * <ul>
+ *   <li><b>Solid</b> — block picker with ✓ (one block to place) / ✗ (exclusions) + match mode;</li>
  *   <li><b>Gradient</b> — block picker (left) + gradient settings (right);</li>
  *   <li><b>Noise Paint</b> — block picker (left) + noise settings (right);</li>
- *   <li><b>Solid</b> — block picker with ✓ (one block to place) / ✗ (exclusions) + match mode;</li>
  *   <li><b>Settings</b> — pick the paint tool item, per-paint-type mode, marker options,
- *       helper-text position.</li>
+ *       helper-text position;</li>
+ *   <li><b>Help</b> — the in-game manual (the drill-down {@link HelpPanel}).</li>
  * </ul>
  * The block list is the modular {@link BlockPickerPanel}.
  */
@@ -50,7 +51,10 @@ public class GradientScreen extends Screen {
     private static final int COL_GAP = 12;
     private static final int TOOL_LIST_TOP = 78;
 
-    private enum Tab { GRADIENT, NOISE, SOLID, SETTINGS }
+    private enum Tab { GRADIENT, NOISE, SOLID, SETTINGS, HELP }
+
+    /** Title-bar order, left to right (right-aligned as a group). */
+    private static final Tab[] BAR_ORDER = {Tab.SOLID, Tab.GRADIENT, Tab.NOISE, Tab.SETTINGS, Tab.HELP};
     private enum Assign { NONE, START, END, REQUIRE, EXCLUDE }
     private enum SolidAssign { NONE, TICK, CROSS }
 
@@ -100,8 +104,12 @@ public class GradientScreen extends Screen {
         return dbl;
     }
 
+    // Help tab state — static so the manual keeps its expansion + scroll across reopening (like tab).
+    private static HelpPanel help;
+
     // Settings tab state.
     private EditBox filterBox;
+    private int autoEndDescY;
     private final List<ToolRow> matches = new ArrayList<>();
     private String filter = "";
     private int toolRowHeight = 12;
@@ -127,6 +135,7 @@ public class GradientScreen extends Screen {
         toolRowHeight = this.font.lineHeight + 3;
         if (tab == Tab.GRADIENT || tab == Tab.NOISE) initPickerTab();
         else if (tab == Tab.SOLID) initSolidTab();
+        else if (tab == Tab.HELP) initHelpTab();
         else initSettingsTab();
 
         addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
@@ -140,23 +149,24 @@ public class GradientScreen extends Screen {
     private String tabName(Tab t) {
         return switch (t) {
             case GRADIENT -> "Gradient"; case NOISE -> "Noise Paint";
-            case SOLID -> "Solid"; case SETTINGS -> "Settings";
+            case SOLID -> "Solid"; case SETTINGS -> "Settings"; case HELP -> "Help";
         };
     }
     private String tabText(Tab t) { return tab == t ? "» " + tabName(t) : tabName(t); }
 
-    /** Right-aligned tab x positions: {x,width} pairs in bar order SOLID, GRADIENT, NOISE, SETTINGS. */
+    /** Right-aligned tab x positions: {x,width} pairs, one per {@link #BAR_ORDER} entry. */
     private int[] tabXs() {
         int gap = 14;
-        int sw = this.font.width(tabText(Tab.SETTINGS));
-        int nw = this.font.width(tabText(Tab.NOISE));
-        int gw = this.font.width(tabText(Tab.GRADIENT));
-        int ow = this.font.width(tabText(Tab.SOLID));
-        int sx = this.width - 10 - sw;
-        int nx = sx - gap - nw;
-        int gx = nx - gap - gw;
-        int ox = gx - gap - ow;
-        return new int[]{ox, ow, gx, gw, nx, nw, sx, sw};
+        int[] out = new int[BAR_ORDER.length * 2];
+        int x = this.width - 10;
+        for (int i = BAR_ORDER.length - 1; i >= 0; i--) {
+            int w = this.font.width(tabText(BAR_ORDER[i]));
+            x -= w;
+            out[i * 2] = x;
+            out[i * 2 + 1] = w;
+            x -= gap;
+        }
+        return out;
     }
 
     // ---- Gradient / Noise tab -------------------------------------------------------------------
@@ -734,7 +744,7 @@ public class GradientScreen extends Screen {
         y += 24;
         cycleButton(rx, y, rw, () -> Component.literal("Auto end marker: " + (ConfigManager.get().autoPlaceEnd ? "On" : "Off")),
                 () -> ConfigManager.get().autoPlaceEnd = !ConfigManager.get().autoPlaceEnd);
-        y += 24;
+        y += 24; autoEndDescY = y; y += 12;
 
         addRenderableWidget(Button.builder(clearMarkersLabel(), b -> {
             MarkerManager.clearAll(); b.setMessage(clearMarkersLabel());
@@ -788,18 +798,32 @@ public class GradientScreen extends Screen {
         return (idx >= 0 && idx < matches.size()) ? idx : -1;
     }
 
+    // ---- Help tab -------------------------------------------------------------------------------
+
+    private void initHelpTab() {
+        if (help == null) help = new HelpPanel(this.font);
+        // The manual gets the full content width (both columns), from under the bar to the Done button.
+        help.setBounds(contentX(), 30, 2 * colW() + COL_GAP, this.height - 30 - 34);
+    }
+
     // ---- input ----------------------------------------------------------------------------------
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
         if (event.y() < BAR_H && event.button() == 0) {
             int[] xs = tabXs();
-            if (event.x() >= xs[0] && event.x() <= xs[0] + xs[1]) { setTab(Tab.SOLID); return true; }
-            if (event.x() >= xs[2] && event.x() <= xs[2] + xs[3]) { setTab(Tab.GRADIENT); return true; }
-            if (event.x() >= xs[4] && event.x() <= xs[4] + xs[5]) { setTab(Tab.NOISE); return true; }
-            if (event.x() >= xs[6] && event.x() <= xs[6] + xs[7]) { setTab(Tab.SETTINGS); return true; }
+            for (int i = 0; i < BAR_ORDER.length; i++) {
+                if (event.x() >= xs[i * 2] && event.x() <= xs[i * 2] + xs[i * 2 + 1]) {
+                    setTab(BAR_ORDER[i]);
+                    return true;
+                }
+            }
         }
         if (super.mouseClicked(event, doubled)) return true;
+        if (tab == Tab.HELP && event.button() == 0 && help != null
+                && help.mouseClicked(event.x(), event.y())) {
+            return true;
+        }
         if ((tab == Tab.GRADIENT || tab == Tab.NOISE || tab == Tab.SOLID) && picker != null
                 && event.button() >= 0 && event.button() <= 2) {
             String id = picker.rowIdAt(event.x(), event.y());
@@ -866,6 +890,9 @@ public class GradientScreen extends Screen {
                 && picker != null && picker.mouseScrolled(mouseX, mouseY, scrollY)) {
             return true;
         }
+        if (tab == Tab.HELP && help != null && help.mouseScrolled(mouseX, mouseY, scrollY)) {
+            return true;
+        }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
@@ -920,6 +947,7 @@ public class GradientScreen extends Screen {
         if (tab == Tab.GRADIENT) renderGradientTab(g, mouseX, mouseY);
         else if (tab == Tab.NOISE) renderNoiseTab(g, mouseX, mouseY);
         else if (tab == Tab.SOLID) renderSolidTab(g, mouseX, mouseY);
+        else if (tab == Tab.HELP) { if (help != null) help.render(g, mouseX, mouseY); }
         else renderSettingsTab(g, mouseX, mouseY);
     }
 
@@ -929,10 +957,10 @@ public class GradientScreen extends Screen {
         int textY = (BAR_H - this.font.lineHeight) / 2 + 1;
         g.text(this.font, "FW Paint", 8, textY, WHITE);
         int[] xs = tabXs();
-        g.text(this.font, tabText(Tab.SOLID), xs[0], textY, tab == Tab.SOLID ? WHITE : GREY);
-        g.text(this.font, tabText(Tab.GRADIENT), xs[2], textY, tab == Tab.GRADIENT ? WHITE : GREY);
-        g.text(this.font, tabText(Tab.NOISE), xs[4], textY, tab == Tab.NOISE ? WHITE : GREY);
-        g.text(this.font, tabText(Tab.SETTINGS), xs[6], textY, tab == Tab.SETTINGS ? WHITE : GREY);
+        for (int i = 0; i < BAR_ORDER.length; i++) {
+            Tab t = BAR_ORDER[i];
+            g.text(this.font, tabText(t), xs[i * 2], textY, tab == t ? WHITE : GREY);
+        }
     }
 
     /** Darken the active assign button (drawn over the vanilla button) to show it's toggled on. */
@@ -1027,6 +1055,9 @@ public class GradientScreen extends Screen {
     private void renderSettingsTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         GradientConfig cfg = ConfigManager.get();
         int cx = contentX(), w = leftW();
+
+        g.text(this.font, this.font.plainSubstrByWidth("Start click scans its face to a block", rightW()),
+                rightX(), autoEndDescY, YELLOW);
 
         // Darken the tool button while it's armed (drawn over the vanilla button).
         if (assigningTool) g.fill(cx, TOOL_BTN_Y, cx + w, TOOL_BTN_Y + TOOL_BTN_H, PRESSED_OVERLAY);

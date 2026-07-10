@@ -34,14 +34,15 @@ import java.util.Set;
  * clicked column intersects a start marker behind it (the marker itself, or anywhere down the
  * axis — so re-clicking a half-built wall still counts), every start marker connected to that one
  * in the same plane perpendicular to the direction extrudes together, each column continuing from
- * its own first air cell. Scattered end markers stop only the column that runs into them.
+ * its own first air cell. Scattered end markers stop only the column that runs into them — a marker
+ * bounds its column even when it sits in air (e.g. auto-placed), not only when it marks a block.
  *
  * <p><b>3D Fill</b>: a connected fill (through air, face-adjacent) that grows outward from the
  * clicked face — a tap places the first shell, holding grows it layer by layer. Start markers are
  * cubes whose constraint extends from all six faces: a cell is "in the marker space" when it lies
  * on an axis line through a marker (within the marker-distance setting). A fill that starts inside
- * the space never leaves it, and one that starts outside never enters it; end markers are physical
- * blocks, so the fill stops at them naturally.
+ * the space never leaves it, and one that starts outside never enters it; end-marker cells act as
+ * solid blocks, so the fill stops at them whether they mark a block or hang in air.
  *
  * <p>The placed block comes from the Solid tab's match mode: the ✓ block, the exact clicked block,
  * or the closest colour/brightness match in the source slots. Excluded blocks are never placed —
@@ -164,10 +165,16 @@ public final class SolidPlacer {
         return null;
     }
 
-    /** Offset (≥1) of the first air cell out from {@code base} along the direction, or -1. */
+    /**
+     * Offset (≥1) of the first air cell out from {@code base} along the direction, or -1. An end
+     * marker on the way means the column already reached its end — re-clicking the face must not
+     * resume it on the far side of the marker, so a crossed column doesn't seed at all.
+     */
     private static int firstAirOffset(Minecraft mc, BlockPos base) {
         for (int k = 1; k <= SCAN_LIMIT; k++) {
-            if (mc.level.getBlockState(base.relative(dir, k)).isAir()) return k;
+            BlockPos p = base.relative(dir, k);
+            if (MarkerManager.endMarkers.contains(p)) return -1;
+            if (mc.level.getBlockState(p).isAir()) return k;
         }
         return -1;
     }
@@ -225,8 +232,10 @@ public final class SolidPlacer {
         while (it.hasNext()) {
             Column c = it.next();
             BlockPos cell = c.base.relative(dir, c.next);
-            // End markers are physical blocks, so the air check stops a column at them too.
-            if (!mc.level.getBlockState(cell).isAir() || outOfReach(mc, cell)) {
+            // An end marker bounds the column even in air; a marker on a block is also caught by
+            // the air check like any obstruction.
+            if (MarkerManager.endMarkers.contains(cell)
+                    || !mc.level.getBlockState(cell).isAir() || outOfReach(mc, cell)) {
                 it.remove();
                 continue;
             }
@@ -260,7 +269,8 @@ public final class SolidPlacer {
                 BlockPos n = p.relative(d);
                 if (visited.contains(n)) continue;
                 if (n.distSqr(center) > r2) continue;
-                if (!mc.level.getBlockState(n).isAir()) continue; // walls + end markers block the fill
+                if (!mc.level.getBlockState(n).isAir()) continue; // walls block the fill
+                if (MarkerManager.endMarkers.contains(n)) continue; // end markers bound it even in air
                 if (spaceConstrained && inMarkerSpace(n) != startedInSpace) continue;
                 if (outOfReach(mc, n)) continue;
                 visited.add(n);

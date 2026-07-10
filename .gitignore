@@ -27,6 +27,9 @@ bin/
 # VS Code
 .vscode/
 
+# Local dev helpers (window-capture scripts for taking doc screenshots — not part of the mod)
+scripts/
+
 # OS junk
 .DS_Store
 Thumbs.db
