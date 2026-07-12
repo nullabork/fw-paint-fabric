@@ -21,7 +21,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Runtime state + behaviour for the block-marking tool (the {@link ToolMode#MARKER} mode).
+ * Runtime state + behaviour for the block-marking tool (the {@link PlacementMode#MARKER} mode).
  *
  * <p>Marking is only live while the player holds the configured tool and the mode is MARKER. Left
  * click places <b>start</b> markers (turquoise), right click places <b>end</b> markers (amber).
@@ -66,13 +66,26 @@ public final class MarkerManager {
     private static BlockPos dragOrigin;
     private static Direction dragFace; // clicked face of the origin (drives the auto end marker)
     private static boolean dragRemoving; // whole drag removes (origin was marked) vs adds
+    private static boolean dragConsumed; // ctrl group-clear already happened; ignore until release
     private static final List<BlockPos> dragLine = new ArrayList<>();
 
-    /** True when marking is currently live (held tool in MARKER mode). Markers are shared by tools. */
+    // Marker corners state: first corner + its clicked face (the column axis of the volume).
+    private static BlockPos cornerA;
+    private static Direction cornerFace;
+    private static boolean lastLeft, lastRight; // press-edge detection (corners mode)
+
+    // Marker draw (freehand) stroke state.
+    private static Kind strokeKind = Kind.NONE;
+    private static boolean strokeRemoving;
+    private static boolean strokeConsumed;
+    private static boolean strokeRemovedStart;
+    private static Direction strokeFace; // face the stroke began on — locks the auto-end direction
+
+    /** True when marking is currently live (held tool in a marker mode). Markers are shared by tools. */
     public static boolean active() {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return false;
-        return Gradient.currentMode(mc) == ToolMode.MARKER;
+        return Gradient.currentPlacement(mc).isMarker();
     }
 
     /** Remove every marker (used by the settings screen's Clear Markers button) and persist. */
@@ -113,10 +126,26 @@ public final class MarkerManager {
 
     public static void tick(Minecraft mc) {
         syncWorld(mc); // load this world's saved markers when the world/dimension changes
-        if (mc.player == null || mc.level == null || mc.gui.screen() != null || !active()) {
+        PlacementMode pm = (mc.player == null || mc.level == null || mc.gui.screen() != null)
+                ? PlacementMode.DISABLED : Gradient.currentPlacement(mc);
+        if (!pm.isMarker()) {
             cancelDrag();
+            clearCorner();     // leaving corners mode drops the pending first corner + volume
+            endStroke(mc);
+            lastLeft = lastRight = false;
             return;
         }
+        if (pm != PlacementMode.MARKER_CORNERS) clearCorner();
+        if (pm != PlacementMode.MARKER_DRAW) endStroke(mc);
+        switch (pm) {
+            case MARKER -> tickDrag(mc);
+            case MARKER_CORNERS -> tickCorners(mc);
+            case MARKER_DRAW -> tickFreehand(mc);
+            default -> { }
+        }
+    }
+
+    private static void tickDrag(Minecraft mc) {
         BlockHitResult hit = targetedHit(mc);
         BlockPos target = hit == null ? null : hit.getBlockPos();
         boolean left = mc.options.keyAttack.isDown();
@@ -129,20 +158,28 @@ public final class MarkerManager {
             }
             case START -> {
                 if (!left) commitDrag();
-                else if (target != null) updateDrag(target);
+                else if (!dragConsumed && target != null) updateDrag(target);
             }
             case END -> {
                 if (!right) commitDrag();
-                else if (target != null) updateDrag(target);
+                else if (!dragConsumed && target != null) updateDrag(target);
             }
         }
     }
 
-    private static BlockHitResult targetedHit(Minecraft mc) {
-        if (mc.hitResult instanceof BlockHitResult bhr && bhr.getType() == HitResult.Type.BLOCK) {
-            return bhr;
-        }
-        return null;
+    /**
+     * The aimed block for marking. Markers aren't placed blocks, so the ray reaches out to the
+     * Marker-dist setting instead of block-place reach — every marker mode can mark at range.
+     */
+    static BlockHitResult targetedHit(Minecraft mc) {
+        if (mc.player == null || mc.level == null) return null;
+        double reach = Math.max(4.5, maxEndDistance());
+        Vec3 eye = mc.player.getEyePosition();
+        Vec3 end = eye.add(mc.player.getViewVector(1.0f).scale(reach));
+        BlockHitResult hit = mc.level.clip(new net.minecraft.world.level.ClipContext(
+                eye, end, net.minecraft.world.level.ClipContext.Block.OUTLINE,
+                net.minecraft.world.level.ClipContext.Fluid.NONE, mc.player));
+        return hit != null && hit.getType() == HitResult.Type.BLOCK ? hit : null;
     }
 
     private static void beginDrag(Kind kind, BlockPos origin, Direction face) {
@@ -153,7 +190,49 @@ public final class MarkerManager {
         Set<BlockPos> set = (kind == Kind.START) ? startMarkers : endMarkers;
         dragRemoving = set.contains(dragOrigin);
         dragLine.clear();
+        // Removing with the clear-connected modifier held wipes the whole connected plane at once.
+        if (dragRemoving && Gradient.clearConnectedDown()) {
+            removeConnectedPlane(kind, dragOrigin, face);
+            dragConsumed = true; // swallow the rest of the hold
+            return;
+        }
         dragLine.add(dragOrigin);
+    }
+
+    /** Remove {@code origin} plus every same-kind marker connected to it in the clicked face's plane. */
+    private static void removeConnectedPlane(Kind kind, BlockPos origin, Direction face) {
+        Set<BlockPos> set = (kind == Kind.START) ? startMarkers : endMarkers;
+        for (BlockPos p : connectedPlane(set, origin, face.getAxis())) {
+            set.remove(p);
+        }
+        if (kind == Kind.START) endMarkers.removeIf(p -> !isEndAllowed(p));
+        saveCurrent();
+    }
+
+    /** Markers in {@code set} connected to {@code seed} (diagonals count) sharing its {@code axis} plane. */
+    private static List<BlockPos> connectedPlane(Set<BlockPos> set, BlockPos seed, Direction.Axis axis) {
+        int plane = seed.get(axis);
+        List<BlockPos> out = new ArrayList<>();
+        java.util.ArrayDeque<BlockPos> bfs = new java.util.ArrayDeque<>();
+        Set<BlockPos> seen = new java.util.HashSet<>();
+        bfs.add(seed);
+        seen.add(seed);
+        while (!bfs.isEmpty()) {
+            BlockPos p = bfs.poll();
+            out.add(p);
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        if (dx == 0 && dy == 0 && dz == 0) continue;
+                        BlockPos n = p.offset(dx, dy, dz);
+                        if (n.get(axis) != plane || seen.contains(n) || !set.contains(n)) continue;
+                        seen.add(n);
+                        bfs.add(n);
+                    }
+                }
+            }
+        }
+        return out;
     }
 
     /** Rebuild the preview line from the origin to {@code target}, locked to the dominant axis. */
@@ -178,6 +257,10 @@ public final class MarkerManager {
     }
 
     private static void commitDrag() {
+        if (dragConsumed) { // the ctrl group-clear already did the work
+            cancelDrag();
+            return;
+        }
         if (dragKind != Kind.NONE && !dragLine.isEmpty()) {
             Set<BlockPos> set = (dragKind == Kind.START) ? startMarkers : endMarkers;
             boolean removedStart = false;
@@ -224,11 +307,229 @@ public final class MarkerManager {
         endMarkers.add(start.relative(face, max));
     }
 
+    // ---- marker corners ---------------------------------------------------------------------------
+
+    /**
+     * Corners mode: left click sets the first (start-side) corner and remembers the clicked face —
+     * that face's axis is the column direction. While a corner is pending, a 1px box is drawn from
+     * it to the aimed block. Right click sets the opposite corner and fills the volume: start
+     * markers over the first corner's plane, end markers over the opposite plane, one colinear
+     * pair per column. With Auto end marker on, each column adapts to the terrain instead: the
+     * start sits on the last solid block before the column's first air gap, the end on the first
+     * non-air block after it (or the far plane when it's all air).
+     */
+    private static void tickCorners(Minecraft mc) {
+        BlockHitResult hit = targetedHit(mc);
+        boolean left = mc.options.keyAttack.isDown();
+        boolean right = mc.options.keyUse.isDown();
+        if (left && !lastLeft && hit != null) {
+            BlockPos target = hit.getBlockPos();
+            if (startMarkers.contains(target)) {
+                // Marked blocks toggle off in every marker mode (Ctrl = the connected plane).
+                toggleOff(Kind.START, target, hit.getDirection());
+            } else {
+                cornerA = target.immutable(); // re-clicking simply moves the corner
+                cornerFace = hit.getDirection();
+            }
+        }
+        if (right && !lastRight && hit != null) {
+            if (cornerA != null) {
+                commitCorners(mc, hit.getBlockPos());
+                clearCorner();
+            } else if (endMarkers.contains(hit.getBlockPos())) {
+                toggleOff(Kind.END, hit.getBlockPos(), hit.getDirection());
+            } else {
+                overlay(mc, "Corners: left-click the first corner first");
+            }
+        }
+        lastLeft = left;
+        lastRight = right;
+    }
+
+    /** Toggle one marker off — or, with the clear-connected modifier held, its whole plane. */
+    private static void toggleOff(Kind kind, BlockPos pos, Direction face) {
+        if (Gradient.clearConnectedDown()) {
+            removeConnectedPlane(kind, pos, face);
+            return;
+        }
+        Set<BlockPos> set = (kind == Kind.START) ? startMarkers : endMarkers;
+        set.remove(pos);
+        if (kind == Kind.START) endMarkers.removeIf(p -> !isEndAllowed(p));
+        saveCurrent();
+    }
+
+    private static void clearCorner() {
+        cornerA = null;
+        cornerFace = null;
+    }
+
+    private static void commitCorners(Minecraft mc, BlockPos cornerB) {
+        Direction.Axis axis = cornerFace.getAxis();
+        int a0 = cornerA.get(axis), b0 = cornerB.get(axis);
+        int sign = Integer.signum(b0 - a0);
+        if (sign == 0) sign = cornerFace.getAxisDirection().getStep(); // flat box: fall back to the face
+        int max = maxEndDistance();
+        if (Math.abs(b0 - a0) > max) {
+            b0 = a0 + sign * max; // a pair can't be further apart than Marker dist
+            overlay(mc, "Corners: depth clamped to Marker dist (" + max + ")");
+        }
+        Direction along = Direction.fromAxisAndDirection(axis,
+                sign > 0 ? Direction.AxisDirection.POSITIVE : Direction.AxisDirection.NEGATIVE);
+        int len = Math.abs(b0 - a0);
+        if (len == 0) { // start and end would be the same block in every column
+            overlay(mc, "Corners: the box has no depth — pick a further corner");
+            return;
+        }
+
+        // The two axes spanning the marker planes.
+        Direction.Axis uAxis = axis == Direction.Axis.X ? Direction.Axis.Y : Direction.Axis.X;
+        Direction.Axis vAxis = axis == Direction.Axis.Z ? Direction.Axis.Y : Direction.Axis.Z;
+        int u1 = Math.min(cornerA.get(uAxis), cornerB.get(uAxis));
+        int u2 = Math.max(cornerA.get(uAxis), cornerB.get(uAxis));
+        int v1 = Math.min(cornerA.get(vAxis), cornerB.get(vAxis));
+        int v2 = Math.max(cornerA.get(vAxis), cornerB.get(vAxis));
+
+        boolean auto = ConfigManager.get().autoPlaceEnd;
+        int placed = 0;
+        for (int u = u1; u <= u2; u++) {
+            for (int v = v1; v <= v2; v++) {
+                BlockPos startCell = cellAt(axis, a0, uAxis, u, vAxis, v);
+                BlockPos endCell = cellAt(axis, b0, uAxis, u, vAxis, v);
+                if (auto) {
+                    if (!placeAutoColumn(mc, startCell, endCell, along, len)) continue;
+                } else {
+                    startMarkers.add(startCell);
+                    endMarkers.add(endCell);
+                }
+                placed++;
+            }
+        }
+        saveCurrent();
+        overlay(mc, "Corners: marked " + placed + " column" + (placed == 1 ? "" : "s"));
+    }
+
+    private static BlockPos cellAt(Direction.Axis axis, int a, Direction.Axis uAxis, int u,
+                                   Direction.Axis vAxis, int v) {
+        int x = axis == Direction.Axis.X ? a : (uAxis == Direction.Axis.X ? u : v);
+        int y = axis == Direction.Axis.Y ? a : (uAxis == Direction.Axis.Y ? u : v);
+        int z = axis == Direction.Axis.Z ? a : (vAxis == Direction.Axis.Z ? v : u);
+        return new BlockPos(x, y, z);
+    }
+
+    /**
+     * Terrain-adaptive corners column (Auto end marker on): the start marker sits on the last
+     * solid block before the column's first air gap, the end marker on the first non-air block
+     * after it — or on the far plane when the rest is all air. Everything stays strictly inside
+     * the drawn volume: a start plane already in air (no start block inside), a fully buried
+     * column, or a column whose start and end would collapse onto the same block is skipped.
+     */
+    private static boolean placeAutoColumn(Minecraft mc, BlockPos startCell, BlockPos endCell,
+                                           Direction along, int len) {
+        if (mc.level.getBlockState(startCell).isAir()) return false; // no start block inside the volume
+        BlockPos start = null;
+        for (int k = 1; k <= len; k++) { // climb to the last solid block before the air gap
+            BlockPos p = startCell.relative(along, k);
+            if (mc.level.getBlockState(p).isAir()) {
+                start = p.relative(along.getOpposite());
+                break;
+            }
+        }
+        if (start == null) return false; // fully buried column — nothing to paint
+
+        int steps = Math.min(maxEndDistance(),
+                Math.abs(endCell.get(along.getAxis()) - start.get(along.getAxis())));
+        if (steps <= 0) return false; // the start reached the far plane — no room for an end
+        BlockPos end = null;
+        for (int k = 1; k <= steps; k++) {
+            BlockPos p = start.relative(along, k);
+            if (!mc.level.getBlockState(p).isAir()) {
+                end = p;
+                break;
+            }
+        }
+        if (end == null) end = start.relative(along, steps); // all air → the far plane
+        if (end.equals(start)) return false;
+        startMarkers.add(start);
+        if (isEndAllowed(end)) endMarkers.add(end);
+        return true;
+    }
+
+    // ---- marker draw (freehand) ---------------------------------------------------------------------
+
+    /**
+     * Freehand mode: hold left to paint start markers over whatever the crosshair touches, hold
+     * right for end markers (only where a start marker lines up). A stroke that begins on a
+     * marked block erases instead — with the clear-connected modifier held, the whole connected
+     * plane goes at once.
+     */
+    private static void tickFreehand(Minecraft mc) {
+        BlockHitResult hit = targetedHit(mc);
+        boolean left = mc.options.keyAttack.isDown();
+        boolean right = mc.options.keyUse.isDown();
+        if (strokeKind == Kind.NONE) {
+            if (left && hit != null) beginStroke(mc, Kind.START, hit);
+            else if (right && hit != null) beginStroke(mc, Kind.END, hit);
+        } else if ((strokeKind == Kind.START && !left) || (strokeKind == Kind.END && !right)) {
+            endStroke(mc);
+        } else if (!strokeConsumed && hit != null) {
+            applyStroke(hit);
+        }
+    }
+
+    private static void beginStroke(Minecraft mc, Kind kind, BlockHitResult hit) {
+        strokeKind = kind;
+        Set<BlockPos> set = (kind == Kind.START) ? startMarkers : endMarkers;
+        strokeRemoving = set.contains(hit.getBlockPos());
+        strokeRemovedStart = false;
+        strokeConsumed = false;
+        strokeFace = hit.getDirection();
+        if (strokeRemoving && Gradient.clearConnectedDown()) {
+            removeConnectedPlane(kind, hit.getBlockPos(), hit.getDirection());
+            strokeConsumed = true; // swallow the rest of the hold
+            return;
+        }
+        applyStroke(hit);
+    }
+
+    private static void applyStroke(BlockHitResult hit) {
+        BlockPos pos = hit.getBlockPos().immutable();
+        Set<BlockPos> set = (strokeKind == Kind.START) ? startMarkers : endMarkers;
+        if (strokeRemoving) {
+            if (set.remove(pos) && strokeKind == Kind.START) strokeRemovedStart = true;
+        } else if (strokeKind == Kind.START) {
+            // Auto ends scan along the face the stroke BEGAN on — brushing over a block's side
+            // mid-sweep must not shoot an end marker off sideways.
+            if (set.add(pos) && ConfigManager.get().autoPlaceEnd) {
+                autoPlaceEndFor(pos, strokeFace);
+            }
+        } else if (isEndAllowed(pos)) {
+            set.add(pos);
+        }
+    }
+
+    private static void endStroke(Minecraft mc) {
+        if (strokeKind == Kind.NONE) return;
+        if (strokeRemovedStart) endMarkers.removeIf(p -> !isEndAllowed(p));
+        saveCurrent();
+        strokeKind = Kind.NONE;
+        strokeRemoving = false;
+        strokeConsumed = false;
+        strokeRemovedStart = false;
+        strokeFace = null;
+    }
+
+    private static void overlay(Minecraft mc, String msg) {
+        if (mc.player != null) {
+            mc.player.sendOverlayMessage(net.minecraft.network.chat.Component.literal(msg));
+        }
+    }
+
     private static void cancelDrag() {
         dragKind = Kind.NONE;
         dragOrigin = null;
         dragFace = null;
         dragRemoving = false;
+        dragConsumed = false;
         dragLine.clear();
     }
 
@@ -256,9 +557,15 @@ public final class MarkerManager {
     // ---- rendering (level render event) ---------------------------------------------------------
 
     public static void render(LevelRenderContext ctx) {
+        Minecraft mc = Minecraft.getInstance();
+        PlacementMode pm = Gradient.currentPlacement(mc);
         // The auto-end face preview can show before any marker exists (e.g. a fresh world).
-        boolean preview = ConfigManager.get().autoPlaceEnd && active();
-        if (!preview && startMarkers.isEmpty() && endMarkers.isEmpty() && dragLine.isEmpty()) return;
+        // Corners mode has its own volume preview instead.
+        boolean preview = ConfigManager.get().autoPlaceEnd && active()
+                && pm != PlacementMode.MARKER_CORNERS;
+        boolean corners = pm == PlacementMode.MARKER_CORNERS && cornerA != null;
+        if (!preview && !corners
+                && startMarkers.isEmpty() && endMarkers.isEmpty() && dragLine.isEmpty()) return;
 
         // Submit with a FRESH identity PoseStack (as vanilla's submitFeatures does for block
         // entities + the block outline) and let the collector apply the camera rotation. Using the
@@ -285,7 +592,35 @@ public final class MarkerManager {
             }
         }
 
+        if (corners) renderCornersPreview(mc, col, ps, cam);
         if (preview) renderAutoEndPreview(col, ps, cam);
+    }
+
+    /**
+     * Corners mode with a pending first corner: the corner glows turquoise, the aimed block amber,
+     * and a 1px box spans the volume that the second click will fill with marker columns.
+     */
+    private static void renderCornersPreview(Minecraft mc, SubmitNodeCollector col, PoseStack ps, Vec3 cam) {
+        filled(col, ps, cam, cornerA, START_FILL);
+        BlockHitResult hit = targetedHit(mc);
+        if (hit == null) return;
+        BlockPos b = hit.getBlockPos();
+        if (!b.equals(cornerA)) filled(col, ps, cam, b, END_FILL);
+        boxOutline(col, ps, cam, cornerA, b, 0xFFE0E0E0);
+    }
+
+    /** 1px outline of the block-aligned box spanning corners {@code a} and {@code b}. */
+    private static void boxOutline(SubmitNodeCollector col, PoseStack ps, Vec3 cam,
+                                   BlockPos a, BlockPos b, int argb) {
+        int minX = Math.min(a.getX(), b.getX()), minY = Math.min(a.getY(), b.getY()),
+                minZ = Math.min(a.getZ(), b.getZ());
+        int sx = Math.abs(a.getX() - b.getX()) + 1, sy = Math.abs(a.getY() - b.getY()) + 1,
+                sz = Math.abs(a.getZ() - b.getZ()) + 1;
+        ps.pushPose();
+        ps.translate(minX - cam.x, minY - cam.y, minZ - cam.z);
+        col.submitShapeOutline(ps, Shapes.box(0, 0, 0, sx, sy, sz),
+                RenderTypes.lines(), argb, LINE_WIDTH, false);
+        ps.popPose();
     }
 
     // ---- auto-end face preview -------------------------------------------------------------------
@@ -308,43 +643,7 @@ public final class MarkerManager {
     }
 
     private static void facePreview(SubmitNodeCollector col, PoseStack ps, Vec3 cam, BlockPos pos, Direction face) {
-        if (face == null) return;
-        ps.pushPose();
-        ps.translate(pos.getX() - cam.x, pos.getY() - cam.y, pos.getZ() - cam.z);
-        col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(), (pose, vc) -> emitFacePreview(pose, vc, face));
-        ps.popPose();
-    }
-
-    /** The face tint + normal arrow, in block-local coordinates (the pose already sits at the block). */
-    private static void emitFacePreview(PoseStack.Pose pose, VertexConsumer vc, Direction face) {
-        Vec3 n = new Vec3(face.getStepX(), face.getStepY(), face.getStepZ());
-        // Two unit tangents spanning the face.
-        Vec3 u = n.x != 0 ? new Vec3(0, 1, 0) : new Vec3(1, 0, 0);
-        Vec3 v = n.z != 0 ? new Vec3(0, 1, 0) : new Vec3(0, 0, 1);
-        Vec3 c = new Vec3(0.5, 0.5, 0.5).add(n.scale(0.5 + EXPAND)); // face centre, just off the surface
-
-        quadDS(vc, pose, FACE_FILL,
-                c.subtract(u.scale(0.5)).subtract(v.scale(0.5)),
-                c.add(u.scale(0.5)).subtract(v.scale(0.5)),
-                c.add(u.scale(0.5)).add(v.scale(0.5)),
-                c.subtract(u.scale(0.5)).add(v.scale(0.5)));
-
-        // The arrow: a thin crossed shaft along the normal plus a crossed triangle head, so it
-        // reads as an arrow from any viewing angle.
-        Vec3 shaft = n.scale(0.35), tip = n.scale(0.5);
-        for (Vec3 t : new Vec3[]{u, v}) {
-            Vec3 w = t.scale(0.015), hw = t.scale(0.07);
-            quadDS(vc, pose, ARROW, c.subtract(w), c.add(w), c.add(w).add(shaft), c.subtract(w).add(shaft));
-            quadDS(vc, pose, ARROW, c.subtract(hw).add(shaft), c.add(hw).add(shaft), c.add(tip), c.add(tip));
-        }
-    }
-
-    /** Double-sided quad from Vec3 corners (emitted once per winding so it shows from both sides). */
-    private static void quadDS(VertexConsumer vc, PoseStack.Pose pose, int argb, Vec3 a, Vec3 b, Vec3 c, Vec3 d) {
-        quad(vc, pose, argb, (float) a.x, (float) a.y, (float) a.z, (float) b.x, (float) b.y, (float) b.z,
-                (float) c.x, (float) c.y, (float) c.z, (float) d.x, (float) d.y, (float) d.z);
-        quad(vc, pose, argb, (float) d.x, (float) d.y, (float) d.z, (float) c.x, (float) c.y, (float) c.z,
-                (float) b.x, (float) b.y, (float) b.z, (float) a.x, (float) a.y, (float) a.z);
+        FaceOverlay.submit(col, ps, cam, pos, face, FACE_FILL, ARROW);
     }
 
     private static void outline(SubmitNodeCollector col, PoseStack ps, Vec3 cam, BlockPos pos, int argb) {

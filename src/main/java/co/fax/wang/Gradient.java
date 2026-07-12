@@ -23,29 +23,36 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Client entry point. Registers three keybinds (open settings, cycle mode, switch paint type), the
- * in-game HUD helper text, and wires the shared {@link ToolMode}/{@link PaintType} state. See
- * fabric-26.2-mod-starter.md for API notes.
+ * Client entry point. Registers three keybinds (open settings, cycle placement mode, switch paint
+ * type), the in-game HUD helper text, and wires the shared {@link PlacementMode}/{@link PaintType}
+ * state. See fabric-26.2-mod-starter.md for API notes.
  */
 public class Gradient implements ClientModInitializer {
 
     public static final String MOD_ID = "gradient";
     public static final Logger LOG = LoggerFactory.getLogger(MOD_ID);
 
+    /** Held modifier (default L-Ctrl): a marker-removing click clears the whole connected plane. */
+    private static KeyMapping clearConnectedKey;
+    private static KeyMapping openKey, cycleKey, paintTypeKey;
+
     @Override
     public void onInitializeClient() {
         ConfigManager.load();
 
         // Keybinds (26.2: register via KeyMappingHelper, pass a KeyMapping.Category not a String).
-        KeyMapping openKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+        openKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
                 "key.gradient.open", InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_K, KeyMapping.Category.MISC));
-        KeyMapping cycleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+        cycleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
                 "key.gradient.cycle", InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_G, KeyMapping.Category.MISC));
-        KeyMapping paintTypeKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+        paintTypeKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
                 "key.gradient.paint_type", InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_V, KeyMapping.Category.MISC));
+        clearConnectedKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+                "key.gradient.clear_connected", InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_LEFT_CONTROL, KeyMapping.Category.MISC));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (openKey.consumeClick()) {
@@ -53,15 +60,13 @@ public class Gradient implements ClientModInitializer {
                 client.setScreenAndShow(new GradientScreen());
             }
             while (cycleKey.consumeClick()) {
-                cycleMode();
+                cyclePlacement();
             }
             while (paintTypeKey.consumeClick()) {
                 switchPaintType();
             }
             MarkerManager.tick(client);
-            GradientPlacer.tick(client);
-            NoisePlacer.tick(client);
-            SolidPlacer.tick(client);
+            PaintPlacer.tick(client);
         });
 
         // While the tool is engaged (Marker or Place mode), suppress vanilla left/right click so it
@@ -78,6 +83,7 @@ public class Gradient implements ClientModInitializer {
         // COLLECT_SUBMITS — the same submit-collection phase vanilla uses for entities + the block
         // outline — so our geometry is batched and drawn with the exact same camera (no frame drift).
         LevelRenderEvents.COLLECT_SUBMITS.register(MarkerManager::render);
+        LevelRenderEvents.COLLECT_SUBMITS.register(PaintPlacer::renderPreview);
 
         // In-game HUD helper text (26.2: HudElementRegistry; HudRenderCallback is gone). Two lines
         // — active paint type on top, mode below — only while the paint tool is held. Position is
@@ -98,32 +104,23 @@ public class Gradient implements ClientModInitializer {
         return id != null && cfg.paintTool.equals(id.toString());
     }
 
-    /** The activation mode of the active paint type (DISABLED when the tool isn't held). */
-    public static ToolMode currentMode(Minecraft mc) {
-        if (!holdingPaintTool(mc)) return ToolMode.DISABLED;
-        GradientConfig cfg = ConfigManager.get();
-        return switch (cfg.activePaintType) {
-            case GRADIENT -> cfg.gradientToolMode;
-            case NOISE -> cfg.noiseToolMode;
-            case SOLID -> cfg.solidToolMode;
-        };
+    /** The global placement mode (DISABLED when the tool isn't held). */
+    public static PlacementMode currentPlacement(Minecraft mc) {
+        if (!holdingPaintTool(mc)) return PlacementMode.DISABLED;
+        return ConfigManager.get().placementMode;
     }
 
-    /** Advance the active paint type's mode, persist it, and flash an action-bar message. */
-    public static void cycleMode() {
+    /** Advance the placement mode, persist it, and flash an action-bar message. */
+    public static void cyclePlacement() {
         Minecraft mc = Minecraft.getInstance();
         if (!holdingPaintTool(mc)) {
-            overlay(mc, "FW Paint: hold your paint tool to cycle its mode");
+            overlay(mc, "FW Paint: hold your paint tool to cycle placement");
             return;
         }
         GradientConfig cfg = ConfigManager.get();
-        ToolMode next = switch (cfg.activePaintType) {
-            case GRADIENT -> cfg.gradientToolMode = cfg.gradientToolMode.nextFor(PaintType.GRADIENT);
-            case NOISE -> cfg.noiseToolMode = cfg.noiseToolMode.nextFor(PaintType.NOISE);
-            case SOLID -> cfg.solidToolMode = cfg.solidToolMode.nextFor(PaintType.SOLID);
-        };
+        cfg.placementMode = cfg.placementMode.next();
         ConfigManager.save();
-        overlay(mc, "FW Paint — " + cfg.activePaintType.label() + ": " + next.displayName());
+        overlay(mc, "FW Paint — Placement: " + cfg.placementMode.shortName());
     }
 
     /** Cycle Gradient → Noise → Solid paint. Only works while the paint tool is held; persisted. */
@@ -145,9 +142,29 @@ public class Gradient implements ClientModInitializer {
         }
     }
 
-    /** True when a tool is held and its mode isn't Disabled. */
+    /** True when a tool is held and the placement mode isn't Disabled. */
     public static boolean toolEngaged() {
-        return currentMode(Minecraft.getInstance()) != ToolMode.DISABLED;
+        return currentPlacement(Minecraft.getInstance()) != PlacementMode.DISABLED;
+    }
+
+    /** True while the clear-connected modifier (default L-Ctrl) is held. */
+    public static boolean clearConnectedDown() {
+        return clearConnectedKey != null && clearConnectedKey.isDown();
+    }
+
+    /**
+     * Display name of a mod keybind ("open" / "cycle" / "paint" / "clear") as currently bound —
+     * UI text (e.g. the Help tab) uses this so rebinds always read correctly.
+     */
+    public static String boundKey(String id) {
+        KeyMapping k = switch (id) {
+            case "open" -> openKey;
+            case "cycle" -> cycleKey;
+            case "paint" -> paintTypeKey;
+            case "clear" -> clearConnectedKey;
+            default -> null;
+        };
+        return k == null ? "?" : k.getTranslatedKeyMessage().getString();
     }
 
     /** Resolve an item registry id (as stored in config) to its block, or null. */

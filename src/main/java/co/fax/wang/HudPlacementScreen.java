@@ -65,11 +65,11 @@ public class HudPlacementScreen extends Screen {
     public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
         GradientConfig cfg = ConfigManager.get();
         String typeLine = "FW Paint — " + cfg.activePaintType.label();
-        String modeLine = ToolMode.MARKER.displayName(); // sample mode line for the preview
+        String modeLine = PlacementMode.MARKER.displayName(); // sample mode line for the preview
         int w = Math.max(this.font.width(typeLine), this.font.width(modeLine));
         int h = this.font.lineHeight * 2 + 1;
         g.fill(cfg.hudX - 2, cfg.hudY - 2, cfg.hudX + w + 2, cfg.hudY + h + 2, HIGHLIGHT);
-        HudOverlay.draw(g, cfg.hudX, cfg.hudY, typeLine, modeLine, ToolMode.MARKER.color());
+        HudOverlay.draw(g, cfg.hudX, cfg.hudY, typeLine, modeLine, PlacementMode.MARKER.color());
         super.extractRenderState(g, mouseX, mouseY, partialTick); // buttons on top
     }
 

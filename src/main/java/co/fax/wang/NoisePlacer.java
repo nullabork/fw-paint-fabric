@@ -8,15 +8,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -24,76 +21,19 @@ import java.util.Random;
 import java.util.Set;
 
 /**
- * Noise tool placement: right-click flood-fills the air you're aiming at, bounded by the marker
- * region (the markers are only the boundary — they don't set colours). Each filled cell's block is
- * chosen by {@link Noise} sampled at its world xyz, mapped onto the noise tab's block ordering.
- * Placement is queued and rate-limited across ticks so a big fill doesn't spam packets.
+ * Noise paint's block choice + region helpers, used by {@link PaintPlacer}: the valley→peak block
+ * ordering (mirroring the noise tab preview), the per-cell slot choice, and the marked-region
+ * tests for the classic in-marker flood fill. Input handling lives in {@link PaintPlacer}.
  */
 public final class NoisePlacer {
 
     private NoisePlacer() {}
 
-    private static final int PLACE_PER_TICK = 8;
-    private static final int MAX_FILL = 8192;
     private static final double REACH = 6.0;
-
     private static final Random RANDOM = new Random();
-    private static boolean lastUseDown = false;
-    private static final ArrayDeque<FloodFill.Cell> queue = new ArrayDeque<>();
-    private static List<List<Block>> order = new ArrayList<>(); // each entry = a step (a tie group)
-
-    public static void tick(Minecraft mc) {
-        if (mc.player == null || mc.level == null || mc.gui.screen() != null
-                || ConfigManager.get().activePaintType != PaintType.NOISE
-                || Gradient.currentMode(mc) != ToolMode.PLACE) {
-            lastUseDown = false;
-            queue.clear();
-            return;
-        }
-        boolean down = mc.options.keyUse.isDown();
-        if (down && !lastUseDown) startFill(mc);
-        lastUseDown = down;
-        drain(mc);
-    }
-
-    /** True while we're issuing our own placement (so the click-cancel callbacks let it through). */
-    public static boolean isPlacing() {
-        return BlockPlacement.isPlacing();
-    }
-
-    // ---- start a fill ---------------------------------------------------------------------------
-
-    private static void startFill(Minecraft mc) {
-        LocalPlayer player = mc.player;
-        if (MarkerManager.startMarkers.isEmpty() || MarkerManager.endMarkers.isEmpty()) {
-            player.sendOverlayMessage(Component.literal("Noise: place start + end markers to bound the fill"));
-            return;
-        }
-        order = computeOrder(player);
-        if (order.isEmpty()) {
-            player.sendOverlayMessage(Component.literal("Noise: no placeable blocks in source"));
-            return;
-        }
-        // A cell is fillable only if it lies between a colinear start→end marker pair (a row/column
-        // bracketed by start at one end and end at the other). Adjacent segments let the flood spread;
-        // gaps stop it (you must re-point past a gap).
-        int maxDist = Math.max(1, ConfigManager.get().maxMarkerDistance);
-        FloodFill.Region region = (x, y, z) -> inMarkedSegment(x, y, z, maxDist);
-        FloodFill.AirTest air = (x, y, z) -> mc.level.getBlockState(new BlockPos(x, y, z)).isAir();
-
-        int[][] seed = raycastSeed(mc, region, air);
-        if (seed == null) {
-            player.sendOverlayMessage(Component.literal("Noise: aim at an empty spot inside the markers"));
-            return;
-        }
-        List<FloodFill.Cell> cells = FloodFill.compute(seed[0], seed[1], air, region, MAX_FILL);
-        queue.clear();
-        queue.addAll(cells);
-        player.sendOverlayMessage(Component.literal("Noise: filling " + cells.size() + " blocks"));
-    }
 
     /** True if (x,y,z) lies strictly between some colinear start→end marker pair within maxDist. */
-    private static boolean inMarkedSegment(int x, int y, int z, int maxDist) {
+    static boolean inMarkedSegment(int x, int y, int z, int maxDist) {
         for (BlockPos s : MarkerManager.startMarkers) {
             for (BlockPos e : MarkerManager.endMarkers) {
                 if (betweenColinear(s.getX(), s.getY(), s.getZ(), e.getX(), e.getY(), e.getZ(), x, y, z, maxDist)) {
@@ -128,7 +68,7 @@ public final class NoisePlacer {
     }
 
     /** First air cell along the look ray that is in the region and has a solid neighbour to build on. */
-    private static int[][] raycastSeed(Minecraft mc, FloodFill.Region region, FloodFill.AirTest air) {
+    static int[][] raycastSeed(Minecraft mc, FloodFill.Region region, FloodFill.AirTest air) {
         Vec3 eye = mc.player.getEyePosition();
         Vec3 look = mc.player.getViewVector(1.0f);
         BlockPos last = null;
@@ -147,40 +87,27 @@ public final class NoisePlacer {
         return null;
     }
 
-    // ---- drain the queue ------------------------------------------------------------------------
+    // ---- per-cell block choice --------------------------------------------------------------------
 
-    private static void drain(Minecraft mc) {
-        LocalPlayer player = mc.player;
-        Level level = mc.level;
+    /**
+     * The inventory slot for a cell: sample the noise field at its position, apply chaos, map onto
+     * the order, and take the nearest step that still has an available block (random within a tie
+     * group). Returns -1 when none of the gradient blocks are in the inventory.
+     */
+    static int slotForCell(LocalPlayer player, List<List<Block>> order, int x, int y, int z) {
         GradientConfig cfg = ConfigManager.get();
-        long seed = noiseSeedLong(cfg);
-        int placed = 0;
-        while (!queue.isEmpty() && placed < PLACE_PER_TICK) {
-            FloodFill.Cell c = queue.poll();
-            BlockPos pos = new BlockPos(c.x(), c.y(), c.z());
-            if (!level.getBlockState(pos).isAir()) continue; // already filled or obstructed
-            BlockPos support = new BlockPos(c.sx(), c.sy(), c.sz());
-            if (level.getBlockState(support).isAir()) continue; // support not solid (skipped/dropped)
-
-            double t = Noise.sample(cfg.noiseType, c.x(), c.y(), c.z(), seed,
-                    cfg.noiseScaleX, cfg.noiseScaleY, cfg.noiseScaleZ);
-            if (cfg.noiseChaos > 0 && RANDOM.nextDouble() < cfg.noiseChaos) {
-                double stepFrac = order.size() > 1 ? 1.0 / (order.size() - 1) : 0.1;
-                t = clamp01(RANDOM.nextBoolean() ? t - stepFrac : t + stepFrac);
-            }
-            // Each step is a band-variation group (built in computeOrder); chooseSlot randomises
-            // within the group, so variation happens without changing the step count.
-            int idx = GradientRamp.rampIndex(order.size(), t);
-            int slot = chooseSlot(player, idx);
-            if (slot < 0) continue; // none of the gradient blocks are available
-            Direction dir = Direction.getNearest(c.x() - c.sx(), c.y() - c.sy(), c.z() - c.sz(), Direction.UP);
-            BlockPlacement.place(mc, player, slot, support, dir);
-            placed++;
+        double t = Noise.sample(cfg.noiseType, x, y, z, noiseSeedLong(cfg),
+                cfg.noiseScaleX, cfg.noiseScaleY, cfg.noiseScaleZ);
+        if (cfg.noiseChaos > 0 && RANDOM.nextDouble() < cfg.noiseChaos) {
+            double stepFrac = order.size() > 1 ? 1.0 / (order.size() - 1) : 0.1;
+            t = clamp01(RANDOM.nextBoolean() ? t - stepFrac : t + stepFrac);
         }
+        int idx = GradientRamp.rampIndex(order.size(), t);
+        return chooseSlot(player, order, idx);
     }
 
     /** Slot of a block for step {@code idx} (random within a tie group), nearest available. */
-    private static int chooseSlot(LocalPlayer player, int idx) {
+    private static int chooseSlot(LocalPlayer player, List<List<Block>> order, int idx) {
         for (int step = 0; step < order.size(); step++) {
             for (int sgn = -1; sgn <= 1; sgn += 2) {
                 int i = idx + sgn * step;
@@ -199,7 +126,7 @@ public final class NoisePlacer {
 
     // ---- ordering (valley→peak), mirrors the noise tab preview -----------------------------------
 
-    private static List<List<Block>> computeOrder(LocalPlayer player) {
+    static List<List<Block>> computeOrder(LocalPlayer player) {
         GradientConfig cfg = ConfigManager.get();
         List<Block> palette = gatherPalette(player);
         if (palette.isEmpty()) return List.of();

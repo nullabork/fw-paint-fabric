@@ -4,8 +4,8 @@ import co.fax.wang.CurveFunction;
 import co.fax.wang.GradientMode;
 import co.fax.wang.GradientSource;
 import co.fax.wang.PaintType;
+import co.fax.wang.PlacementMode;
 import co.fax.wang.SolidMatch;
-import co.fax.wang.ToolMode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,10 +24,11 @@ public class GradientConfig {
     /** What the tool currently paints — switched in-game with the paint-type keybind. */
     public PaintType activePaintType = PaintType.GRADIENT;
 
-    /** Per-paint-type activation mode (Marker / Place / Extrude / Flood 3D / Disabled). */
-    public ToolMode gradientToolMode = ToolMode.DISABLED;
-    public ToolMode noiseToolMode = ToolMode.DISABLED;
-    public ToolMode solidToolMode = ToolMode.DISABLED;
+    /**
+     * Where blocks go (Marker / Single / Face / 3D Fill / Disabled) — one global mode shared by
+     * all paint types, cycled with the mode keybind.
+     */
+    public PlacementMode placementMode = PlacementMode.DISABLED;
 
     // ---- HUD helper text --------------------------------------------------------------------------
 
@@ -59,6 +60,23 @@ public class GradientConfig {
      * uses the face the drag began on, producing a matching line of ends.
      */
     public boolean autoPlaceEnd = false;
+
+    // ---- placement behaviour ----------------------------------------------------------------------
+
+    /**
+     * Face mode inside markers: when on, the fill advances only the most-behind columns each
+     * layer until every column's front is level, then all stack together (fill voids first).
+     * Off = every column advances at once. Outside markers the face flood always starts from the
+     * clicked plane, so this only matters in-marker.
+     */
+    public boolean faceFillVoids = true;
+
+    /**
+     * Idle seconds before an outside-marker gradient forgets its progress (the session cache is
+     * dropped and the next click starts a fresh gradient). Also cleared whenever the picker
+     * gradient changes.
+     */
+    public int gradientCacheSeconds = 60;
 
     // ---- gradient settings ----------------------------------------------------------------------
 

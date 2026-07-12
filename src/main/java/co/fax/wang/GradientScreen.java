@@ -74,7 +74,7 @@ public class GradientScreen extends Screen {
     private record SourceBlock(String id, ItemStack stack, Block block) {}
     private record ToolRow(String id, String name) {}
 
-    private static Tab tab = Tab.SOLID; // remembered across reopening the screen this session
+    private static Tab tab = Tab.SOLID; // set on open to the active paint type's tab
 
     // Picker tabs (Gradient + Noise) state.
     private BlockPickerPanel picker;
@@ -109,7 +109,7 @@ public class GradientScreen extends Screen {
 
     // Settings tab state.
     private EditBox filterBox;
-    private int autoEndDescY;
+    private int autoEndDescY, fillVoidsDescY, memoryDescY;
     private final List<ToolRow> matches = new ArrayList<>();
     private String filter = "";
     private int toolRowHeight = 12;
@@ -117,6 +117,12 @@ public class GradientScreen extends Screen {
 
     public GradientScreen() {
         super(Component.literal("FW Paint"));
+        // Open on the tab of whatever is being painted right now.
+        tab = switch (ConfigManager.get().activePaintType) {
+            case SOLID -> Tab.SOLID;
+            case GRADIENT -> Tab.GRADIENT;
+            case NOISE -> Tab.NOISE;
+        };
     }
 
     // ---- layout helpers -------------------------------------------------------------------------
@@ -138,8 +144,31 @@ public class GradientScreen extends Screen {
         else if (tab == Tab.HELP) initHelpTab();
         else initSettingsTab();
 
-        addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
-                .bounds(this.width / 2 - 50, this.height - 26, 100, 20).build());
+        // Tool tabs get a "Use" button next to Done: makes this tab's paint type the active one
+        // (same as cycling with the paint-type keybind).
+        PaintType tabType = switch (tab) {
+            case SOLID -> PaintType.SOLID;
+            case GRADIENT -> PaintType.GRADIENT;
+            case NOISE -> PaintType.NOISE;
+            default -> null;
+        };
+        if (tabType != null) {
+            addRenderableWidget(Button.builder(useLabel(tabType), b -> {
+                ConfigManager.get().activePaintType = tabType;
+                ConfigManager.save();
+                b.setMessage(useLabel(tabType));
+            }).bounds(this.width / 2 - 102, this.height - 26, 100, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
+                    .bounds(this.width / 2 + 2, this.height - 26, 100, 20).build());
+        } else {
+            addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
+                    .bounds(this.width / 2 - 50, this.height - 26, 100, 20).build());
+        }
+    }
+
+    private Component useLabel(PaintType t) {
+        return Component.literal(ConfigManager.get().activePaintType == t
+                ? "In use ✓" : "Use " + t.label());
     }
 
     private void setTab(Tab t) { tab = t; rebuildWidgets(); }
@@ -728,14 +757,9 @@ public class GradientScreen extends Screen {
         GradientConfig cfg = ConfigManager.get();
         int y = 30;
 
-        cycleButton(rx, y, rw, () -> Component.literal("Gradient mode: " + cfg.gradientToolMode.displayName()),
-                () -> { GradientConfig c = ConfigManager.get(); c.gradientToolMode = c.gradientToolMode.nextFor(PaintType.GRADIENT); });
-        y += 24;
-        cycleButton(rx, y, rw, () -> Component.literal("Noise mode: " + cfg.noiseToolMode.displayName()),
-                () -> { GradientConfig c = ConfigManager.get(); c.noiseToolMode = c.noiseToolMode.nextFor(PaintType.NOISE); });
-        y += 24;
-        cycleButton(rx, y, rw, () -> Component.literal("Solid mode: " + cfg.solidToolMode.displayName()),
-                () -> { GradientConfig c = ConfigManager.get(); c.solidToolMode = c.solidToolMode.nextFor(PaintType.SOLID); });
+        // One global placement mode (Marker/Single/Face/3D Fill/Disabled), shared by every paint type.
+        cycleButton(rx, y, rw, () -> Component.literal("Placement: " + ConfigManager.get().placementMode.shortName()),
+                () -> { GradientConfig c = ConfigManager.get(); c.placementMode = c.placementMode.next(); });
         y += 24;
 
         addRenderableWidget(new ConfigSlider(rx, y, rw, distToSlider(cfg.maxMarkerDistance),
@@ -746,16 +770,26 @@ public class GradientScreen extends Screen {
                 () -> ConfigManager.get().autoPlaceEnd = !ConfigManager.get().autoPlaceEnd);
         y += 24; autoEndDescY = y; y += 12;
 
+        cycleButton(rx, y, rw, () -> Component.literal("Fill voids first: " + (ConfigManager.get().faceFillVoids ? "On" : "Off")),
+                () -> ConfigManager.get().faceFillVoids = !ConfigManager.get().faceFillVoids);
+        y += 24; fillVoidsDescY = y; y += 12;
+
+        addRenderableWidget(new ConfigSlider(rx, y, rw, secsToSlider(cfg.gradientCacheSeconds),
+                v -> "Gradient memory: " + secsLabel(sliderToSecs(v)),
+                v -> ConfigManager.get().gradientCacheSeconds = sliderToSecs(v)));
+        y += 24; memoryDescY = y; y += 12;
+
         addRenderableWidget(Button.builder(clearMarkersLabel(), b -> {
             MarkerManager.clearAll(); b.setMessage(clearMarkersLabel());
         }).bounds(rx, y, rw, 20).build());
         y += 24;
-        cycleButton(rx, y, rw, () -> Component.literal("Debug logging: " + (ConfigManager.get().debug ? "On" : "Off")),
-                () -> ConfigManager.get().debug = !ConfigManager.get().debug);
-        y += 24;
-        addRenderableWidget(Button.builder(Component.literal("Move helper text…"), b -> {
+        // Two half-width buttons on one row to keep the column inside short windows.
+        addRenderableWidget(Button.builder(Component.literal("Move helper…"), b -> {
             if (this.minecraft != null) this.minecraft.setScreenAndShow(new HudPlacementScreen(this));
-        }).bounds(rx, y, rw, 20).build());
+        }).bounds(rx, y, rw / 2 - 2, 20).build());
+        cycleButton(rx + rw / 2 + 2, y, rw - rw / 2 - 2,
+                () -> Component.literal("Debug: " + (ConfigManager.get().debug ? "On" : "Off")),
+                () -> ConfigManager.get().debug = !ConfigManager.get().debug);
 
         // Left column: the paint-tool assign button (overlay shows it's armed) + filter + list.
         int cx = contentX(), w = leftW();
@@ -937,6 +971,13 @@ public class GradientScreen extends Screen {
     private static double stepsToSlider(int steps) { return (Math.max(1, Math.min(16, steps)) - 1) / 15.0; }
     private static int sliderToDist(double v) { return Math.max(1, Math.min(128, 1 + (int) Math.round(v * 127))); }
     private static double distToSlider(int d) { return (Math.max(1, Math.min(128, d)) - 1) / 127.0; }
+    // Gradient memory: 10 s – 5 min.
+    private static int sliderToSecs(double v) { return Math.max(10, Math.min(300, 10 + (int) Math.round(v * 290))); }
+    private static double secsToSlider(int s) { return (Math.max(10, Math.min(300, s)) - 10) / 290.0; }
+    private static String secsLabel(int s) {
+        if (s < 60) return s + "s";
+        return s % 60 == 0 ? (s / 60) + "m" : (s / 60) + "m " + (s % 60) + "s";
+    }
 
     // ---- rendering ------------------------------------------------------------------------------
 
@@ -1058,6 +1099,10 @@ public class GradientScreen extends Screen {
 
         g.text(this.font, this.font.plainSubstrByWidth("Start click scans its face to a block", rightW()),
                 rightX(), autoEndDescY, YELLOW);
+        g.text(this.font, this.font.plainSubstrByWidth("Face mode in markers: level, then stack", rightW()),
+                rightX(), fillVoidsDescY, YELLOW);
+        g.text(this.font, this.font.plainSubstrByWidth("Idle gap before a new gradient starts", rightW()),
+                rightX(), memoryDescY, YELLOW);
 
         // Darken the tool button while it's armed (drawn over the vanilla button).
         if (assigningTool) g.fill(cx, TOOL_BTN_Y, cx + w, TOOL_BTN_Y + TOOL_BTN_H, PRESSED_OVERLAY);
