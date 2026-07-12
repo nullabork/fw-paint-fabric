@@ -3,7 +3,6 @@ package co.fax.wang;
 import co.fax.wang.config.ConfigManager;
 import co.fax.wang.config.GradientConfig;
 import com.mojang.blaze3d.vertex.PoseStack;
-import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.SubmitNodeCollector;
@@ -664,12 +663,10 @@ public final class PaintPlacer {
                 : List.of("Start selected from marker", "End selected from picker");
     }
 
-    /** Submit the green face tint + direction arrows (registered on COLLECT_SUBMITS). */
-    public static void renderPreview(LevelRenderContext ctx) {
+    /** Submit the green face tint + direction arrows (each loader's level-render submit hook). */
+    public static void renderPreview(SubmitNodeCollector col, Vec3 cam) {
         if (previewPos.isEmpty()) return;
         PoseStack ps = new PoseStack();
-        SubmitNodeCollector col = ctx.submitNodeCollector();
-        Vec3 cam = ctx.levelState().cameraRenderState.pos;
         for (int i = 0; i < previewPos.size(); i++) {
             FaceOverlay.submit(col, ps, cam, previewPos.get(i), previewDir.get(i), GREEN_FILL, GREEN_ARROW);
         }

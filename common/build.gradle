@@ -1,0 +1,27 @@
+// All game code + unit tests, loader-free: it compiles against the unobfuscated Minecraft jar
+// only (26.1+ ships Mojang names), so the exact same classes are bundled into both loader jars.
+// Loom is applied purely to provide the `minecraft` dependency — nothing Fabric is on the
+// compile classpath, so a stray loader import fails the build.
+plugins {
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+base { archivesName = 'fw-paint-common' }
+
+repositories {
+    maven { url = 'https://maven.fabricmc.net/' }
+    mavenCentral() // for JUnit
+}
+
+dependencies {
+    // No `mappings` line — game is unobfuscated. Plain `implementation`, not `modImplementation`.
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+
+    testImplementation platform("org.junit:junit-bom:5.11.3")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+    useJUnitPlatform()
+}

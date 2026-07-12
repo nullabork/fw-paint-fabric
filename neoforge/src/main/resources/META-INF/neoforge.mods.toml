@@ -1,0 +1,27 @@
+license="MIT"
+issueTrackerURL="https://github.com/nullabork/fw-paint-fabric/issues"
+
+[[mods]]
+modId="gradient"
+version="${version}"
+displayName="FW Paint"
+displayURL="https://github.com/nullabork/fw-paint-fabric"
+logoFile="assets/gradient/icon.png"
+authors="faxwang"
+description='''
+Paint block gradients and 3D-noise fills from your inventory — ordered by colour, brightness, texture analysis, or by hand — and placed the multiplayer-safe way.
+'''
+
+[[dependencies.gradient]]
+modId="neoforge"
+type="required"
+versionRange="[26.2,)"
+ordering="NONE"
+side="CLIENT"
+
+[[dependencies.gradient]]
+modId="minecraft"
+type="required"
+versionRange="[26.2]"
+ordering="NONE"
+side="CLIENT"

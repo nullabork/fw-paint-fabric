@@ -2,7 +2,7 @@
 
 Open source (MIT) — [github.com/nullabork/fw-paint-fabric](https://github.com/nullabork/fw-paint-fabric)
 
-**Paint with blocks.** FW Paint is a client-side Fabric mod with three block-painting tools — **Solid**
+**Paint with blocks.** FW Paint is a client-side mod (Fabric **and** NeoForge) with three block-painting tools — **Solid**
 (one block: walls, columns, volumes), **Gradient** (smooth colour/brightness blends), and **Noise**
 (natural, blotchy 3D patterns) — all using the blocks already in your inventory. What you paint and
 where you place it are independent: any paint type works through any placement mode, with or without
@@ -136,7 +136,9 @@ block order, peaks the other. Always ordered from the picker list.
 
 ## Requirements
 
-- **Minecraft 26.2** · **Fabric Loader 0.19.3+** · **Fabric API** for 26.2 · **Java 25**
+- **Minecraft 26.2** · **Java 25** · pick your loader's file:
+  - **Fabric** — Fabric Loader 0.19.3+ and **Fabric API** for 26.2
+  - **NeoForge** — no other dependency
 - Client-side only — nothing to install on the server.
 - Placement sends normal "use block" interactions the server validates (Litematica-style); an
   aggressive anti-cheat may rate-limit very fast fills.

@@ -1,49 +1,27 @@
-plugins {
-    // 26.1+ uses the NON-remapping loom plugin; needs no mappings (game is unobfuscated).
-    id 'net.fabricmc.fabric-loom' version "${loom_version}"
-    id 'java'
-}
+// Root is a pure aggregator — the real builds are :common (all game code, vanilla-only),
+// :fabric and :neoforge (entrypoints + packaging). `./gradlew build` builds every loader jar.
 
-version = project.mod_version
-group = project.maven_group
-base { archivesName = project.archives_base_name }
+subprojects {
+    apply plugin: 'java'
 
-repositories {
-    maven { url = 'https://maven.fabricmc.net/' }
-    mavenCentral()
-}
+    version = rootProject.mod_version
+    group = rootProject.maven_group
 
-dependencies {
-    // No `mappings` line — game is unobfuscated. Plain `implementation`, not `modImplementation`.
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
-    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-
-    testImplementation platform("org.junit:junit-bom:5.11.3")
-    testImplementation "org.junit.jupiter:junit-jupiter"
-    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
-}
-
-test {
-    useJUnitPlatform()
-}
-
-java {
-    // MC 26.2 requires Java 25. The daemon JVM is pinned in gradle/gradle-daemon-jvm.properties.
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
+    java {
+        // MC 26.2 requires Java 25. The daemon JVM is pinned in gradle/gradle-daemon-jvm.properties.
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(25)
+        }
     }
-    withSourcesJar()
-}
 
-processResources {
-    inputs.property "version", project.version
-    filesMatching("fabric.mod.json") {
-        expand "version": project.version
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+        options.release = 25
     }
 }
 
-tasks.withType(JavaCompile).configureEach {
-    options.encoding = 'UTF-8'
-    options.release = 25
+// Convenience aliases so the familiar root commands keep working.
+tasks.register('runClient') {
+    dependsOn ':fabric:runClient'
+    description = 'Runs the Fabric dev client (use :neoforge:runClient for NeoForge).'
 }

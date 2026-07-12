@@ -14,7 +14,7 @@
   "icon": "assets/gradient/icon.png",
   "environment": "client",
   "entrypoints": {
-    "client": ["co.fax.wang.Gradient"]
+    "client": ["co.fax.wang.fabric.GradientFabric"]
   },
   "depends": {
     "fabricloader": ">=0.19.3",

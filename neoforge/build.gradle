@@ -1,0 +1,44 @@
+// NeoForge shell: the @Mod entrypoint + neoforge.mods.toml, bundling :common's classes and
+// assets into the shippable fw-paint-neoforge jar.
+plugins {
+    id 'net.neoforged.moddev' version "${moddev_version}"
+}
+
+base { archivesName = 'fw-paint-neoforge' }
+
+repositories {
+    mavenCentral()
+}
+
+neoForge {
+    version = project.neo_version
+
+    runs {
+        client {
+            client()
+        }
+    }
+
+    mods {
+        gradient {
+            sourceSet sourceSets.main
+            sourceSet project(':common').sourceSets.main
+        }
+    }
+}
+
+dependencies {
+    implementation project(':common')
+}
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("META-INF/neoforge.mods.toml") {
+        expand "version": project.version
+    }
+}
+
+jar {
+    // One self-contained jar: the loader shell plus all of common's classes + assets.
+    from project(':common').sourceSets.main.output
+}

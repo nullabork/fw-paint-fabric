@@ -4,28 +4,46 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 
 /**
- * Loads/saves {@link GradientConfig} as JSON in the Fabric config directory. Failures are logged
- * (never silently swallowed) and fall back to defaults so a corrupt file can't crash the client.
- * Gson ships with Minecraft, so this needs no extra dependency.
+ * Loads/saves {@link GradientConfig} as JSON in the loader's config directory (injected by the
+ * loader entrypoint via {@link #init}). Failures are logged (never silently swallowed) and fall
+ * back to defaults so a corrupt file can't crash the client. Gson ships with Minecraft, so this
+ * needs no extra dependency.
  */
 public final class ConfigManager {
 
     private static final Logger LOG = LoggerFactory.getLogger("gradient/config");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("gradient.json");
+
+    /** Set by the loader entry before anything reads config; "config" is a same-shape fallback. */
+    private static Path configDir = Paths.get("config");
 
     private static GradientConfig config;
 
     private ConfigManager() {}
+
+    /** Point at the loader's config directory and load. Called once from each loader entrypoint. */
+    public static void init(Path dir) {
+        configDir = dir;
+        load();
+    }
+
+    private static Path path() {
+        return configDir.resolve("gradient.json");
+    }
+
+    /** The loader's config directory (for the mod's other files, e.g. the marker store). */
+    public static Path configDir() {
+        return configDir;
+    }
 
     public static GradientConfig get() {
         if (config == null) {
@@ -37,13 +55,13 @@ public final class ConfigManager {
     public static void load() {
         GradientConfig loaded = null;
         try {
-            if (Files.exists(PATH)) {
-                String text = Files.readString(PATH);
+            if (Files.exists(path())) {
+                String text = Files.readString(path());
                 loaded = GSON.fromJson(text, GradientConfig.class);
                 migrateLegacyTools(loaded, text);
             }
         } catch (Exception e) {
-            LOG.warn("Failed to read {} — using defaults. Cause: {}", PATH, e.toString());
+            LOG.warn("Failed to read {} — using defaults. Cause: {}", path(), e.toString());
         }
         config = (loaded != null) ? loaded : new GradientConfig();
     }
@@ -74,10 +92,10 @@ public final class ConfigManager {
 
     public static void save() {
         try {
-            Files.createDirectories(PATH.getParent());
-            Files.writeString(PATH, GSON.toJson(get()));
+            Files.createDirectories(path().getParent());
+            Files.writeString(path(), GSON.toJson(get()));
         } catch (IOException e) {
-            LOG.warn("Failed to write {}: {}", PATH, e.toString());
+            LOG.warn("Failed to write {}: {}", path(), e.toString());
         }
     }
 }

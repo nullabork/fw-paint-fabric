@@ -1,9 +1,9 @@
 package co.fax.wang;
 
+import co.fax.wang.config.ConfigManager;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.BlockPos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,7 +27,10 @@ public final class MarkerStore {
 
     private static final Logger LOG = LoggerFactory.getLogger("gradient/markers");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("gradient_markers.json");
+    private static Path path() {
+        return ConfigManager.configDir().resolve("gradient_markers.json");
+    }
+
     private static final Type MAP_TYPE = new TypeToken<Map<String, WorldMarkers>>() {}.getType();
 
     /** Serialized per-world record: each position is a {@code [x, y, z]} array. */
@@ -42,11 +45,11 @@ public final class MarkerStore {
         if (data == null) {
             Map<String, WorldMarkers> loaded = null;
             try {
-                if (Files.exists(PATH)) {
-                    loaded = GSON.fromJson(Files.readString(PATH), MAP_TYPE);
+                if (Files.exists(path())) {
+                    loaded = GSON.fromJson(Files.readString(path()), MAP_TYPE);
                 }
             } catch (Exception e) {
-                LOG.warn("Failed to read {} — markers reset. Cause: {}", PATH, e.toString());
+                LOG.warn("Failed to read {} — markers reset. Cause: {}", path(), e.toString());
             }
             data = (loaded != null) ? loaded : new HashMap<>();
         }
@@ -80,10 +83,10 @@ public final class MarkerStore {
 
     private static void save() {
         try {
-            Files.createDirectories(PATH.getParent());
-            Files.writeString(PATH, GSON.toJson(data()));
+            Files.createDirectories(path().getParent());
+            Files.writeString(path(), GSON.toJson(data()));
         } catch (IOException e) {
-            LOG.warn("Failed to write {}: {}", PATH, e.toString());
+            LOG.warn("Failed to write {}: {}", path(), e.toString());
         }
     }
 

@@ -3,19 +3,11 @@ package co.fax.wang;
 import co.fax.wang.config.ConfigManager;
 import co.fax.wang.config.GradientConfig;
 import com.mojang.blaze3d.platform.InputConstants;
-import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
-import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
-import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
-import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
-import net.minecraft.world.InteractionResult;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.lwjgl.glfw.GLFW;
@@ -23,76 +15,61 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Client entry point. Registers three keybinds (open settings, cycle placement mode, switch paint
- * type), the in-game HUD helper text, and wires the shared {@link PlacementMode}/{@link PaintType}
- * state. See fabric-26.2-mod-starter.md for API notes.
+ * Loader-independent core of the mod: the key mappings, the shared {@link PlacementMode}/
+ * {@link PaintType} state, and the per-tick driving of markers + placement. The thin loader
+ * entrypoints ({@code co.fax.wang.fabric} / {@code co.fax.wang.neoforge}) create this state via
+ * {@link #createKeyMappings()}, register the mappings with their loader, and forward tick /
+ * render / input events here. See fabric-26.2-mod-starter.md for API notes.
  */
-public class Gradient implements ClientModInitializer {
+public final class Gradient {
 
     public static final String MOD_ID = "gradient";
     public static final Logger LOG = LoggerFactory.getLogger(MOD_ID);
 
+    public static KeyMapping openKey;
+    public static KeyMapping cycleKey;
+    public static KeyMapping paintTypeKey;
     /** Held modifier (default L-Ctrl): a marker-removing click clears the whole connected plane. */
-    private static KeyMapping clearConnectedKey;
-    private static KeyMapping openKey, cycleKey, paintTypeKey;
+    public static KeyMapping clearConnectedKey;
 
-    @Override
-    public void onInitializeClient() {
-        ConfigManager.load();
+    private Gradient() {}
 
-        // Keybinds (26.2: register via KeyMappingHelper, pass a KeyMapping.Category not a String).
-        openKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-                "key.gradient.open", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_K, KeyMapping.Category.MISC));
-        cycleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-                "key.gradient.cycle", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_G, KeyMapping.Category.MISC));
-        paintTypeKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-                "key.gradient.paint_type", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_V, KeyMapping.Category.MISC));
-        clearConnectedKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-                "key.gradient.clear_connected", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_LEFT_CONTROL, KeyMapping.Category.MISC));
+    /** Build the (vanilla) key mappings; each loader entry registers them its own way. */
+    public static void createKeyMappings() {
+        openKey = new KeyMapping("key.gradient.open", InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_K, KeyMapping.Category.MISC);
+        cycleKey = new KeyMapping("key.gradient.cycle", InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_G, KeyMapping.Category.MISC);
+        paintTypeKey = new KeyMapping("key.gradient.paint_type", InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_V, KeyMapping.Category.MISC);
+        clearConnectedKey = new KeyMapping("key.gradient.clear_connected", InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_LEFT_CONTROL, KeyMapping.Category.MISC);
+    }
 
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (openKey.consumeClick()) {
-                // 26.2: open screens via setScreenAndShow (there is no setScreen).
-                client.setScreenAndShow(new GradientScreen());
-            }
-            while (cycleKey.consumeClick()) {
-                cyclePlacement();
-            }
-            while (paintTypeKey.consumeClick()) {
-                switchPaintType();
-            }
-            MarkerManager.tick(client);
-            PaintPlacer.tick(client);
-        });
+    /** Runs once at the end of every client tick (wired by the loader entrypoints). */
+    public static void endClientTick(Minecraft client) {
+        while (openKey.consumeClick()) {
+            // 26.2: open screens via setScreenAndShow (there is no setScreen).
+            client.setScreenAndShow(new GradientScreen());
+        }
+        while (cycleKey.consumeClick()) {
+            cyclePlacement();
+        }
+        while (paintTypeKey.consumeClick()) {
+            switchPaintType();
+        }
+        MarkerManager.tick(client);
+        PaintPlacer.tick(client);
+    }
 
-        // While the tool is engaged (Marker or Place mode), suppress vanilla left/right click so it
-        // doesn't break/use the world — Marker mode marks, Place mode places. Cancel client-side
-        // only (stops the action packet). The !isPlacing() guard lets our OWN synthesized placement
-        // interaction through instead of cancelling it.
-        AttackBlockCallback.EVENT.register((player, level, hand, pos, dir) ->
-                (level.isClientSide() && toolEngaged()) ? InteractionResult.FAIL : InteractionResult.PASS);
-        UseBlockCallback.EVENT.register((player, level, hand, hit) ->
-                (level.isClientSide() && toolEngaged() && !BlockPlacement.isPlacing())
-                        ? InteractionResult.FAIL : InteractionResult.PASS);
-
-        // In-world marker rendering (filled committed faces + drag outline preview). Submit during
-        // COLLECT_SUBMITS — the same submit-collection phase vanilla uses for entities + the block
-        // outline — so our geometry is batched and drawn with the exact same camera (no frame drift).
-        LevelRenderEvents.COLLECT_SUBMITS.register(MarkerManager::render);
-        LevelRenderEvents.COLLECT_SUBMITS.register(PaintPlacer::renderPreview);
-
-        // In-game HUD helper text (26.2: HudElementRegistry; HudRenderCallback is gone). Two lines
-        // — active paint type on top, mode below — only while the paint tool is held. Position is
-        // configurable (Settings → Move helper text).
-        HudElementRegistry.addLast(
-                Identifier.fromNamespaceAndPath(MOD_ID, "mode_status"),
-                (g, deltaTracker) -> HudOverlay.render(g));
-
-        LOG.info("{} initialised", MOD_ID);
+    /**
+     * While the tool is engaged, vanilla left/right clicks must be suppressed so they don't
+     * break/use the world — the mod does the marking / placing itself. Our OWN synthesized
+     * placement interaction (via {@link BlockPlacement}) must still pass, hence the isPlacing()
+     * guard (only relevant on loaders whose hook wraps the interaction itself, like Fabric).
+     */
+    public static boolean shouldCancelClick() {
+        return toolEngaged() && !BlockPlacement.isPlacing();
     }
 
     /** True when the configured paint tool item is in the player's main hand. */

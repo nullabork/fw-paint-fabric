@@ -27,12 +27,14 @@ jobs:
           chmod +x ./gradlew
           ./gradlew build --stacktrace
 
-      # Every build: attach the jar to the workflow run so you can download it.
-      - name: Upload jar
+      # Every build: attach both loader jars to the workflow run so you can download them.
+      - name: Upload jars
         uses: actions/upload-artifact@v4
         with:
-          name: fw-paint-jar
-          path: build/libs/*.jar
+          name: fw-paint-jars
+          path: |
+            fabric/build/libs/fw-paint-fabric-*.jar
+            neoforge/build/libs/fw-paint-neoforge-*.jar
           if-no-files-found: error
 
       # On a v* tag: the release body comes from docs/release-notes/<tag>.md when it exists
@@ -46,12 +48,12 @@ jobs:
           else
             echo "No $NOTES found — using the fallback body."
             cat > RELEASE_BODY.md <<'EOF'
-          **FW Paint** — a client-side Fabric mod for painting blocks: solid extrude/fill, gradients, and noise.
+          **FW Paint** — a client-side mod for painting blocks: solid extrude/fill, gradients, and noise.
 
-          Targets: Minecraft **26.2** · Fabric Loader **0.19.3+** · Fabric API for 26.2 · Java **25**.
+          Targets: Minecraft **26.2** · Java **25** · Fabric (Loader 0.19.3+ with Fabric API) or NeoForge.
 
-          Install: drop the `fw-paint-fabric` jar below into a 26.2 Fabric instance's `mods/` folder
-          (alongside Fabric API for 26.2).
+          Install: drop the jar matching your loader (`fw-paint-fabric` or `fw-paint-neoforge`) into a
+          26.2 instance's `mods/` folder (Fabric also needs Fabric API for 26.2).
           EOF
           fi
 
@@ -60,6 +62,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: FW Paint ${{ github.ref_name }} (Minecraft 26.2)
-          files: build/libs/*.jar
+          files: |
+            fabric/build/libs/fw-paint-fabric-*.jar
+            neoforge/build/libs/fw-paint-neoforge-*.jar
           generate_release_notes: true
           body_path: RELEASE_BODY.md

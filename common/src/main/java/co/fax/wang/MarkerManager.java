@@ -3,7 +3,6 @@ package co.fax.wang;
 import co.fax.wang.config.ConfigManager;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
@@ -556,7 +555,8 @@ public final class MarkerManager {
 
     // ---- rendering (level render event) ---------------------------------------------------------
 
-    public static void render(LevelRenderContext ctx) {
+    /** Called from each loader's level-render submit hook with the collector + camera position. */
+    public static void render(SubmitNodeCollector col, Vec3 cam) {
         Minecraft mc = Minecraft.getInstance();
         PlacementMode pm = Gradient.currentPlacement(mc);
         // The auto-end face preview can show before any marker exists (e.g. a fresh world).
@@ -569,12 +569,10 @@ public final class MarkerManager {
 
         // Submit with a FRESH identity PoseStack (as vanilla's submitFeatures does for block
         // entities + the block outline) and let the collector apply the camera rotation. Using the
-        // context's own poseStack places geometry against a different basis than the collector
+        // event's own poseStack places geometry against a different basis than the collector
         // renders with, which shows up as a one-frame drift while moving. Geometry is made
         // camera-relative by translating each box by (worldPos - cameraPos).
         PoseStack ps = new PoseStack();
-        SubmitNodeCollector col = ctx.submitNodeCollector();
-        Vec3 cam = ctx.levelState().cameraRenderState.pos;
 
         // Committed markers — filled translucent faces.
         for (BlockPos p : startMarkers) filled(col, ps, cam, p, START_FILL);
