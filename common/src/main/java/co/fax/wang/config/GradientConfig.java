@@ -30,6 +30,13 @@ public class GradientConfig {
      */
     public PlacementMode placementMode = PlacementMode.DISABLED;
 
+    /**
+     * Colour maths for ordering/matching across all tools: true = perceptual (Oklab — sorts and
+     * matches like the eye sees), false = classic luma + raw RGB (pre-1.3 behaviour). Mirrored to
+     * {@code GradientRamp.perceptual} by ConfigManager and the Settings toggle.
+     */
+    public boolean perceptualColor = true;
+
     // ---- HUD helper text --------------------------------------------------------------------------
 
     /** Helper-text position (px from the top-left), movable via the "Move helper text" screen. */

@@ -22,11 +22,13 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * The FW Paint screen (opened by K). Five tabs:
+ * The FW Paint screen (opened by K). Six tabs:
  * <ul>
  *   <li><b>Solid</b> — block picker with ✓ (one block to place) / ✗ (exclusions) + match mode;</li>
  *   <li><b>Gradient</b> — block picker (left) + gradient settings (right);</li>
  *   <li><b>Noise Paint</b> — block picker (left) + noise settings (right);</li>
+ *   <li><b>Finder</b> — every block ranked by colour or brightness ({@link ColorIndex}), centred
+ *       on a chosen reference block or pure colour, to discover close blocks you don't have;</li>
  *   <li><b>Settings</b> — pick the paint tool item, per-paint-type mode, marker options,
  *       helper-text position;</li>
  *   <li><b>Help</b> — the in-game manual (the drill-down {@link HelpPanel}).</li>
@@ -51,10 +53,10 @@ public class GradientScreen extends Screen {
     private static final int COL_GAP = 12;
     private static final int TOOL_LIST_TOP = 78;
 
-    private enum Tab { GRADIENT, NOISE, SOLID, SETTINGS, HELP }
+    private enum Tab { GRADIENT, NOISE, SOLID, FINDER, SETTINGS, HELP }
 
     /** Title-bar order, left to right (right-aligned as a group). */
-    private static final Tab[] BAR_ORDER = {Tab.SOLID, Tab.GRADIENT, Tab.NOISE, Tab.SETTINGS, Tab.HELP};
+    private static final Tab[] BAR_ORDER = {Tab.SOLID, Tab.GRADIENT, Tab.NOISE, Tab.FINDER, Tab.SETTINGS, Tab.HELP};
     private enum Assign { NONE, START, END, REQUIRE, EXCLUDE }
     private enum SolidAssign { NONE, TICK, CROSS }
 
@@ -107,6 +109,17 @@ public class GradientScreen extends Screen {
     // Help tab state — static so the manual keeps its expansion + scroll across reopening (like tab).
     private static HelpPanel help;
 
+    // Finder tab state — static so the sort mode and reference survive reopening (like tab).
+    private enum FinderSort { COLOR, BRIGHTNESS }
+    private enum FinderRef { BLOCK, COLOR }
+    private static FinderSort finderSort = FinderSort.COLOR;
+    private static FinderRef finderRef = FinderRef.BLOCK; // set by whichever picker was clicked last
+    private static String finderSelectedId = "";
+    private static double finderHue = 0, finderSat = 1, finderBri = 1;
+    private FinderListPanel finderList; // left: all blocks in the active ordering (click to select)
+    private ColorField2D finderField;   // right: hue×sat field (click for a pure-colour reference)
+    private int finderLabelY, finderHeaderY, finderSwatchY;
+
     // Settings tab state.
     private EditBox filterBox;
     private int autoEndDescY, fillVoidsDescY, memoryDescY;
@@ -141,6 +154,7 @@ public class GradientScreen extends Screen {
         toolRowHeight = this.font.lineHeight + 3;
         if (tab == Tab.GRADIENT || tab == Tab.NOISE) initPickerTab();
         else if (tab == Tab.SOLID) initSolidTab();
+        else if (tab == Tab.FINDER) initFinderTab();
         else if (tab == Tab.HELP) initHelpTab();
         else initSettingsTab();
 
@@ -177,7 +191,7 @@ public class GradientScreen extends Screen {
 
     private String tabName(Tab t) {
         return switch (t) {
-            case GRADIENT -> "Gradient"; case NOISE -> "Noise Paint";
+            case GRADIENT -> "Gradient"; case NOISE -> "Noise Paint"; case FINDER -> "Finder";
             case SOLID -> "Solid"; case SETTINGS -> "Settings"; case HELP -> "Help";
         };
     }
@@ -790,6 +804,14 @@ public class GradientScreen extends Screen {
         cycleButton(rx + rw / 2 + 2, y, rw - rw / 2 - 2,
                 () -> Component.literal("Debug: " + (ConfigManager.get().debug ? "On" : "Off")),
                 () -> ConfigManager.get().debug = !ConfigManager.get().debug);
+        y += 24;
+        cycleButton(rx, y, rw,
+                () -> Component.literal("Color match: " + (ConfigManager.get().perceptualColor ? "Perceptual" : "Classic")),
+                () -> {
+                    GradientConfig c = ConfigManager.get();
+                    c.perceptualColor = !c.perceptualColor;
+                    GradientRamp.perceptual = c.perceptualColor;
+                });
 
         // Left column: the paint-tool assign button (overlay shows it's armed) + filter + list.
         int cx = contentX(), w = leftW();
@@ -830,6 +852,117 @@ public class GradientScreen extends Screen {
         if (mouseX < cx || mouseX > cx + leftW() || mouseY < TOOL_LIST_TOP) return -1;
         int idx = (int) ((mouseY - TOOL_LIST_TOP) / toolRowHeight);
         return (idx >= 0 && idx < matches.size()) ? idx : -1;
+    }
+
+    // ---- Finder tab -----------------------------------------------------------------------------
+
+    private void initFinderTab() {
+        int cx = contentX(), w = leftW();
+        int listBottom = this.height - 40;
+
+        // Left: every block in the game, in the active ordering, with a target button to re-center.
+        // Clicking a row selects that block as the reference — there is no separate picker.
+        finderLabelY = 36;
+        addRenderableWidget(Button.builder(Component.literal("⌖"), b -> recenterFinder())
+                .bounds(cx + w - 20, 30, 20, 20).build());
+        finderList = new FinderListPanel(this.font);
+        finderList.setShowSwatch(true);
+        finderList.setBounds(cx, 54, w, listBottom - 54);
+        finderList.setEntries(activeFinderEntries()); // first call builds the session colour index
+
+        // Right: sort toggle, the selected block, and the always-visible pure-colour picker.
+        int rx = rightX(), rw = rightW();
+        addRenderableWidget(Button.builder(
+                Component.literal("Sort: " + (finderSort == FinderSort.COLOR ? "Color" : "Brightness")),
+                b -> { finderSort = finderSort == FinderSort.COLOR ? FinderSort.BRIGHTNESS : FinderSort.COLOR; rebuildWidgets(); })
+                .bounds(rx, 30, rw, 20).build());
+
+        finderHeaderY = 58; // selected-block header is render-only
+        int fieldY = 86;
+        // Landscape field: cap the height so tall windows don't stretch it into a square.
+        int fieldH = Math.max(40, Math.min(72, listBottom - fieldY - 52));
+        finderField = new ColorField2D();
+        finderField.setBounds(rx, fieldY, rw, fieldH);
+        int sliderY = fieldY + fieldH + 4;
+        finderSwatchY = sliderY + 24;
+        addRenderableWidget(new ConfigSlider(rx, sliderY, rw, finderBri,
+                v -> "Brightness: " + Math.round(v * 100) + "%",
+                v -> { finderBri = v; finderRef = FinderRef.COLOR; recenterFinder(); }));
+        recenterFinder();
+    }
+
+    private List<ColorIndex.Entry> activeFinderEntries() {
+        return finderSort == FinderSort.COLOR ? ColorIndex.byColor() : ColorIndex.byBrightness();
+    }
+
+    /** Scroll the left list so the reference (block or pure colour) sits mid-view. */
+    private void recenterFinder() {
+        if (finderList == null) return;
+        if (finderRef == FinderRef.BLOCK) {
+            finderList.clearMarker();
+            finderList.setSelectedId(finderSelectedId);
+            int idx = finderList.indexOfId(finderSelectedId);
+            if (idx >= 0) finderList.centerOn(idx);
+        } else {
+            int rgb = ColorOrder.hsvToRgb(finderHue, finderSat, finderBri);
+            long key = finderSort == FinderSort.COLOR
+                    ? ColorOrder.colorSortKey(rgb) : ColorOrder.brightnessSortKey(rgb);
+            long[] keys = finderSort == FinderSort.COLOR
+                    ? ColorIndex.colorKeys() : ColorIndex.brightnessKeys();
+            int idx = ColorOrder.insertionIndex(key, keys);
+            finderList.setSelectedId(null);
+            finderList.setMarker(idx, rgb);
+            finderList.centerOn(idx);
+        }
+    }
+
+    /** Left-click select: a row makes that block the reference, the field makes a pure colour it. */
+    private boolean handleFinderClick(double mx, double my) {
+        if (finderList != null && finderList.mouseClicked(mx, my)) return true;
+        if (finderList != null) {
+            String id = finderList.idAt(mx, my);
+            if (id != null) {
+                finderSelectedId = id;
+                finderRef = FinderRef.BLOCK;
+                recenterFinder();
+                return true;
+            }
+        }
+        if (finderField != null && finderField.contains(mx, my)) {
+            double[] hs = finderField.pick(mx, my);
+            finderHue = hs[0];
+            finderSat = hs[1];
+            finderRef = FinderRef.COLOR;
+            recenterFinder();
+            return true;
+        }
+        return false;
+    }
+
+    private void renderFinderTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        g.text(this.font, finderSort == FinderSort.COLOR ? "By color" : "By brightness",
+                contentX(), finderLabelY, GREY);
+        if (finderList != null) finderList.render(g, mouseX, mouseY);
+
+        int rx = rightX(), rw = rightW();
+        ColorIndex.Entry sel = finderSelectedId.isEmpty() ? null : ColorIndex.byId(finderSelectedId);
+        int hy = finderHeaderY;
+        if (sel == null) {
+            g.text(this.font, this.font.plainSubstrByWidth("Click a block or pick a colour", rw), rx, hy + 8, YELLOW);
+        } else {
+            g.fill(rx, hy, rx + 24, hy + 24, 0xFF6E6E6E);
+            g.item(sel.stack(), rx + 4, hy + 4);
+            g.fill(rx + rw - 17, hy + 4, rx + rw - 1, hy + 20, 0x60FFFFFF);
+            g.fill(rx + rw - 16, hy + 5, rx + rw - 2, hy + 19, 0xFF000000 | sel.rgb());
+            g.text(this.font, this.font.plainSubstrByWidth(sel.name(), rw - 50), rx + 30, hy + 2, WHITE);
+            g.text(this.font, String.format("#%06X", sel.rgb()), rx + 30, hy + 14, GREY);
+        }
+        if (finderField != null) finderField.render(g, finderHue, finderSat, finderBri);
+        int rgb = ColorOrder.hsvToRgb(finderHue, finderSat, finderBri);
+        g.fill(rx, finderSwatchY, rx + 20, finderSwatchY + 20, 0x60FFFFFF);
+        g.fill(rx + 1, finderSwatchY + 1, rx + 19, finderSwatchY + 19, 0xFF000000 | rgb);
+        g.text(this.font, String.format("#%06X", rgb), rx + 26, finderSwatchY + 6,
+                finderRef == FinderRef.COLOR ? WHITE : GREY);
     }
 
     // ---- Help tab -------------------------------------------------------------------------------
@@ -905,6 +1038,9 @@ public class GradientScreen extends Screen {
             }
             return false;
         }
+        if (tab == Tab.FINDER && event.button() == 0 && handleFinderClick(event.x(), event.y())) {
+            return true;
+        }
         if (tab == Tab.SETTINGS && event.button() == 0) {
             int idx = toolRowAt(event.x(), event.y());
             if (idx >= 0 && assigningTool) {
@@ -925,6 +1061,9 @@ public class GradientScreen extends Screen {
             return true;
         }
         if (tab == Tab.HELP && help != null && help.mouseScrolled(mouseX, mouseY, scrollY)) {
+            return true;
+        }
+        if (tab == Tab.FINDER && finderList != null && finderList.mouseScrolled(mouseX, mouseY, scrollY)) {
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
@@ -988,6 +1127,7 @@ public class GradientScreen extends Screen {
         if (tab == Tab.GRADIENT) renderGradientTab(g, mouseX, mouseY);
         else if (tab == Tab.NOISE) renderNoiseTab(g, mouseX, mouseY);
         else if (tab == Tab.SOLID) renderSolidTab(g, mouseX, mouseY);
+        else if (tab == Tab.FINDER) renderFinderTab(g, mouseX, mouseY);
         else if (tab == Tab.HELP) { if (help != null) help.render(g, mouseX, mouseY); }
         else renderSettingsTab(g, mouseX, mouseY);
     }
@@ -1089,6 +1229,17 @@ public class GradientScreen extends Screen {
             previewOffX -= dragX / 16.0; // one cell == 16px
             previewOffZ -= dragY / 16.0;
             return true;
+        }
+        if (tab == Tab.FINDER && event.button() == 0) {
+            if (finderList != null && finderList.mouseDragged(event.y())) return true;
+            if (finderField != null && finderField.contains(event.x(), event.y())) {
+                double[] hs = finderField.pick(event.x(), event.y());
+                finderHue = hs[0];
+                finderSat = hs[1];
+                finderRef = FinderRef.COLOR;
+                recenterFinder();
+                return true;
+            }
         }
         return super.mouseDragged(event, dragX, dragY);
     }

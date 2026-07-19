@@ -53,9 +53,9 @@ public final class BlockTextures {
         int[] px = tex(block).argb();
         if (px.length > 0) {
             if (mode.usesPixelPercent()) {
-                return TextureStats.topColor(px, pixelFraction, mode.selectsLightest());
+                return applyTint(block, TextureStats.topColor(px, pixelFraction, mode.selectsLightest()));
             }
-            return TextureStats.averageColor(px);
+            return applyTint(block, TextureStats.averageColor(px));
         }
         var mapColor = block.defaultMapColor(); // fallback when no texture is available
         return mapColor == null ? 0 : mapColor.col;
@@ -63,7 +63,7 @@ public final class BlockTextures {
 
     /** Start-independent brightness of a block (its average texture colour) — used for default endpoints. */
     public static double baseLuminance(Block block) {
-        return TextureStats.luminance(gradientValue(block, null, GradientMode.COLOR, 0.5));
+        return GradientRamp.brightness(gradientValue(block, null, GradientMode.COLOR, 0.5));
     }
 
     /** Drop caches — call on a resource reload so re-read textures aren't stale. */
@@ -107,7 +107,8 @@ public final class BlockTextures {
                 int[] out = new int[w * h];
                 for (int y = 0; y < h; y++) {
                     for (int x = 0; x < w; x++) {
-                        out[y * w + x] = abgrToArgb(img.getPixel(x, y));
+                        // getPixel already returns ARGB in this MC version — no channel shuffle.
+                        out[y * w + x] = img.getPixel(x, y);
                     }
                 }
                 return new Tex(out, w, h);
@@ -118,9 +119,23 @@ public final class BlockTextures {
         }
     }
 
-    /** NativeImage stores pixels as ABGR (0xAABBGGRR); convert to ARGB (0xAARRGGBB). */
-    private static int abgrToArgb(int abgr) {
-        int a = (abgr >>> 24) & 0xFF, b = (abgr >> 16) & 0xFF, g = (abgr >> 8) & 0xFF, r = abgr & 0xFF;
-        return (a << 24) | (r << 16) | (g << 8) | b;
+    /**
+     * Multiply in the block's static tint (grass, foliage, redstone, …). Tinted textures are
+     * grayscale in the PNG and get their colour from a colour provider at render time, so without
+     * this a bush reads as white instead of green.
+     */
+    private static int applyTint(Block block, int rgb) {
+        try {
+            Minecraft mc = Minecraft.getInstance();
+            var tintSource = mc.getBlockColors().getTintSource(block.defaultBlockState(), 0);
+            if (tintSource == null) return rgb;
+            int tint = tintSource.color(block.defaultBlockState());
+            int r = (((rgb >> 16) & 0xFF) * ((tint >> 16) & 0xFF)) / 255;
+            int g = (((rgb >> 8) & 0xFF) * ((tint >> 8) & 0xFF)) / 255;
+            int b = ((rgb & 0xFF) * (tint & 0xFF)) / 255;
+            return (r << 16) | (g << 8) | b;
+        } catch (Exception e) {
+            return rgb; // no colour provider quirks should break colour sampling
+        }
     }
 }

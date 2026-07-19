@@ -64,6 +64,7 @@ public final class ConfigManager {
             LOG.warn("Failed to read {} — using defaults. Cause: {}", path(), e.toString());
         }
         config = (loaded != null) ? loaded : new GradientConfig();
+        co.fax.wang.GradientRamp.perceptual = config.perceptualColor;
     }
 
     /**

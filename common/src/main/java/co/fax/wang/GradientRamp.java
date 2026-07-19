@@ -47,24 +47,43 @@ public final class GradientRamp {
         return maxDeviation(mode, DEFAULT_DEVIATION_BUDGET);
     }
 
-    /** Perceived (apparent) brightness of a 0xRRGGBB colour. */
+    /**
+     * When true (the default) ordering, brightness, and band similarity are measured in Oklab —
+     * perceived colour — instead of luma + raw sRGB. Wired to {@code GradientConfig.perceptualColor}
+     * (the Settings "Color match" toggle). Static so this class stays free of config dependencies.
+     */
+    public static volatile boolean perceptual = true;
+
+    /** Luma (classic apparent brightness) of a 0xRRGGBB colour, 0..255. */
     public static double luminance(int rgb) {
         int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
         return 0.2126 * r + 0.7152 * g + 0.0722 * b;
     }
 
+    /** Brightness used for ordering: Oklab lightness or classic luma per the toggle, both 0..255. */
+    public static double brightness(int rgb) {
+        return perceptual ? ColorOrder.rgbToOklab(rgb)[0] * 255.0 : luminance(rgb);
+    }
+
+    /** Colour coordinates the ordering maths run in: Oklab (scaled ×255) or raw sRGB channels. */
+    private static double[] coords(int rgb) {
+        if (perceptual) {
+            double[] lab = ColorOrder.rgbToOklab(rgb);
+            return new double[]{lab[0] * 255.0, lab[1] * 255.0, lab[2] * 255.0};
+        }
+        return new double[]{(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF};
+    }
+
     /** 1-D position of a colour along the gradient defined by start→end, per mode. */
     public static double position(int rgb, int startRgb, int endRgb, GradientMode mode) {
-        if (mode.usesBrightness()) return luminance(rgb);
+        if (mode.usesBrightness()) return brightness(rgb);
 
-        double sr = (startRgb >> 16) & 0xFF, sg = (startRgb >> 8) & 0xFF, sb = startRgb & 0xFF;
-        double er = (endRgb >> 16) & 0xFF, eg = (endRgb >> 8) & 0xFF, eb = endRgb & 0xFF;
-        double vr = er - sr, vg = eg - sg, vb = eb - sb;
+        double[] s = coords(startRgb), e = coords(endRgb), p = coords(rgb);
+        double vr = e[0] - s[0], vg = e[1] - s[1], vb = e[2] - s[2];
         double len2 = vr * vr + vg * vg + vb * vb;
-        if (len2 < 1e-6) return luminance(rgb); // endpoints share a colour → fall back to brightness
+        if (len2 < 1e-6) return brightness(rgb); // endpoints share a colour → fall back to brightness
 
-        double pr = ((rgb >> 16) & 0xFF) - sr, pg = ((rgb >> 8) & 0xFF) - sg, pb = (rgb & 0xFF) - sb;
-        return (pr * vr + pg * vg + pb * vb) / Math.sqrt(len2);
+        return ((p[0] - s[0]) * vr + (p[1] - s[1]) * vg + (p[2] - s[2]) * vb) / Math.sqrt(len2);
     }
 
     /**
@@ -76,7 +95,9 @@ public final class GradientRamp {
      * greys on the segment, so deviation is ~0 — similarity there is one-dimensional by design.)
      */
     public static double deviation(int rgb, int startRgb, int endRgb, GradientMode mode) {
-        // distance from the point to the start→end segment in RGB space
+        // Distance from the point to the start→end segment in raw RGB space — deliberately NOT
+        // switched by the perceptual toggle: the deviation budgets (sliders, defaults) are tuned
+        // against RGB magnitudes, and this is an eligibility gate, not a user-visible ordering.
         double pr = (rgb >> 16) & 0xFF, pg = (rgb >> 8) & 0xFF, pb = rgb & 0xFF;
         double sr = (startRgb >> 16) & 0xFF, sg = (startRgb >> 8) & 0xFF, sb = startRgb & 0xFF;
         double er = (endRgb >> 16) & 0xFF, eg = (endRgb >> 8) & 0xFF, eb = endRgb & 0xFF;
@@ -232,13 +253,12 @@ public final class GradientRamp {
         return groups;
     }
 
-    /** Similarity metric for band membership: luminance in scalar modes, RGB distance otherwise. */
+    /** Similarity metric for band membership: brightness in scalar modes, colour distance otherwise. */
     private static double bandDistance(int a, int b, GradientMode mode) {
-        if (mode.usesBrightness()) return Math.abs(luminance(a) - luminance(b));
-        int dr = ((a >> 16) & 0xFF) - ((b >> 16) & 0xFF);
-        int dg = ((a >> 8) & 0xFF) - ((b >> 8) & 0xFF);
-        int db = (a & 0xFF) - (b & 0xFF);
-        return Math.sqrt((double) dr * dr + dg * dg + db * db);
+        if (mode.usesBrightness()) return Math.abs(brightness(a) - brightness(b));
+        double[] ca = coords(a), cb = coords(b);
+        double dr = ca[0] - cb[0], dg = ca[1] - cb[1], db = ca[2] - cb[2];
+        return Math.sqrt(dr * dr + dg * dg + db * db);
     }
 
     /**

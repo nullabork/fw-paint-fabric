@@ -31,6 +31,37 @@ class GradientRampTest {
     }
 
     @Test
+    void brightnessWorksInBothColorMathModes() {
+        // Whichever metric the toggle selects, brightness must stay monotone on greys and 0..255.
+        boolean saved = GradientRamp.perceptual;
+        try {
+            for (boolean mode : new boolean[]{true, false}) {
+                GradientRamp.perceptual = mode;
+                assertTrue(GradientRamp.brightness(BLACK) < GradientRamp.brightness(GRAY));
+                assertTrue(GradientRamp.brightness(GRAY) < GradientRamp.brightness(WHITE));
+                assertEquals(0.0, GradientRamp.brightness(BLACK), 1e-6);
+                assertEquals(255.0, GradientRamp.brightness(WHITE), 0.5);
+            }
+        } finally {
+            GradientRamp.perceptual = saved;
+        }
+    }
+
+    @Test
+    void classicModeReproducesLegacyOrdering() {
+        boolean saved = GradientRamp.perceptual;
+        try {
+            GradientRamp.perceptual = false;
+            int purple = 0x800080;
+            int[] pal = {BLUE, RED, purple};
+            int[] order = GradientRamp.orderedIndices(pal, RED, BLUE, GradientMode.COLOR);
+            assertArrayEquals(new int[]{1, 2, 0}, order); // red, purple, blue — as before the toggle
+        } finally {
+            GradientRamp.perceptual = saved;
+        }
+    }
+
+    @Test
     void colorPositionRunsFromStartToEnd() {
         // The start colour sits at 0 and the end colour furthest along its own axis.
         double atStart = GradientRamp.position(RED, RED, BLUE, GradientMode.COLOR);
@@ -68,12 +99,13 @@ class GradientRampTest {
 
     @Test
     void brightnessAndColorOrderingsDiffer() {
-        // Yellow is bright but lies at the start of a black→blue colour axis; blue is dark.
-        int[] pal = {YELLOW, BLUE};
+        // Red is brighter than blue but sits earlier on a black→blue colour axis (in both colour
+        // math modes), so the two orderings disagree.
+        int[] pal = {RED, BLUE};
         int[] byBrightness = GradientRamp.orderedIndices(pal, BLACK, BLUE, GradientMode.BRIGHTNESS);
         int[] byColor = GradientRamp.orderedIndices(pal, BLACK, BLUE, GradientMode.COLOR);
-        assertArrayEquals(new int[]{1, 0}, byBrightness); // blue (dark), yellow (bright)
-        assertArrayEquals(new int[]{0, 1}, byColor);      // yellow (near black on this axis), blue
+        assertArrayEquals(new int[]{1, 0}, byBrightness); // blue (dark), red (brighter)
+        assertArrayEquals(new int[]{0, 1}, byColor);      // red (early on this axis), blue
         assertFalse(Arrays.equals(byBrightness, byColor));
     }
 
@@ -236,13 +268,14 @@ class GradientRampTest {
 
     @Test
     void brightnessBudgetFiltersOffColorBlocksWithInRangeLuminance() {
-        // Red's luminance (~54) sits inside black→white, but its colour is far from the grey ramp:
-        // the default budget must drop it, a full budget must keep it (that's the slider working).
-        int[] pal = {BLACK, RED, GRAY, WHITE};
+        // Blue's brightness sits inside black→white (in both colour math modes), but its colour is
+        // far from the grey ramp: the default budget must drop it, a full budget must keep it
+        // (that's the slider working).
+        int[] pal = {BLACK, BLUE, GRAY, WHITE};
         int[] tight = GradientRamp.gradientOrder(pal, BLACK, WHITE, GradientMode.BRIGHTNESS);
-        assertArrayEquals(new int[]{0, 2, 3}, tight, "off-colour red must be dropped at the default budget");
+        assertArrayEquals(new int[]{0, 2, 3}, tight, "off-colour blue must be dropped at the default budget");
         int[] loose = GradientRamp.gradientOrder(pal, BLACK, WHITE, GradientMode.BRIGHTNESS, 1.0);
-        assertArrayEquals(new int[]{0, 1, 2, 3}, loose, "full budget keeps red, ordered by luminance");
+        assertArrayEquals(new int[]{0, 1, 2, 3}, loose, "full budget keeps blue, ordered by brightness");
     }
 
     @Test

@@ -301,7 +301,9 @@ public final class HelpPanel {
                 "Selected block: places the block you ticked in the list on the left.",
                 "Exact block: copies exactly the block you clicked.",
                 "Closest color / Closest brightness: looks at the clicked block and places the "
-                    + "closest match from your inventory.",
+                    + "closest match from your inventory. Closeness is measured as perceived "
+                    + "colour (Oklab) - the Color match button in Settings switches back to the "
+                    + "classic RGB maths.",
                 "Blocks marked with an X in the list are never placed, even on an exact match."))),
 
         t("Gradient paint", "Blend from one block to another - along markers or free-hand.",
@@ -354,7 +356,10 @@ public final class HelpPanel {
                     + "block - a gradient of \"increasingly unlike the start\".",
                 "Pick: manual ordering. Click a row to raise its number, right-click to lower it "
                     + "(0 removes it). Lowest number places first, highest last; blocks sharing a "
-                    + "number share a step.")),
+                    + "number share a step.",
+                "Colour and brightness are measured as the eye sees them (Oklab) - the Color "
+                    + "match button in Settings switches every tool back to the classic "
+                    + "luma/RGB maths.")),
             t("Curve", "Where the gradient changes fastest.", List.of(
                 "Linear: even change all the way. Ease In: holds the start colour longer. "
                     + "Ease Out: reaches the end colour sooner. Ease In/Out: lingers at both ends. "
@@ -399,5 +404,21 @@ public final class HelpPanel {
                     + "noise tool.")),
             t("Preview", "A live top-down slice of the field.", List.of(
                 "The grid at the bottom right previews the noise with your current blocks and "
-                    + "settings. Click and drag it to pan around."))));
+                    + "settings. Click and drag it to pan around."))),
+
+        t("Finder", "Every block in the game, ranked by colour or brightness.",
+            List.of(
+                "A discovery tool: find the blocks closest to a chosen colour, beyond what's in "
+                    + "your inventory. The left list is every placeable block in the game, in the "
+                    + "order set by the Sort button - Color is a rainbow (grays first dark to "
+                    + "light, then hue families with brightness running through each band), "
+                    + "Brightness runs dark to light.",
+                "Click any row to select that block: it highlights and scrolls to the middle of "
+                    + "the list, so the nearest colours sit just above and below it. The small "
+                    + "target button jumps back to the selection after you scroll away.",
+                "Or pick a pure colour instead: click the hue/saturation field on the right and "
+                    + "set the brightness slider. A coloured marker line in the list shows "
+                    + "exactly where that colour falls in the ordering.",
+                "Colours come from each block's actual texture (resource packs included), "
+                    + "measured once per game session.")));
 }

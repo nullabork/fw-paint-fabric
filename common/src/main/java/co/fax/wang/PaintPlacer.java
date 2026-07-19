@@ -782,14 +782,14 @@ public final class PaintPlacer {
     private static Block closest(LocalPlayer player, Block ref, boolean byBrightness) {
         if (ref == null) return null;
         int refRgb = BlockTextures.gradientValue(ref, null, GradientMode.COLOR, 0.5);
-        double refLum = TextureStats.luminance(refRgb);
+        double refBright = GradientRamp.brightness(refRgb);
         Block best = null;
         double bestD = Double.MAX_VALUE;
         Set<Block> seen = new HashSet<>();
         for (Block b : solidSourceBlocks(player)) {
             if (!seen.add(b) || isSolidExcluded(b)) continue;
             int rgb = BlockTextures.gradientValue(b, null, GradientMode.COLOR, 0.5);
-            double d = byBrightness ? Math.abs(TextureStats.luminance(rgb) - refLum) : rgbDist(rgb, refRgb);
+            double d = byBrightness ? Math.abs(GradientRamp.brightness(rgb) - refBright) : colorDist(rgb, refRgb);
             if (d < bestD) {
                 bestD = d;
                 best = b;
@@ -798,7 +798,9 @@ public final class PaintPlacer {
         return best;
     }
 
-    private static double rgbDist(int a, int b) {
+    /** Colour closeness per the perceptual toggle: Oklab distance, or classic sRGB distance. */
+    private static double colorDist(int a, int b) {
+        if (GradientRamp.perceptual) return ColorOrder.oklabDist(a, b);
         int dr = ((a >> 16) & 0xFF) - ((b >> 16) & 0xFF);
         int dg = ((a >> 8) & 0xFF) - ((b >> 8) & 0xFF);
         int db = (a & 0xFF) - (b & 0xFF);
