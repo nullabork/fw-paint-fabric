@@ -7,7 +7,9 @@ import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -19,6 +21,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Random;
 import java.util.Set;
 
 /**
@@ -185,7 +188,7 @@ public class GradientScreen extends Screen {
                 ? "In use ✓" : "Use " + t.label());
     }
 
-    private void setTab(Tab t) { tab = t; rebuildWidgets(); }
+    private void setTab(Tab t) { tab = t; previewExpanded = false; rebuildWidgets(); }
 
     // ---- tabs in the title bar ------------------------------------------------------------------
 
@@ -303,10 +306,6 @@ public class GradientScreen extends Screen {
         cycleButton(rx, y, rw, this::curveLabel, () -> {
             GradientConfig c = ConfigManager.get(); c.curve = c.curve.next(); rebuildDisplayRows(); });
         y += 24;
-        cycleButton(rx, y, rw, this::sourceLabel, () -> {
-            GradientConfig c = ConfigManager.get(); c.source = c.source.next();
-            sourceBlocks = gatherSourceBlocks(); rebuildDisplayRows(); });
-        y += 24;
         cycleButton(rx, y, rw, this::endpointsLabel, () -> {
             GradientConfig c = ConfigManager.get(); c.gradientFromMarkers = !c.gradientFromMarkers; });
         y += 24; endpointsDescY = y; y += 12;
@@ -329,11 +328,31 @@ public class GradientScreen extends Screen {
         addRenderableWidget(new ConfigSlider(rx, y, rw, stepsToSlider(cfg.maxSteps),
                 v -> "Max steps: " + sliderToSteps(v),
                 v -> { ConfigManager.get().maxSteps = sliderToSteps(v); rebuildDisplayRows(); }));
+        y += 26;
+        gradPreviewY = y;
+        if (gradPreviewY + 12 < this.height - 32) {
+            addRenderableWidget(Button.builder(Component.literal("⛶"), b -> previewExpanded = true)
+                    .bounds(rx + rw - 16, gradPreviewY - 2, 16, 14).build());
+        }
     }
 
-    private int noisePreviewY;          // y where the noise preview grid starts (set in initNoiseSettings)
+    private int noisePreviewY;          // y where the noise preview cube starts (set in initNoiseSettings)
     private int noiseModeDescY, noiseDevDescY, noiseChaosDescY; // yellow help lines on the noise tab
-    private double previewOffX, previewOffZ; // pan offset (in cells) for scrubbing the preview
+    private double previewOffX, previewOffY, previewOffZ; // pan offset (in blocks) from the player anchor
+    private enum CubeFace { TOP, RIGHT, LEFT }
+    private CubeFace dragFace; // face pressed at mouse-down — the drag pans along it until release
+
+    // Expanded preview: the tab's preview blown up over a dark backdrop (⛶ opens, ✗/Esc closes).
+    private boolean previewExpanded;
+    private static final int CLOSE_X_SIZE = 24;
+
+    // Gradient tab cylinder preview: gradient start at the top rim, end at the bottom. The cell
+    // choices are cached (chaos/wobble/variation are random) and re-rolled when settings change.
+    private int gradPreviewY; // y where the cylinder preview starts (set in initGradientSettings)
+    private List<List<ItemStack>> previewStepGroups = new ArrayList<>(); // step → its variation group
+    private ItemStack[][] cylCache; // [ring cell][row, 0 = top rim] chosen sprite
+    private int[][] cylCells;       // ring cells (x,z) of the cached cylinder, painter-sorted
+    private int cylD, cylH;
 
     private void initNoiseSettings() {
         int rx = rightX(), rw = rightW();
@@ -401,6 +420,10 @@ public class GradientScreen extends Screen {
                 v -> { ConfigManager.get().noiseMaxSteps = sliderToSteps(v); rebuildDisplayRows(); }));
         y += 26;
         noisePreviewY = y;
+        if (noisePreviewY + 12 < this.height - 32) {
+            addRenderableWidget(Button.builder(Component.literal("⛶"), b -> previewExpanded = true)
+                    .bounds(rx + rw - 16, noisePreviewY - 2, 16, 14).build());
+        }
     }
 
     private long noiseSeedLong() {
@@ -409,8 +432,8 @@ public class GradientScreen extends Screen {
         try { return Long.parseLong(s); } catch (NumberFormatException e) { return s.hashCode(); }
     }
 
-    private static int sliderToScale(double v) { return Math.max(1, Math.min(64, 1 + (int) Math.round(v * 63))); }
-    private static double scaleToSlider(double s) { return (Math.max(1, Math.min(64, s)) - 1) / 63.0; }
+    private static int sliderToScale(double v) { return Math.max(1, Math.min(15, 1 + (int) Math.round(v * 14))); }
+    private static double scaleToSlider(double s) { return (Math.max(1, Math.min(15, s)) - 1) / 14.0; }
 
     private List<SourceBlock> gatherSourceBlocks() {
         List<SourceBlock> out = new ArrayList<>();
@@ -505,11 +528,16 @@ public class GradientScreen extends Screen {
         double variation = tab == Tab.NOISE ? cfg.noiseDeviation : cfg.deviationBudget;
         java.util.Map<Integer, List<ItemStack>> extrasByStep = new java.util.HashMap<>();
         List<int[]> groups = GradientRamp.bandGroups(rgbs, used, order, mode, variation);
+        previewStepGroups = new ArrayList<>();
+        cylCache = null; // settings changed — re-roll the cylinder preview
         for (int i = 0; i < used.length; i++) {
             List<ItemStack> ex = new ArrayList<>();
+            List<ItemStack> full = new ArrayList<>();
             for (int member : groups.get(i)) {
+                full.add(nonEx.get(member).stack());
                 if (member != used[i]) ex.add(nonEx.get(member).stack());
             }
+            previewStepGroups.add(full);
             if (!ex.isEmpty()) extrasByStep.put(used[i], ex);
         }
 
@@ -563,10 +591,17 @@ public class GradientScreen extends Screen {
         // Flatten to numbered blocks (low→high) and one representative per group for the preview.
         List<SourceBlock> numbered = new ArrayList<>();
         orderedBlocks = new ArrayList<>();
+        previewStepGroups = new ArrayList<>();
+        cylCache = null; // settings changed — re-roll the cylinder preview
         for (List<String> grp : groups) {
             SourceBlock rep = sbById(grp.get(0), sourceBlocks);
             if (rep != null) orderedBlocks.add(rep);
-            for (String id : grp) { SourceBlock sb = sbById(id, sourceBlocks); if (sb != null) numbered.add(sb); }
+            List<ItemStack> full = new ArrayList<>();
+            for (String id : grp) {
+                SourceBlock sb = sbById(id, sourceBlocks);
+                if (sb != null) { numbered.add(sb); full.add(sb.stack()); }
+            }
+            if (!full.isEmpty()) previewStepGroups.add(full);
         }
 
         List<BlockPickerPanel.Row> rows = new ArrayList<>();
@@ -977,6 +1012,16 @@ public class GradientScreen extends Screen {
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
+        if (previewExpanded && (tab == Tab.GRADIENT || tab == Tab.NOISE)) {
+            if (event.button() == 0) {
+                if (inCloseX(event.x(), event.y())) {
+                    previewExpanded = false;
+                } else if (tab == Tab.NOISE && inNoisePreview(event.x(), event.y())) {
+                    dragFace = faceAt(event.x(), event.y());
+                }
+            }
+            return true; // the settings underneath are covered by the backdrop — swallow everything
+        }
         if (event.y() < BAR_H && event.button() == 0) {
             int[] xs = tabXs();
             for (int i = 0; i < BAR_ORDER.length; i++) {
@@ -987,6 +1032,10 @@ public class GradientScreen extends Screen {
             }
         }
         if (super.mouseClicked(event, doubled)) return true;
+        if (event.button() == 0 && inNoisePreview(event.x(), event.y())) {
+            dragFace = faceAt(event.x(), event.y()); // lock the drag to this face until release
+            return true;
+        }
         if (tab == Tab.HELP && event.button() == 0 && help != null
                 && help.mouseClicked(event.x(), event.y())) {
             return true;
@@ -1056,6 +1105,7 @@ public class GradientScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (previewExpanded && (tab == Tab.GRADIENT || tab == Tab.NOISE)) return true;
         if ((tab == Tab.GRADIENT || tab == Tab.NOISE || tab == Tab.SOLID)
                 && picker != null && picker.mouseScrolled(mouseX, mouseY, scrollY)) {
             return true;
@@ -1130,6 +1180,9 @@ public class GradientScreen extends Screen {
         else if (tab == Tab.FINDER) renderFinderTab(g, mouseX, mouseY);
         else if (tab == Tab.HELP) { if (help != null) help.render(g, mouseX, mouseY); }
         else renderSettingsTab(g, mouseX, mouseY);
+        if (previewExpanded && (tab == Tab.GRADIENT || tab == Tab.NOISE)) {
+            renderExpandedOverlay(g, mouseX, mouseY);
+        }
     }
 
     private void renderTitleBar(GuiGraphicsExtractor g) {
@@ -1178,6 +1231,7 @@ public class GradientScreen extends Screen {
         g.text(this.font, this.font.plainSubstrByWidth("Similar blocks swap within each step", rw), rx, deviationDescY, YELLOW);
         g.text(this.font, this.font.plainSubstrByWidth("Chance to repeat or skip a step", rw), rx, chaosDescY, YELLOW);
         g.text(this.font, this.font.plainSubstrByWidth("Chance steps run longer or shorter", rw), rx, stepWobbleDescY, YELLOW);
+        renderGradientPreview(g);
     }
 
     private void renderNoiseTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
@@ -1191,43 +1245,310 @@ public class GradientScreen extends Screen {
         renderNoisePreview(g);
     }
 
-    /** Top-down slice of the noise field, each cell drawn as the block it maps to (valley→peak). */
+    // GUI block sprites are a 30° dimetric render with a 10px block edge: one block over in +X is
+    // (+7.07, +3.54) px on screen, +Z is (−7.07, +3.54), and one block up is (0, −8.66). Drawing
+    // sprites at exactly these offsets tiles them into one solid composite cube.
+    private static final float ISO_X = 7.0711f;   // half the projected block width
+    private static final float ISO_DOWN = 3.5355f; // screen drop per horizontal step
+    private static final float ISO_UP = 8.6603f;  // screen rise per vertical step
+
+    /** Anchor world coords of the preview cube: the player's feet plus the pan offsets. */
+    private int[] noiseAnchor() {
+        BlockPos feet = this.minecraft != null && this.minecraft.player != null
+                ? this.minecraft.player.blockPosition() : BlockPos.ZERO;
+        return new int[]{feet.getX() + (int) Math.round(previewOffX),
+                feet.getY() + (int) Math.round(previewOffY),
+                feet.getZ() + (int) Math.round(previewOffZ)};
+    }
+
+    /**
+     * The noise field as a packed isometric cube of world blocks, anchored at the player's feet and
+     * extending East (+X, the right face), South (+Z, the left face) and up (top face). Each visible
+     * block samples the noise at its real world coordinate exactly as placement does
+     * ({@link NoisePlacer#slotForCell}: integer coords, same seed and scales, no curve) — so the
+     * preview is literally what painting that region would produce (before chaos/variation swaps).
+     */
     private void renderNoisePreview(GuiGraphicsExtractor g) {
         int rx = rightX(), rw = rightW();
         g.text(this.font, "Preview:", rx, noisePreviewY, GREY);
+        if (previewExpanded) return; // drawn by the overlay instead
         int gridY = noisePreviewY + 12;
         if (orderedBlocks.isEmpty()) {
             g.text(this.font, this.font.plainSubstrByWidth("Select blocks to preview", rw), rx, gridY, YELLOW);
             return;
         }
+        float[] l = noiseCubeLayout(false);
+        drawNoiseCube(g, l);
+        int[] a = noiseAnchor();
+        int hintY = (int) (l[2] + l[3] * (((int) l[0] - 1) * (2 * ISO_DOWN + ISO_UP) + 16)) + 3;
+        g.text(this.font, this.font.plainSubstrByWidth(
+                "At " + a[0] + " " + a[1] + " " + a[2] + " · right = East · left = South", rw), rx, hintY, GREY);
+        g.text(this.font, this.font.plainSubstrByWidth("Drag a face to pan along that face", rw),
+                rx, hintY + 11, YELLOW);
+    }
+
+    /** Draw the noise cube for a {@link #noiseCubeLayout} layout {n, tx, ty, scale}. */
+    private void drawNoiseCube(GuiGraphicsExtractor g, float[] l) {
+        int n = (int) l[0];
         GradientConfig cfg = ConfigManager.get();
         long seed = noiseSeedLong();
-        int cells = Math.max(1, rw / 16);                       // square-ish grid sized to the column
-        int rows = Math.max(1, Math.min(cells, (this.height - 30 - gridY - 12) / 16));
-        for (int gz = 0; gz < rows; gz++) {
-            for (int gx = 0; gx < cells; gx++) {
-                // Top-down (XZ) slice at y=0; drag the grid to pan. Noise.sample is equalised so the
-                // value spreads across [0,1] → the whole block list is used, not just the middle.
-                double v = Noise.sample(cfg.noiseType, gx + previewOffX, 0, gz + previewOffZ, seed,
-                        cfg.noiseScaleX, cfg.noiseScaleY, cfg.noiseScaleZ);
-                int idx = GradientRamp.rampIndex(orderedBlocks.size(), cfg.curve.apply(v));
-                g.item(orderedBlocks.get(idx).stack(), rx + gx * 16, gridY + gz * 16);
+        int[] a = noiseAnchor();
+        g.pose().pushMatrix();
+        g.pose().translate(l[1], l[2]);
+        g.pose().scale(l[3], l[3]);
+        // Painter's order: bottom layer up, back-to-front within each layer.
+        for (int gy = 0; gy < n; gy++) {
+            for (int sum = 0; sum <= 2 * (n - 1); sum++) {
+                for (int gx = Math.max(0, sum - (n - 1)); gx <= Math.min(n - 1, sum); gx++) {
+                    int gz = sum - gx;
+                    if (gx != n - 1 && gz != n - 1 && gy != n - 1) continue; // hidden inside the cube
+                    double v = Noise.sample(cfg.noiseType, a[0] + gx, a[1] + gy, a[2] + gz, seed,
+                            cfg.noiseScaleX, cfg.noiseScaleY, cfg.noiseScaleZ);
+                    int idx = GradientRamp.rampIndex(orderedBlocks.size(), v);
+                    g.pose().pushMatrix();
+                    g.pose().translate((gx - gz + (n - 1)) * ISO_X, (gx + gz) * ISO_DOWN + (n - 1 - gy) * ISO_UP);
+                    g.item(orderedBlocks.get(idx).stack(), 0, 0);
+                    g.pose().popMatrix();
+                }
             }
         }
-        g.text(this.font, this.font.plainSubstrByWidth("Click + drag the preview to pan", rw),
-                rx, gridY + rows * 16 + 3, YELLOW);
+        g.pose().popMatrix();
+    }
+
+    /**
+     * Noise cube layout {n, tx, ty, scale}: (tx,ty) is the on-screen top-left of the cube's bounding
+     * box. Collapsed sits in the settings column at 1×; expanded is centred at 2× over the backdrop.
+     */
+    private float[] noiseCubeLayout(boolean expanded) {
+        if (expanded) {
+            float s = 2f;
+            float availW = this.width - 60, availH = this.height - 70;
+            int n = 1 + (int) Math.min((availW / s - 16) / (2 * ISO_X), (availH / s - 16) / (2 * ISO_DOWN + ISO_UP));
+            n = Math.max(2, Math.min(12, n));
+            float w = s * (2 * (n - 1) * ISO_X + 16), h = s * ((n - 1) * (2 * ISO_DOWN + ISO_UP) + 16);
+            return new float[]{n, (this.width - w) / 2f, (this.height - h) / 2f, s};
+        }
+        int rw = rightW();
+        int gridY = noisePreviewY + 12;
+        int availH = (this.height - 30 - 24) - gridY; // room for the two hint lines underneath
+        int n = 1 + (int) Math.min((rw - 16) / (2 * ISO_X), (availH - 16) / (2 * ISO_DOWN + ISO_UP));
+        n = Math.max(2, Math.min(10, n));
+        float w = 2 * (n - 1) * ISO_X + 16;
+        return new float[]{n, rightX() + (rw - w) / 2f, gridY, 1f};
+    }
+
+    /**
+     * Which composite-cube face the point is over, by inverting the iso projection relative to the
+     * cube's top vertex: u,v are the point's world X/Z if it lay in the top-face plane — inside
+     * [0,n]² means the top face; otherwise the sign of the horizontal offset from the front vertical
+     * edge picks the East (right) or South (left) face. Off-cube points get the nearest face.
+     */
+    private CubeFace faceAt(double mx, double my) {
+        float[] l = noiseCubeLayout(previewExpanded);
+        float n = l[0];
+        double dx = (mx - l[1]) / l[3] - ((n - 1) * ISO_X + 8); // top vertex: sprite (0,n−1,0) top-centre
+        double dy = (my - l[2]) / l[3];
+        double u = (dx / ISO_X + dy / ISO_DOWN) / 2, v = (dy / ISO_DOWN - dx / ISO_X) / 2;
+        if (u >= 0 && u <= n && v >= 0 && v <= n) return CubeFace.TOP;
+        return dx >= 0 ? CubeFace.RIGHT : CubeFace.LEFT;
+    }
+
+    // ---- gradient cylinder preview --------------------------------------------------------------
+
+    /**
+     * The gradient as a hollow open-topped cylinder: the top rim is the start of the gradient, the
+     * bottom the end, and every ring cell is its own vertical run through the same choice pipeline
+     * as placement ({@link GradientChoice}): Curve, then Chaos nudges, per-column Step-length wobble
+     * boundaries, and a random pick within each step's Variation band group.
+     */
+    private void renderGradientPreview(GuiGraphicsExtractor g) {
+        int rx = rightX(), rw = rightW();
+        if (gradPreviewY + 12 >= this.height - 32) return; // no room at all — ⛶ hidden too
+        g.text(this.font, "Preview:", rx, gradPreviewY, GREY);
+        if (previewExpanded) return; // drawn by the overlay instead
+        int gridY = gradPreviewY + 12;
+        if (previewStepGroups.isEmpty()) {
+            g.text(this.font, this.font.plainSubstrByWidth("Select blocks to preview", rw), rx, gridY, YELLOW);
+            return;
+        }
+        int availH = (this.height - 34) - gridY;
+        int d = rw >= 5 * 2 * ISO_X + 16 ? 5 : 3;
+        int h = cylinderRows(d, availH);
+        if (h < 3 && d > 3) { d = 3; h = cylinderRows(d, availH); }
+        if (h < 3) {
+            g.text(this.font, this.font.plainSubstrByWidth("No room — use ⛶ to expand", rw), rx, gridY, YELLOW);
+            return;
+        }
+        h = Math.min(h, Math.max(whiteCount, 8)); // don't stretch a short gradient absurdly tall
+        float w = 2 * (d - 1) * ISO_X + 16;
+        drawCylinder(g, rx + (rw - w) / 2f, gridY, 1f, d, h);
+    }
+
+    /** Rows that fit a d-wide cylinder into {@code availH} pixels (bounding height inverted). */
+    private static int cylinderRows(int d, float availH) {
+        return 1 + (int) ((availH - 16 - (d - 1) * 2 * ISO_DOWN) / ISO_UP);
+    }
+
+    /** Ring cells (x,z) of a d-wide hollow circle, painter-sorted (back to front). */
+    private static int[][] ringCells(int d) {
+        double c = (d - 1) / 2.0, r = (d - 1) / 2.0;
+        List<int[]> cells = new ArrayList<>();
+        for (int x = 0; x < d; x++) {
+            for (int z = 0; z < d; z++) {
+                if (Math.abs(Math.hypot(x - c, z - c) - r) <= 0.5) cells.add(new int[]{x, z});
+            }
+        }
+        cells.sort(java.util.Comparator.comparingInt(a -> a[0] + a[1]));
+        return cells.toArray(new int[0][]);
+    }
+
+    /**
+     * Fill {@link #cylCache} for a d×h cylinder. Fixed-seed random: the preview is stable from frame
+     * to frame and re-rolls only when the settings change (rebuild clears the cache) or it resizes.
+     */
+    private void ensureCylinder(int d, int h) {
+        if (cylCache != null && cylD == d && cylH == h) return;
+        cylD = d;
+        cylH = h;
+        cylCells = ringCells(d);
+        cylCache = new ItemStack[cylCells.length][h];
+        if (previewStepGroups.isEmpty()) return;
+        GradientConfig cfg = ConfigManager.get();
+        Random rnd = new Random(42);
+        int count = previewStepGroups.size();
+        double band = 1.0 / count;
+        for (int i = 0; i < cylCells.length; i++) {
+            // Per-column wobble boundaries, like placement's per-column wobble key.
+            double[] bounds = new double[count - 1];
+            for (int k = 0; k < count - 1; k++) {
+                double off = cfg.stepWobble > 0 && rnd.nextDouble() < cfg.stepWobble
+                        ? (rnd.nextDouble() - 0.5) * band : 0.0;
+                bounds[k] = (k + 1) * band + off;
+            }
+            for (int j = 0; j < h; j++) {
+                double t = h == 1 ? 0 : (double) j / (h - 1);
+                double tc = cfg.curve.apply(t);
+                if (cfg.chaos > 0 && t > 0 && t < 1 && rnd.nextDouble() < cfg.chaos) {
+                    double stepFrac = count > 1 ? 1.0 / (count - 1) : 0.1;
+                    tc = Math.max(0, Math.min(1, rnd.nextBoolean() ? tc - stepFrac : tc + stepFrac));
+                }
+                int pos = 0;
+                while (pos < bounds.length && tc >= bounds[pos]) pos++;
+                List<ItemStack> group = previewStepGroups.get(pos);
+                cylCache[i][j] = group.get(rnd.nextInt(group.size()));
+            }
+        }
+    }
+
+    /** Draw the cylinder with its bounding box top-left at (tx,ty), sprites scaled by {@code s}. */
+    private void drawCylinder(GuiGraphicsExtractor g, float tx, float ty, float s, int d, int h) {
+        ensureCylinder(d, h);
+        g.pose().pushMatrix();
+        g.pose().translate(tx, ty);
+        g.pose().scale(s, s);
+        for (int gy = 0; gy < h; gy++) {  // bottom layer up
+            int row = h - 1 - gy;          // row 0 = top rim = gradient start
+            for (int i = 0; i < cylCells.length; i++) { // back to front (pre-sorted)
+                ItemStack st = cylCache[i][row];
+                if (st == null) continue;
+                int cx = cylCells[i][0], cz = cylCells[i][1];
+                g.pose().pushMatrix();
+                g.pose().translate((cx - cz + (d - 1)) * ISO_X, (cx + cz) * ISO_DOWN + row * ISO_UP);
+                g.item(st, 0, 0);
+                g.pose().popMatrix();
+            }
+        }
+        g.pose().popMatrix();
+    }
+
+    // ---- expanded preview overlay ---------------------------------------------------------------
+
+    private boolean inCloseX(double mx, double my) {
+        return mx >= this.width - 10 - CLOSE_X_SIZE && mx <= this.width - 10
+                && my >= 10 && my <= 10 + CLOSE_X_SIZE;
+    }
+
+    /** The expanded preview: dark backdrop over the settings, the preview centred and 2×, ✗ closes. */
+    private void renderExpandedOverlay(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        g.nextStratum();
+        g.fill(0, 0, this.width, this.height, 0xD0000000);
+        if (tab == Tab.GRADIENT) {
+            if (previewStepGroups.isEmpty()) {
+                g.text(this.font, "Select blocks to preview", this.width / 2 - 60, this.height / 2, YELLOW);
+            } else {
+                float s = 2f;
+                float availW = this.width - 60, availH = this.height - 70;
+                int d = 7;
+                while (d > 3 && s * (2 * (d - 1) * ISO_X + 16) > availW) d -= 2;
+                int h = Math.max(3, Math.min(24, cylinderRows(d, availH / s)));
+                h = Math.min(h, Math.max(whiteCount * 2, 12));
+                float w = s * (2 * (d - 1) * ISO_X + 16);
+                float hp = s * ((d - 1) * 2 * ISO_DOWN + (h - 1) * ISO_UP + 16);
+                drawCylinder(g, (this.width - w) / 2f, (this.height - hp) / 2f, s, d, h);
+                g.text(this.font, "Top rim = start · bottom = end",
+                        this.width / 2 - this.font.width("Top rim = start · bottom = end") / 2,
+                        (int) ((this.height + hp) / 2f) + 5, GREY);
+            }
+        } else {
+            if (orderedBlocks.isEmpty()) {
+                g.text(this.font, "Select blocks to preview", this.width / 2 - 60, this.height / 2, YELLOW);
+            } else {
+                float[] l = noiseCubeLayout(true);
+                drawNoiseCube(g, l);
+                int[] a = noiseAnchor();
+                String coords = "At " + a[0] + " " + a[1] + " " + a[2]
+                        + " · right = East · left = South · drag a face to pan";
+                g.text(this.font, coords, this.width / 2 - this.font.width(coords) / 2,
+                        (int) (l[2] + l[3] * (((int) l[0] - 1) * (2 * ISO_DOWN + ISO_UP) + 16)) + 5, GREY);
+            }
+        }
+        // Contrasting close ✗, top-right (Esc works too).
+        boolean hover = inCloseX(mouseX, mouseY);
+        int bx = this.width - 10 - CLOSE_X_SIZE;
+        if (hover) g.fill(bx, 10, bx + CLOSE_X_SIZE, 10 + CLOSE_X_SIZE, 0x30FFFFFF);
+        g.pose().pushMatrix();
+        g.pose().translate(bx + (CLOSE_X_SIZE - 2f * this.font.width("✗")) / 2f,
+                10 + (CLOSE_X_SIZE - 2f * this.font.lineHeight) / 2f);
+        g.pose().scale(2f, 2f);
+        g.text(this.font, "✗", 0, 0, hover ? YELLOW : WHITE);
+        g.pose().popMatrix();
     }
 
     private boolean inNoisePreview(double mx, double my) {
+        if (tab != Tab.NOISE) return false;
+        if (previewExpanded) {
+            float[] l = noiseCubeLayout(true);
+            float w = l[3] * (2 * ((int) l[0] - 1) * ISO_X + 16);
+            float h = l[3] * (((int) l[0] - 1) * (2 * ISO_DOWN + ISO_UP) + 16);
+            return mx >= l[1] && mx <= l[1] + w && my >= l[2] && my <= l[2] + h;
+        }
         int rx = rightX();
-        return tab == Tab.NOISE && mx >= rx && mx <= rx + rightW() && my >= noisePreviewY + 12 && my < this.height - 30;
+        return mx >= rx && mx <= rx + rightW() && my >= noisePreviewY + 12 && my < this.height - 30;
     }
 
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
-        if (event.button() == 0 && inNoisePreview(event.x(), event.y())) {
-            previewOffX -= dragX / 16.0; // one cell == 16px
-            previewOffZ -= dragY / 16.0;
+        if (event.button() == 0 && dragFace != null) {
+            // Project the mouse delta onto the locked face's world axes (coords follow the mouse:
+            // dragging up a side face shifts the anchor up). The face keeps the lock even when the
+            // pointer leaves it mid-drag; releasing the button clears it.
+            double mx = -dragX, my = -dragY;
+            switch (dragFace) {
+                case TOP -> {
+                    previewOffX += mx / (2 * ISO_X) + my / (2 * ISO_DOWN);
+                    previewOffZ += my / (2 * ISO_DOWN) - mx / (2 * ISO_X);
+                }
+                case RIGHT -> { // East face: Z runs down-left across it, Y runs up
+                    double dz = -mx / ISO_X;
+                    previewOffZ += dz;
+                    previewOffY += (dz * ISO_DOWN - my) / ISO_UP;
+                }
+                case LEFT -> {  // South face: X runs down-right across it, Y runs up
+                    double dxw = mx / ISO_X;
+                    previewOffX += dxw;
+                    previewOffY += (dxw * ISO_DOWN - my) / ISO_UP;
+                }
+            }
             return true;
         }
         if (tab == Tab.FINDER && event.button() == 0) {
@@ -1242,6 +1563,24 @@ public class GradientScreen extends Screen {
             }
         }
         return super.mouseDragged(event, dragX, dragY);
+    }
+
+    @Override
+    public boolean mouseReleased(MouseButtonEvent event) {
+        if (event.button() == 0 && dragFace != null) {
+            dragFace = null;
+            return true;
+        }
+        return super.mouseReleased(event);
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        if (previewExpanded && event.key() == 256) { // Esc closes the expanded preview first
+            previewExpanded = false;
+            return true;
+        }
+        return super.keyPressed(event);
     }
 
     private void renderSettingsTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {

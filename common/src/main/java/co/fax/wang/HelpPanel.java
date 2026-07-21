@@ -373,7 +373,14 @@ public final class HelpPanel {
                 "Step length: chance each step runs randomly longer or shorter (its neighbour "
                     + "compensates, so the gradient still starts and ends on time).",
                 "Max steps: caps how many distinct blocks the gradient uses.",
-                "Pixel %: how much of each texture the Top % modes measure."))),
+                "Pixel %: how much of each texture the Top % modes measure.")),
+            t("Preview", "A cylinder placed with the real pipeline.", List.of(
+                "The open-topped cylinder under the sliders shows the gradient as it would "
+                    + "place: the top rim is the start, the bottom rim the end, and every column "
+                    + "rolls its own Chaos, Step length, and Variation - the spread you see "
+                    + "between columns is the spread a real build gets.",
+                "It re-rolls whenever a setting changes. The expand button opens it full "
+                    + "screen; X or Esc closes it."))),
 
         t("Noise paint", "Natural, blotchy 3D patterns - regions, surfaces, or free-hand.",
             List.of(
@@ -402,9 +409,15 @@ public final class HelpPanel {
                 "Order, Pixel %, Variation, Chaos, and Max steps work exactly like the gradient "
                     + "tool's (see Gradient paint), but keep their own separate values for the "
                     + "noise tool.")),
-            t("Preview", "A live top-down slice of the field.", List.of(
-                "The grid at the bottom right previews the noise with your current blocks and "
-                    + "settings. Click and drag it to pan around."))),
+            t("Preview", "A live cube of the field, sampled where you stand.", List.of(
+                "The cube at the bottom right shows the noise built from your current blocks and "
+                    + "settings, sampled at real world coordinates starting at your feet - the "
+                    + "right face runs East, the left face South, the top face up. What you see "
+                    + "is what painting that region would place.",
+                "Drag a face to pan along it - the drag locks to the face you press. The top "
+                    + "face pans across the ground, the side faces also pan up and down. The "
+                    + "coordinates under the cube follow along.",
+                "The expand button opens the preview full screen; X or Esc closes it."))),
 
         t("Finder", "Every block in the game, ranked by colour or brightness.",
             List.of(

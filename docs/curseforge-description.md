@@ -106,6 +106,9 @@ A smooth blend from one block to another — along markers or free-hand.
 - **Shaping**: **Curve** (Linear / Ease In / Ease Out / Ease In-Out / Step), **Variation** (similar
   blocks randomly stand in for a step — shown as small icons on its row), **Chaos** (chance to
   repeat/skip a step), **Step length** (steps randomly run longer/shorter), **Max steps**.
+- **Live preview**: an open-topped cylinder placed with the real pipeline — top rim = start,
+  bottom = end, every column rolling its own Chaos / Step length / Variation. **⛶** expands it
+  full screen (✗ or Esc closes).
 
 ## Noise tool
 
@@ -116,8 +119,10 @@ block order, peaks the other. Always ordered from the picker list.
   empty spot inside — it flood-fills the whole region at once.
 - Or paint it anywhere: Single columns, Face surfaces, and free 3D blobs all work.
 - **Noise settings**: type (Smooth / Perlin / Fractal), **Seed**, per-axis **Scale** (with Lock
-  XYZ), plus its own Order / Variation / Chaos / Max steps — and a **live preview** grid you can
-  drag to pan.
+  XYZ), plus its own Order / Variation / Chaos / Max steps.
+- **Live preview**: an isometric cube sampled at real world coordinates starting at your feet —
+  exactly what painting that spot would place. Drag a face to pan along it (side faces pan up and
+  down too); **⛶** expands it full screen (✗ or Esc closes).
 
 ## Finder tab
 
