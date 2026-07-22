@@ -15,7 +15,13 @@ public enum CurveFunction {
     /** Shallow at both ends, steep in the middle. */
     EASE_IN_OUT("Ease In/Out"),
     /** Hard, quantised bands instead of a smooth blend. */
-    STEP("Step");
+    STEP("Step"),
+    /**
+     * User-drawn step distribution: the per-step boundaries live in the config
+     * ({@code curveBounds} / {@code noiseCurveBounds}) and are edited by dragging the curve strip's
+     * handles on the paint screen. Never reached by {@link #next()} — dragging a handle selects it.
+     */
+    CUSTOM("Custom");
 
     private static final int STEP_BANDS = 4;
 
@@ -38,11 +44,14 @@ public enum CurveFunction {
             case EASE_OUT -> x * (2.0 - x);
             case EASE_IN_OUT -> x * x * (3.0 - 2.0 * x); // smoothstep
             case STEP -> Math.round(x * STEP_BANDS) / (double) STEP_BANDS;
+            case CUSTOM -> x; // shaping happens via the stored boundaries, not the curve itself
         };
     }
 
+    /** The next curve in the cycle, skipping {@link #CUSTOM} (only handle-dragging selects it). */
     public CurveFunction next() {
         CurveFunction[] all = values();
-        return all[(ordinal() + 1) % all.length];
+        CurveFunction n = all[(ordinal() + 1) % all.length];
+        return n == CUSTOM ? all[0] : n;
     }
 }

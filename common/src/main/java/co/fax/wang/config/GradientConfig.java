@@ -93,6 +93,14 @@ public class GradientConfig {
     /** Easing curve applied to gradient progress. */
     public CurveFunction curve = CurveFunction.LINEAR;
 
+    /**
+     * Custom-curve step boundaries for the gradient tool: ascending fractions of the fill (one per
+     * internal step boundary, so size = steps − 1), edited by dragging the curve strip's handles.
+     * Used only while {@link #curve} is CUSTOM; ignored (falls back to even steps) when the size
+     * doesn't match the current step count.
+     */
+    public List<Double> curveBounds = new ArrayList<>();
+
     /** Where the candidate-block palette is sourced from. */
     public GradientSource source = GradientSource.HOTBAR_AND_INVENTORY;
 
@@ -152,6 +160,11 @@ public class GradientConfig {
     public double noiseChaos = 0.0;
     public int noiseMaxSteps = 16;
     public double noisePixelPercent = 0.5;
+    /** Easing curve applied to the noise value before mapping it onto the order (its own, like
+     *  every other noise setting). */
+    public CurveFunction noiseCurve = CurveFunction.LINEAR;
+    /** Custom-curve boundaries for the noise tool (see {@link #curveBounds}). */
+    public List<Double> noiseCurveBounds = new ArrayList<>();
 
     // ---- solid paint ------------------------------------------------------------------------------
 

@@ -43,6 +43,7 @@ public final class GradientChoice {
     private static Object wobbleKey;
     private static int wobbleCount;
     private static double wobbleStrength;
+    private static CurveFunction wobbleCurve;
     private static double[] wobbleBounds; // ascending boundaries in curved-t space, length count-1
 
     // ---- palette ----------------------------------------------------------------------------------
@@ -177,18 +178,30 @@ public final class GradientChoice {
      * makes its neighbour shorter — the gradient still starts and ends on time.
      */
     private static int stepIndex(GradientConfig cfg, Object key, int count, double tc) {
-        if (cfg.stepWobble <= 0 || count <= 1) return GradientRamp.rampIndex(count, tc);
-        if (!Objects.equals(key, wobbleKey) || count != wobbleCount || cfg.stepWobble != wobbleStrength) {
+        // Custom curve: the base boundaries come from the strip editor instead of even bands
+        // (CUSTOM.apply is identity, so tc is still the raw fill fraction here).
+        java.util.List<Double> custom =
+                cfg.curve == CurveFunction.CUSTOM && cfg.curveBounds.size() == count - 1
+                        ? cfg.curveBounds : null;
+        if (cfg.stepWobble <= 0 || count <= 1) {
+            if (custom == null) return GradientRamp.rampIndex(count, tc);
+            int pos = 0;
+            while (pos < custom.size() && tc >= custom.get(pos)) pos++;
+            return pos;
+        }
+        if (!Objects.equals(key, wobbleKey) || count != wobbleCount
+                || cfg.stepWobble != wobbleStrength || cfg.curve != wobbleCurve) {
             double band = 1.0 / count;
             wobbleBounds = new double[count - 1];
             for (int k = 0; k < count - 1; k++) {
                 double off = RANDOM.nextDouble() < cfg.stepWobble
                         ? (RANDOM.nextDouble() - 0.5) * band : 0.0;
-                wobbleBounds[k] = (k + 1) * band + off;
+                wobbleBounds[k] = (custom != null ? custom.get(k) : (k + 1) * band) + off;
             }
             wobbleKey = key;
             wobbleCount = count;
             wobbleStrength = cfg.stepWobble;
+            wobbleCurve = cfg.curve;
         }
         int pos = 0;
         while (pos < wobbleBounds.length && tc >= wobbleBounds[pos]) pos++;

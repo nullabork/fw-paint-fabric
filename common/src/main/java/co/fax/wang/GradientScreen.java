@@ -143,12 +143,21 @@ public class GradientScreen extends Screen {
 
     // ---- layout helpers -------------------------------------------------------------------------
 
+    // The Gradient/Noise tabs slot a thin third column (the curve strip) between the picker and the
+    // settings. The outer columns keep their two-column width — the strip shifts them apart.
+    private static final int MID_W = 44;
+
+    private boolean threeCol() { return tab == Tab.GRADIENT || tab == Tab.NOISE; }
     private int colW() {
         int avail = this.width - 2 * LEFT_X;
         return Math.max(60, Math.min(COL_W_MAX, (avail - COL_GAP) / 2));
     }
-    private int contentX() { return Math.max(LEFT_X, (this.width - (2 * colW() + COL_GAP)) / 2); }
-    private int rightX() { return contentX() + colW() + COL_GAP; }
+    private int contentX() {
+        int total = 2 * colW() + COL_GAP + (threeCol() ? MID_W + COL_GAP : 0);
+        return Math.max(LEFT_X, (this.width - total) / 2);
+    }
+    private int midX() { return contentX() + colW() + COL_GAP; }
+    private int rightX() { return midX() + (threeCol() ? MID_W + COL_GAP : 0); }
     private int rightW() { return colW(); }
     private int leftW() { return colW(); }
 
@@ -253,11 +262,23 @@ public class GradientScreen extends Screen {
         }
 
         // List capped at 10½ rows (the half row + scrollbar show it scrolls), leaving room for the
-        // yellow button key underneath.
+        // yellow button key underneath (Pick mode's key runs four lines instead of two).
         int availH = (this.height - 30) - PICK_LIST_Y;
-        int listH = Math.max(BlockPickerPanel.ROW_H, Math.min(BlockPickerPanel.MAX_H, availH - LEGEND_H));
+        int legendH = activeMode().isPick() ? 50 : LEGEND_H;
+        int listH = Math.max(BlockPickerPanel.ROW_H, Math.min(BlockPickerPanel.MAX_H, availH - legendH));
         picker.setBounds(cx, PICK_LIST_Y, w, listH);
         legendY = PICK_LIST_Y + listH + 4;
+
+        // Centre column: the curve button (its icon is drawn over it in render; the distribution
+        // strip below it is render-only, with hand-rolled handle dragging).
+        addRenderableWidget(Button.builder(Component.empty(), b -> {
+            GradientConfig c = ConfigManager.get();
+            if (tab == Tab.NOISE) c.noiseCurve = c.noiseCurve.next();
+            else c.curve = c.curve.next();
+            ConfigManager.save();
+            rebuildDisplayRows();
+        }).bounds(midX(), 30, MID_W, 20).build());
+
         rebuildDisplayRows();
 
         if (tab == Tab.GRADIENT) initGradientSettings();
@@ -303,9 +324,6 @@ public class GradientScreen extends Screen {
         }
         modeDescY = y; y += 12;
 
-        cycleButton(rx, y, rw, this::curveLabel, () -> {
-            GradientConfig c = ConfigManager.get(); c.curve = c.curve.next(); rebuildDisplayRows(); });
-        y += 24;
         cycleButton(rx, y, rw, this::endpointsLabel, () -> {
             GradientConfig c = ConfigManager.get(); c.gradientFromMarkers = !c.gradientFromMarkers; });
         y += 24; endpointsDescY = y; y += 12;
@@ -341,6 +359,9 @@ public class GradientScreen extends Screen {
     private double previewOffX, previewOffY, previewOffZ; // pan offset (in blocks) from the player anchor
     private enum CubeFace { TOP, RIGHT, LEFT }
     private CubeFace dragFace; // face pressed at mouse-down — the drag pans along it until release
+
+    // Curve strip (centre column): index of the boundary handle being dragged, −1 when none.
+    private int dragHandle = -1;
 
     // Expanded preview: the tab's preview blown up over a dark backdrop (⛶ opens, ✗/Esc closes).
     private boolean previewExpanded;
@@ -1032,6 +1053,13 @@ public class GradientScreen extends Screen {
             }
         }
         if (super.mouseClicked(event, doubled)) return true;
+        if (threeCol() && event.button() == 0) {
+            int hIdx = handleAt(event.x(), event.y());
+            if (hIdx >= 0) {
+                beginHandleDrag(hIdx);
+                return true;
+            }
+        }
         if (event.button() == 0 && inNoisePreview(event.x(), event.y())) {
             dragFace = faceAt(event.x(), event.y()); // lock the drag to this face until release
             return true;
@@ -1122,7 +1150,6 @@ public class GradientScreen extends Screen {
     // ---- labels ---------------------------------------------------------------------------------
 
     private Component gradientLabel() { return Component.literal("Gradient: " + ConfigManager.get().gradientMode.displayName()); }
-    private Component curveLabel() { return Component.literal("Curve: " + ConfigManager.get().curve.displayName()); }
     private Component sourceLabel() { return Component.literal("Source: " + ConfigManager.get().source.displayName()); }
     private Component endpointsLabel() {
         return Component.literal("From: " + (ConfigManager.get().gradientFromMarkers ? "Markers" : "Block list"));
@@ -1206,19 +1233,21 @@ public class GradientScreen extends Screen {
     /** Yellow key under the block list explaining the picker buttons (or Pick-mode clicks). */
     private void renderPickerLegend(GuiGraphicsExtractor g) {
         int cx = contentX(), w = leftW();
-        String l1, l2;
+        String[] lines;
         if (tab == Tab.SOLID) {
-            l1 = "✓ block to place · ✗ exclude";
-            l2 = "Dbl-click: ✓ · middle-click: ✗";
+            lines = new String[]{"✓ block to place · ✗ exclude", "Dbl-click: ✓ · middle-click: ✗"};
         } else if (activeMode().isPick()) {
-            l1 = "Click row: +1 · right-click: −1";
-            l2 = "+/− adjust selected · ✗ clear number";
+            lines = new String[]{
+                "Numbers = order · lowest first",
+                "Click selects (») and adds +1",
+                "Right-click −1 · 0 = unused",
+                "+ − adjust selected · ✗ clears"};
         } else {
-            l1 = "[S] start block · [E] end block";
-            l2 = "✓ must use · ✗ exclude";
+            lines = new String[]{"[S] start block · [E] end block", "✓ must use · ✗ exclude"};
         }
-        g.text(this.font, this.font.plainSubstrByWidth(l1, w), cx, legendY, YELLOW);
-        g.text(this.font, this.font.plainSubstrByWidth(l2, w), cx, legendY + 11, YELLOW);
+        for (int i = 0; i < lines.length; i++) {
+            g.text(this.font, this.font.plainSubstrByWidth(lines[i], w), cx, legendY + i * 11, YELLOW);
+        }
     }
 
     private void renderGradientTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
@@ -1231,6 +1260,7 @@ public class GradientScreen extends Screen {
         g.text(this.font, this.font.plainSubstrByWidth("Similar blocks swap within each step", rw), rx, deviationDescY, YELLOW);
         g.text(this.font, this.font.plainSubstrByWidth("Chance to repeat or skip a step", rw), rx, chaosDescY, YELLOW);
         g.text(this.font, this.font.plainSubstrByWidth("Chance steps run longer or shorter", rw), rx, stepWobbleDescY, YELLOW);
+        renderCurveStrip(g, mouseX, mouseY);
         renderGradientPreview(g);
     }
 
@@ -1242,6 +1272,7 @@ public class GradientScreen extends Screen {
         g.text(this.font, this.font.plainSubstrByWidth(modeDescription(), rw), rx, noiseModeDescY, YELLOW);
         g.text(this.font, this.font.plainSubstrByWidth("Similar blocks swap within each step", rw), rx, noiseDevDescY, YELLOW);
         g.text(this.font, this.font.plainSubstrByWidth("Chance to repeat or skip a step", rw), rx, noiseChaosDescY, YELLOW);
+        renderCurveStrip(g, mouseX, mouseY);
         renderNoisePreview(g);
     }
 
@@ -1304,7 +1335,7 @@ public class GradientScreen extends Screen {
                     if (gx != n - 1 && gz != n - 1 && gy != n - 1) continue; // hidden inside the cube
                     double v = Noise.sample(cfg.noiseType, a[0] + gx, a[1] + gy, a[2] + gz, seed,
                             cfg.noiseScaleX, cfg.noiseScaleY, cfg.noiseScaleZ);
-                    int idx = GradientRamp.rampIndex(orderedBlocks.size(), v);
+                    int idx = GradientRamp.stepFor(orderedBlocks.size(), v, cfg.noiseCurve, cfg.noiseCurveBounds);
                     g.pose().pushMatrix();
                     g.pose().translate((gx - gz + (n - 1)) * ISO_X, (gx + gz) * ISO_DOWN + (n - 1 - gy) * ISO_UP);
                     g.item(orderedBlocks.get(idx).stack(), 0, 0);
@@ -1351,6 +1382,141 @@ public class GradientScreen extends Screen {
         double u = (dx / ISO_X + dy / ISO_DOWN) / 2, v = (dy / ISO_DOWN - dx / ISO_X) / 2;
         if (u >= 0 && u <= n && v >= 0 && v <= n) return CubeFace.TOP;
         return dx >= 0 ? CubeFace.RIGHT : CubeFace.LEFT;
+    }
+
+    // ---- curve strip (centre column) ------------------------------------------------------------
+
+    private CurveFunction activeCurve() {
+        GradientConfig c = ConfigManager.get();
+        return tab == Tab.NOISE ? c.noiseCurve : c.curve;
+    }
+    private List<Double> activeCurveBounds() {
+        GradientConfig c = ConfigManager.get();
+        return tab == Tab.NOISE ? c.noiseCurveBounds : c.curveBounds;
+    }
+    private void setActiveCurve(CurveFunction curve) {
+        GradientConfig c = ConfigManager.get();
+        if (tab == Tab.NOISE) c.noiseCurve = curve; else c.curve = curve;
+    }
+
+    private int stripX() { return midX() + 8; }
+    private int stripW() { return MID_W - 16; }
+    private int stripY() { return 54; }
+    private int stripH() { return Math.max(0, this.height - 34 - stripY()); }
+
+    /**
+     * Boundary fractions (size count−1) of the active curve's step distribution — where each step
+     * hands over to the next along the fill. CUSTOM reads the stored handle positions; any other
+     * curve is scanned to find its handovers.
+     */
+    private double[] displayBounds(int count) {
+        CurveFunction curve = activeCurve();
+        List<Double> custom = activeCurveBounds();
+        double[] b = new double[Math.max(0, count - 1)];
+        if (curve == CurveFunction.CUSTOM && custom.size() == count - 1) {
+            for (int i = 0; i < b.length; i++) b[i] = custom.get(i);
+            return b;
+        }
+        int samples = 400, pos = 0;
+        for (int i = 0; i <= samples && pos < b.length; i++) {
+            double t = i / (double) samples;
+            int idx = GradientRamp.rampIndex(count, curve.apply(t));
+            while (pos < idx && pos < b.length) b[pos++] = t;
+        }
+        while (pos < b.length) b[pos++] = 1.0;
+        return b;
+    }
+
+    /** Pixel y of each strip segment edge, size count+1 (first = strip top, last = strip bottom). */
+    private int[] stripEdges(int count) {
+        double[] b = displayBounds(count);
+        int[] edges = new int[count + 1];
+        edges[0] = stripY();
+        edges[count] = stripY() + stripH();
+        for (int k = 0; k < count - 1; k++) edges[k + 1] = stripY() + (int) Math.round(b[k] * stripH());
+        return edges;
+    }
+
+    /** Handle hit test: boundary index at (mx,my), or −1. Handles alternate left/right. */
+    private int handleAt(double mx, double my) {
+        int count = orderedBlocks.size();
+        if (count < 2 || stripH() < 40) return -1;
+        int[] edges = stripEdges(count);
+        for (int k = 1; k < count; k++) {
+            int hx = k % 2 == 1 ? stripX() - 8 : stripX() + stripW() + 1;
+            if (mx >= hx - 2 && mx <= hx + 9 && my >= edges[k] - 6 && my <= edges[k] + 6) return k - 1;
+        }
+        return -1;
+    }
+
+    /** Start dragging a handle: seed the custom bounds from the current curve, switch it to "C". */
+    private void beginHandleDrag(int idx) {
+        int count = orderedBlocks.size();
+        List<Double> bounds = activeCurveBounds();
+        if (activeCurve() != CurveFunction.CUSTOM || bounds.size() != count - 1) {
+            double[] cur = displayBounds(count);
+            bounds.clear();
+            for (double v : cur) bounds.add(v);
+            setActiveCurve(CurveFunction.CUSTOM);
+        }
+        dragHandle = idx;
+        cylCache = null;
+    }
+
+    /**
+     * The centre column: the curve's shape drawn over its button (a "C" when CUSTOM), then the
+     * distribution strip — one segment per step, its height the step's share of the fill, its
+     * background the step's sprite iso-tiled and clipped. Drag a boundary handle to reshape.
+     */
+    private void renderCurveStrip(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        renderCurveButtonIcon(g);
+        int count = orderedBlocks.size();
+        int sx = stripX(), sw = stripW(), sh = stripH();
+        if (count == 0 || sh < 40) return;
+        int[] edges = stripEdges(count);
+        for (int k = 0; k < count; k++) {
+            int top = edges[k], bot = edges[k + 1];
+            if (bot <= top) continue;
+            SourceBlock sb = orderedBlocks.get(k);
+            int avg = BlockTextures.gradientValue(sb.block(), sb.block(), GradientMode.COLOR, 1.0);
+            g.enableScissor(sx, top, sx + sw, bot);
+            g.fill(sx, top, sx + sw, bot, 0xFF000000 | (avg & 0xFFFFFF));
+            for (int row = 0; top - 16 + row * ISO_UP < bot; row++) {
+                float y = top - 16 + row * ISO_UP;
+                for (int col = 0; col * 2 * ISO_X < sw + 16; col++) {
+                    g.pose().pushMatrix();
+                    g.pose().translate(sx - 16 + col * 2 * ISO_X + (row % 2) * ISO_X, y);
+                    g.item(sb.stack(), 0, 0);
+                    g.pose().popMatrix();
+                }
+            }
+            g.disableScissor();
+        }
+        for (int k = 1; k < count; k++) {
+            int yb = edges[k];
+            g.fill(sx, yb - 1, sx + sw, yb + 1, 0xFF000000);
+            int hx = k % 2 == 1 ? sx - 8 : sx + sw + 1;
+            boolean hot = dragHandle == k - 1
+                    || (mouseX >= hx - 2 && mouseX <= hx + 9 && mouseY >= yb - 6 && mouseY <= yb + 6);
+            g.fill(hx, yb - 5, hx + 7, yb + 5, 0xFF000000);
+            g.fill(hx + 1, yb - 4, hx + 6, yb + 4, hot ? 0xFFFFE34D : 0xFFE0E0E0);
+        }
+    }
+
+    /** The curve drawn as a small plot on the centre-column button; CUSTOM shows a "C" instead. */
+    private void renderCurveButtonIcon(GuiGraphicsExtractor g) {
+        int bx = midX(), by = 30;
+        CurveFunction curve = activeCurve();
+        if (curve == CurveFunction.CUSTOM) {
+            g.text(this.font, "C", bx + MID_W / 2 - this.font.width("C") / 2, by + 6, WHITE);
+            return;
+        }
+        int w = MID_W - 12, h = 12, x0 = bx + 6, y0 = by + 16;
+        for (int i = 0; i < w; i++) {
+            double v = curve.apply(i / (double) (w - 1));
+            int py = y0 - (int) Math.round(v * h);
+            g.fill(x0 + i, py - 1, x0 + i + 1, py + 1, 0xFFFFFFFF);
+        }
     }
 
     // ---- gradient cylinder preview --------------------------------------------------------------
@@ -1417,13 +1583,15 @@ public class GradientScreen extends Screen {
         Random rnd = new Random(42);
         int count = previewStepGroups.size();
         double band = 1.0 / count;
+        List<Double> custom = cfg.curve == CurveFunction.CUSTOM && cfg.curveBounds.size() == count - 1
+                ? cfg.curveBounds : null;
         for (int i = 0; i < cylCells.length; i++) {
             // Per-column wobble boundaries, like placement's per-column wobble key.
             double[] bounds = new double[count - 1];
             for (int k = 0; k < count - 1; k++) {
                 double off = cfg.stepWobble > 0 && rnd.nextDouble() < cfg.stepWobble
                         ? (rnd.nextDouble() - 0.5) * band : 0.0;
-                bounds[k] = (k + 1) * band + off;
+                bounds[k] = (custom != null ? custom.get(k) : (k + 1) * band) + off;
             }
             for (int j = 0; j < h; j++) {
                 double t = h == 1 ? 0 : (double) j / (h - 1);
@@ -1528,6 +1696,19 @@ public class GradientScreen extends Screen {
 
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        if (event.button() == 0 && dragHandle >= 0) {
+            int count = orderedBlocks.size();
+            List<Double> bounds = activeCurveBounds();
+            if (bounds.size() == count - 1 && dragHandle < bounds.size() && stripH() > 0) {
+                double v = (event.y() - stripY()) / (double) stripH();
+                double min = 4.0 / stripH(); // keep every step at least a few px tall
+                double lo = (dragHandle == 0 ? 0 : bounds.get(dragHandle - 1)) + min;
+                double hi = (dragHandle == bounds.size() - 1 ? 1 : bounds.get(dragHandle + 1)) - min;
+                bounds.set(dragHandle, Math.max(lo, Math.min(hi, v)));
+                cylCache = null; // the cylinder re-rolls with the new distribution
+            }
+            return true;
+        }
         if (event.button() == 0 && dragFace != null) {
             // Project the mouse delta onto the locked face's world axes (coords follow the mouse:
             // dragging up a side face shifts the anchor up). The face keeps the lock even when the
@@ -1567,6 +1748,11 @@ public class GradientScreen extends Screen {
 
     @Override
     public boolean mouseReleased(MouseButtonEvent event) {
+        if (event.button() == 0 && dragHandle >= 0) {
+            dragHandle = -1;
+            ConfigManager.save();
+            return true;
+        }
         if (event.button() == 0 && dragFace != null) {
             dragFace = null;
             return true;

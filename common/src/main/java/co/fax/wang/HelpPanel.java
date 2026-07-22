@@ -361,9 +361,22 @@ public final class HelpPanel {
                     + "match button in Settings switches every tool back to the classic "
                     + "luma/RGB maths.")),
             t("Curve", "Where the gradient changes fastest.", List.of(
-                "Linear: even change all the way. Ease In: holds the start colour longer. "
+                "The curve button sits in the thin middle column, drawn as its own shape. "
+                    + "Linear: even change all the way. Ease In: holds the start colour longer. "
                     + "Ease Out: reaches the end colour sooner. Ease In/Out: lingers at both ends. "
-                    + "Step: hard quantised bands instead of a smooth blend.")),
+                    + "Step: hard quantised bands instead of a smooth blend.",
+                "A C on the button means Custom - you dragged the strip below into your own "
+                    + "shape (see The curve strip).")),
+            t("The curve strip", "Each step's share of the fill - drag to reshape.", List.of(
+                "The strip under the curve button stacks every step top to bottom, drawn with "
+                    + "its block; each band's height is how much of the fill that step covers "
+                    + "under the current curve.",
+                "Drag the small handles beside the strip to move a boundary: the band below "
+                    + "grows, the one above shrinks, and the curve flips to C (custom). Real "
+                    + "placement then uses exactly the shares you drew.",
+                "Cycling the curve button snaps the strip back to that curve's automatic "
+                    + "shape. Custom shapes are kept per tool; if the step count changes they "
+                    + "fall back to even steps.")),
             t("Sliders", "Variation, Chaos, Step length, Max steps, Pixel %.", List.of(
                 "Variation: lets blocks similar to a step randomly stand in for it - bands get "
                     + "visual variety without gaining or losing steps. At 0% every step is exactly "
@@ -406,9 +419,11 @@ public final class HelpPanel {
                     + "all three axes; unlock it to stretch the pattern (tall streaks, flat "
                     + "layers).")),
             t("Ordering and sliders", "Shared ideas with the gradient tool.", List.of(
-                "Order, Pixel %, Variation, Chaos, and Max steps work exactly like the gradient "
-                    + "tool's (see Gradient paint), but keep their own separate values for the "
-                    + "noise tool.")),
+                "Order, Curve (with the drag-to-reshape strip), Pixel %, Variation, Chaos, and "
+                    + "Max steps work exactly like the gradient tool's (see Gradient paint), but "
+                    + "keep their own separate values for the noise tool.",
+                "The curve shapes how the noise value maps onto your block order: an eased or "
+                    + "custom curve makes some steps cover more of the pattern than others.")),
             t("Preview", "A live cube of the field, sampled where you stand.", List.of(
                 "The cube at the bottom right shows the noise built from your current blocks and "
                     + "settings, sampled at real world coordinates starting at your feet - the "

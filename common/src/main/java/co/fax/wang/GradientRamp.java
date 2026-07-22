@@ -181,6 +181,21 @@ public final class GradientRamp {
     }
 
     /**
+     * Step index for a raw value {@code v} in [0,1] under {@code curve}. A CUSTOM curve looks the
+     * step up in {@code customBounds} (ascending boundary fractions, size count − 1); any other
+     * curve — or mismatched bounds — goes through {@link CurveFunction#apply} + {@link #rampIndex}.
+     */
+    public static int stepFor(int count, double v, CurveFunction curve, java.util.List<Double> customBounds) {
+        if (curve == CurveFunction.CUSTOM && customBounds != null && customBounds.size() == count - 1) {
+            double x = clamp01(v);
+            int pos = 0;
+            while (pos < count - 1 && x >= customBounds.get(pos)) pos++;
+            return pos;
+        }
+        return rampIndex(count, curve.apply(v));
+    }
+
+    /**
      * Palette index chosen for each of {@code cells} fill cells of a clean gradient (deterministic).
      * The fill region spans the full ramp: the first cell is anchored to the start-closest block and
      * the last to the end-closest block, so cell {@code c} is at fraction {@code c/(cells-1)}.

@@ -98,11 +98,12 @@ public final class NoisePlacer {
         GradientConfig cfg = ConfigManager.get();
         double t = Noise.sample(cfg.noiseType, x, y, z, noiseSeedLong(cfg),
                 cfg.noiseScaleX, cfg.noiseScaleY, cfg.noiseScaleZ);
+        // The noise tool's own curve (with the strip editor's boundaries when it's CUSTOM),
+        // matching the settings-screen cube preview. Chaos then nudges the chosen step.
+        int idx = GradientRamp.stepFor(order.size(), t, cfg.noiseCurve, cfg.noiseCurveBounds);
         if (cfg.noiseChaos > 0 && RANDOM.nextDouble() < cfg.noiseChaos) {
-            double stepFrac = order.size() > 1 ? 1.0 / (order.size() - 1) : 0.1;
-            t = clamp01(RANDOM.nextBoolean() ? t - stepFrac : t + stepFrac);
+            idx = Math.max(0, Math.min(order.size() - 1, RANDOM.nextBoolean() ? idx - 1 : idx + 1));
         }
-        int idx = GradientRamp.rampIndex(order.size(), t);
         return chooseSlot(player, order, idx);
     }
 
