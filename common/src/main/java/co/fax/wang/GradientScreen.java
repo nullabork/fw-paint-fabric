@@ -56,10 +56,10 @@ public class GradientScreen extends Screen {
     private static final int COL_GAP = 12;
     private static final int TOOL_LIST_TOP = 78;
 
-    private enum Tab { GRADIENT, NOISE, SOLID, FINDER, SETTINGS, HELP }
+    private enum Tab { PALETTE, GRADIENT, NOISE, SOLID, FINDER, SETTINGS, HELP }
 
     /** Title-bar order, left to right (right-aligned as a group). */
-    private static final Tab[] BAR_ORDER = {Tab.SOLID, Tab.GRADIENT, Tab.NOISE, Tab.FINDER, Tab.SETTINGS, Tab.HELP};
+    private static final Tab[] BAR_ORDER = {Tab.SOLID, Tab.PALETTE, Tab.FINDER, Tab.SETTINGS, Tab.HELP};
     private enum Assign { NONE, START, END, REQUIRE, EXCLUDE }
     private enum SolidAssign { NONE, TICK, CROSS }
 
@@ -123,6 +123,13 @@ public class GradientScreen extends Screen {
     private ColorField2D finderField;   // right: hue×sat field (click for a pure-colour reference)
     private int finderLabelY, finderHeaderY, finderSwatchY;
 
+    // Palette tab state (selection/expansion static so they survive reopen + editor round-trips).
+    private PaletteListPanel paletteList;
+    private static String paletteSelectedId = "";
+    private static String paletteExpandId = "";
+    private String confirmDeleteId; // non-null → the delete confirmation modal is up
+    private Button paletteUseBtn, paletteEditBtn, paletteDeleteBtn;
+
     // Settings tab state.
     private EditBox filterBox;
     private int autoEndDescY, fillVoidsDescY, memoryDescY;
@@ -132,13 +139,60 @@ public class GradientScreen extends Screen {
     private boolean assigningTool = false;
 
     public GradientScreen() {
+        this(true);
+    }
+
+    /** @param followPaintType false keeps the last tab (used when returning from the editor). */
+    public GradientScreen(boolean followPaintType) {
         super(Component.literal("FW Paint"));
-        // Open on the tab of whatever is being painted right now.
-        tab = switch (ConfigManager.get().activePaintType) {
-            case SOLID -> Tab.SOLID;
-            case GRADIENT -> Tab.GRADIENT;
-            case NOISE -> Tab.NOISE;
-        };
+        if (ConfigManager.get().paintTool.isEmpty()) {
+            tab = Tab.SETTINGS; // no tool assigned yet — land where the tool picker lives
+        } else if (followPaintType) {
+            // Open on the tab of whatever is being painted right now.
+            tab = switch (ConfigManager.get().activePaintType) {
+                case SOLID -> Tab.SOLID;
+                case GRADIENT, NOISE -> Tab.PALETTE;
+            };
+        } else if (tab == Tab.GRADIENT || tab == Tab.NOISE) {
+            tab = Tab.PALETTE; // retired tabs can't be revisited
+        }
+    }
+
+    /** Open on the Palette tab with {@code id} selected (used when the editor saves). */
+    public static GradientScreen openOnPalette(String id) {
+        GradientScreen s = new GradientScreen(false);
+        tab = Tab.PALETTE;
+        paletteSelectedId = id;
+        paletteExpandId = id;
+        return s;
+    }
+
+    /** For the editor's title bar: open the screen on a specific {@link #BAR_ORDER} tab. */
+    static GradientScreen atBarTab(int barIndex) {
+        GradientScreen s = new GradientScreen(false);
+        tab = BAR_ORDER[Math.max(0, Math.min(BAR_ORDER.length - 1, barIndex))];
+        return s;
+    }
+
+    /** The title-bar tab names, in bar order (shared with the editor so the bars match). */
+    static String[] barTabNames() {
+        String[] out = new String[BAR_ORDER.length];
+        for (int i = 0; i < BAR_ORDER.length; i++) {
+            out[i] = switch (BAR_ORDER[i]) {
+                case PALETTE -> "Palette"; case SOLID -> "Solid"; case FINDER -> "Finder";
+                case SETTINGS -> "Settings"; case HELP -> "Help";
+                case GRADIENT -> "Gradient"; case NOISE -> "Noise Paint";
+            };
+        }
+        return out;
+    }
+
+    /** Index of the Palette tab in {@link #BAR_ORDER} (the editor highlights it). */
+    static int paletteBarIndex() {
+        for (int i = 0; i < BAR_ORDER.length; i++) {
+            if (BAR_ORDER[i] == Tab.PALETTE) return i;
+        }
+        return 0;
     }
 
     // ---- layout helpers -------------------------------------------------------------------------
@@ -164,28 +218,36 @@ public class GradientScreen extends Screen {
     @Override
     protected void init() {
         toolRowHeight = this.font.lineHeight + 3;
-        if (tab == Tab.GRADIENT || tab == Tab.NOISE) initPickerTab();
+        if (tab == Tab.PALETTE) initPaletteTab();
+        else if (tab == Tab.GRADIENT || tab == Tab.NOISE) initPickerTab();
         else if (tab == Tab.SOLID) initSolidTab();
         else if (tab == Tab.FINDER) initFinderTab();
         else if (tab == Tab.HELP) initHelpTab();
         else initSettingsTab();
 
-        // Tool tabs get a "Use" button next to Done: makes this tab's paint type the active one
-        // (same as cycling with the paint-type keybind).
-        PaintType tabType = switch (tab) {
-            case SOLID -> PaintType.SOLID;
-            case GRADIENT -> PaintType.GRADIENT;
-            case NOISE -> PaintType.NOISE;
-            default -> null;
-        };
-        if (tabType != null) {
-            addRenderableWidget(Button.builder(useLabel(tabType), b -> {
-                ConfigManager.get().activePaintType = tabType;
+        // Tool tabs get "Use" buttons next to Done: make a paint type the active one (same as
+        // cycling with the paint-type keybind). The Palette tab serves both gradient and noise.
+        if (tab == Tab.SOLID) {
+            addRenderableWidget(Button.builder(useLabel(PaintType.SOLID), b -> {
+                ConfigManager.get().activePaintType = PaintType.SOLID;
                 ConfigManager.save();
-                b.setMessage(useLabel(tabType));
+                b.setMessage(useLabel(PaintType.SOLID));
             }).bounds(this.width / 2 - 102, this.height - 26, 100, 20).build());
             addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
                     .bounds(this.width / 2 + 2, this.height - 26, 100, 20).build());
+        } else if (tab == Tab.PALETTE) {
+            addRenderableWidget(Button.builder(useLabel(PaintType.GRADIENT), b -> {
+                ConfigManager.get().activePaintType = PaintType.GRADIENT;
+                ConfigManager.save();
+                rebuildWidgets();
+            }).bounds(this.width / 2 - 154, this.height - 26, 100, 20).build());
+            addRenderableWidget(Button.builder(useLabel(PaintType.NOISE), b -> {
+                ConfigManager.get().activePaintType = PaintType.NOISE;
+                ConfigManager.save();
+                rebuildWidgets();
+            }).bounds(this.width / 2 - 50, this.height - 26, 100, 20).build());
+            addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
+                    .bounds(this.width / 2 + 54, this.height - 26, 100, 20).build());
         } else {
             addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
                     .bounds(this.width / 2 - 50, this.height - 26, 100, 20).build());
@@ -203,8 +265,8 @@ public class GradientScreen extends Screen {
 
     private String tabName(Tab t) {
         return switch (t) {
-            case GRADIENT -> "Gradient"; case NOISE -> "Noise Paint"; case FINDER -> "Finder";
-            case SOLID -> "Solid"; case SETTINGS -> "Settings"; case HELP -> "Help";
+            case PALETTE -> "Palette"; case GRADIENT -> "Gradient"; case NOISE -> "Noise Paint";
+            case FINDER -> "Finder"; case SOLID -> "Solid"; case SETTINGS -> "Settings"; case HELP -> "Help";
         };
     }
     private String tabText(Tab t) { return tab == t ? "» " + tabName(t) : tabName(t); }
@@ -702,6 +764,158 @@ public class GradientScreen extends Screen {
                 previewStartId, previewEndId, whiteOrder.size(), cfg.curve, Math.round(cfg.chaos * 100) / 100.0, whiteOrder);
     }
 
+    // ---- Palette tab (list view) ----------------------------------------------------------------
+
+    private void initPaletteTab() {
+        int cx = contentX(), w = 2 * colW() + COL_GAP;
+        int bw = (w - 3 * 4) / 4;
+        addRenderableWidget(Button.builder(Component.literal("+ New"),
+                b -> openEditor(null)).bounds(cx, 30, bw, 20).build());
+        paletteUseBtn = addRenderableWidget(Button.builder(Component.literal("Use"), b -> {
+            String id = paletteList.selectedId();
+            if (!id.isEmpty()) {
+                co.fax.wang.palette.PaletteStore.setActive(id);
+                paletteList.setActiveId(id);
+                paletteList.expand(id); // using a palette auto-expands its summary
+                paletteSelectedId = id;
+                paletteExpandId = id;
+            }
+        }).bounds(cx + bw + 4, 30, bw, 20).build());
+        paletteEditBtn = addRenderableWidget(Button.builder(Component.literal("Edit"), b -> {
+            co.fax.wang.palette.Palette p = co.fax.wang.palette.PaletteStore.byId(paletteList.selectedId());
+            if (p != null) openEditor(p);
+        }).bounds(cx + 2 * (bw + 4), 30, bw, 20).build());
+        paletteDeleteBtn = addRenderableWidget(Button.builder(Component.literal("Delete"), b -> {
+            if (!paletteList.selectedId().isEmpty()) confirmDeleteId = paletteList.selectedId();
+        }).bounds(cx + 3 * (bw + 4), 30, w - 3 * (bw + 4), 20).build());
+
+        paletteList = new PaletteListPanel(this.font);
+        paletteList.setBounds(cx, 56, w, this.height - 56 - 34);
+        paletteList.setActiveId(co.fax.wang.palette.PaletteStore.activeId());
+        paletteList.select(paletteSelectedId);
+        if (!paletteExpandId.isEmpty()) paletteList.expand(paletteExpandId);
+        rebuildPaletteEntries();
+    }
+
+    private void openEditor(co.fax.wang.palette.Palette palette) {
+        if (this.minecraft != null) this.minecraft.setScreenAndShow(new PaletteEditScreen(palette));
+    }
+
+    private void rebuildPaletteEntries() {
+        List<PaletteListPanel.Entry> entries = new ArrayList<>();
+        for (co.fax.wang.palette.Palette p : co.fax.wang.palette.PaletteStore.all()) {
+            List<ItemStack> sprites = new ArrayList<>();
+            List<Boolean> auto = new ArrayList<>();
+            for (co.fax.wang.palette.PaletteSegment s : p.segments) {
+                auto.add(s.isAutomatic());
+                sprites.add(stackOfId(s.block));
+            }
+            List<String> missing = p.missingBlocks(availableIds(p.source));
+            List<ItemStack> mStacks = new ArrayList<>();
+            List<String> mNames = new ArrayList<>();
+            for (String id : missing) {
+                ItemStack st = stackOfId(id);
+                mStacks.add(st);
+                mNames.add(st.isEmpty() ? id : st.getHoverName().getString());
+            }
+            entries.add(new PaletteListPanel.Entry(p, sprites, auto, mStacks, mNames));
+        }
+        paletteList.setEntries(entries);
+    }
+
+    static ItemStack stackOfId(String id) {
+        if (id == null || id.isEmpty()) return ItemStack.EMPTY;
+        Identifier ident = Identifier.tryParse(id);
+        if (ident == null) return ItemStack.EMPTY;
+        return BuiltInRegistries.ITEM.getOptional(ident).map(ItemStack::new).orElse(ItemStack.EMPTY);
+    }
+
+    /** Block-item ids available from a source range of the player's inventory. */
+    private Set<String> availableIds(GradientSource src) {
+        Set<String> out = new HashSet<>();
+        if (this.minecraft == null || this.minecraft.player == null) return out;
+        var items = this.minecraft.player.getInventory().getNonEquipmentItems();
+        int from = src == GradientSource.INVENTORY ? 9 : 0;
+        int to = Math.min(src == GradientSource.HOTBAR ? 9 : 36, items.size());
+        for (int slot = from; slot < to; slot++) {
+            ItemStack st = items.get(slot);
+            if (st.getItem() instanceof BlockItem bi && !bi.getBlock().defaultBlockState().isAir()) {
+                Identifier id = BuiltInRegistries.ITEM.getKey(st.getItem());
+                if (id != null) out.add(id.toString());
+            }
+        }
+        return out;
+    }
+
+    private void renderPaletteTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        boolean hasSelection = paletteList != null && !paletteList.selectedId().isEmpty()
+                && co.fax.wang.palette.PaletteStore.byId(paletteList.selectedId()) != null;
+        if (paletteUseBtn != null) paletteUseBtn.active = hasSelection;
+        if (paletteEditBtn != null) paletteEditBtn.active = hasSelection;
+        if (paletteDeleteBtn != null) paletteDeleteBtn.active = hasSelection;
+        if (paletteList != null) paletteList.render(g, mouseX, mouseY);
+        if (co.fax.wang.palette.PaletteStore.all().isEmpty()) {
+            g.text(this.font, "No palettes yet — press + New to create one",
+                    contentX() + 4, 64, YELLOW);
+        }
+        if (confirmDeleteId != null) renderDeleteConfirm(g, mouseX, mouseY);
+    }
+
+    // Delete confirmation modal: {x, y, w, h} of the dialog; buttons live on its bottom row.
+    private int[] confirmBox() {
+        int w = 240, h = 64;
+        return new int[]{(this.width - w) / 2, (this.height - h) / 2, w, h};
+    }
+
+    private int[] confirmBtn(boolean delete) {
+        int[] b = confirmBox();
+        int bw = (b[2] - 3 * 8) / 2;
+        int x = delete ? b[0] + 8 : b[0] + 2 * 8 + bw;
+        return new int[]{x, b[1] + b[3] - 26, bw, 18};
+    }
+
+    private static boolean inRect(int[] r, double mx, double my) {
+        return mx >= r[0] && mx <= r[0] + r[2] && my >= r[1] && my <= r[1] + r[3];
+    }
+
+    private void renderDeleteConfirm(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        co.fax.wang.palette.Palette p = co.fax.wang.palette.PaletteStore.byId(confirmDeleteId);
+        String name = p == null ? "?" : p.name;
+        g.nextStratum();
+        g.fill(0, 0, this.width, this.height, 0xB0000000);
+        int[] b = confirmBox();
+        g.fill(b[0], b[1], b[0] + b[2], b[1] + b[3], 0xF0202020);
+        g.fill(b[0], b[1], b[0] + b[2], b[1] + 1, 0xFFFFFFFF);
+        g.fill(b[0], b[1] + b[3] - 1, b[0] + b[2], b[1] + b[3], 0xFFFFFFFF);
+        g.fill(b[0], b[1], b[0] + 1, b[1] + b[3], 0xFFFFFFFF);
+        g.fill(b[0] + b[2] - 1, b[1], b[0] + b[2], b[1] + b[3], 0xFFFFFFFF);
+        String msg = this.font.plainSubstrByWidth("Delete '" + name + "'?", b[2] - 16);
+        g.text(this.font, msg, b[0] + (b[2] - this.font.width(msg)) / 2, b[1] + 10, WHITE);
+        for (boolean del : new boolean[]{true, false}) {
+            int[] r = confirmBtn(del);
+            boolean hover = inRect(r, mouseX, mouseY);
+            g.fill(r[0], r[1], r[0] + r[2], r[1] + r[3], hover ? 0x60FFFFFF : 0x30FFFFFF);
+            String label = del ? "Delete" : "Cancel";
+            g.text(this.font, label, r[0] + (r[2] - this.font.width(label)) / 2, r[1] + 5,
+                    del ? RED : WHITE);
+        }
+    }
+
+    /** Modal click handling; swallows everything while the confirmation is up. */
+    private boolean handleDeleteConfirmClick(double mx, double my, int button) {
+        if (button == 0 && inRect(confirmBtn(true), mx, my)) {
+            co.fax.wang.palette.PaletteStore.delete(confirmDeleteId);
+            paletteList.setActiveId(co.fax.wang.palette.PaletteStore.activeId());
+            if (paletteList.selectedId().equals(confirmDeleteId)) {
+                paletteList.select("");
+                paletteSelectedId = "";
+            }
+            rebuildPaletteEntries();
+        }
+        confirmDeleteId = null; // Delete, Cancel, and click-away all dismiss
+        return true;
+    }
+
     // ---- Solid tab ------------------------------------------------------------------------------
 
     private void initSolidTab() {
@@ -1033,6 +1247,9 @@ public class GradientScreen extends Screen {
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
+        if (tab == Tab.PALETTE && confirmDeleteId != null) {
+            return handleDeleteConfirmClick(event.x(), event.y(), event.button());
+        }
         if (previewExpanded && (tab == Tab.GRADIENT || tab == Tab.NOISE)) {
             if (event.button() == 0) {
                 if (inCloseX(event.x(), event.y())) {
@@ -1115,6 +1332,12 @@ public class GradientScreen extends Screen {
             }
             return false;
         }
+        if (tab == Tab.PALETTE && event.button() == 0 && paletteList != null
+                && paletteList.click(event.x(), event.y())) {
+            paletteSelectedId = paletteList.selectedId();
+            paletteExpandId = paletteList.expandedId();
+            return true;
+        }
         if (tab == Tab.FINDER && event.button() == 0 && handleFinderClick(event.x(), event.y())) {
             return true;
         }
@@ -1133,6 +1356,11 @@ public class GradientScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+        if (tab == Tab.PALETTE && confirmDeleteId != null) return true;
+        if (tab == Tab.PALETTE && paletteList != null
+                && paletteList.mouseScrolled(mouseX, mouseY, scrollY)) {
+            return true;
+        }
         if (previewExpanded && (tab == Tab.GRADIENT || tab == Tab.NOISE)) return true;
         if ((tab == Tab.GRADIENT || tab == Tab.NOISE || tab == Tab.SOLID)
                 && picker != null && picker.mouseScrolled(mouseX, mouseY, scrollY)) {
@@ -1201,7 +1429,8 @@ public class GradientScreen extends Screen {
     public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
         super.extractRenderState(g, mouseX, mouseY, partialTick);
         renderTitleBar(g);
-        if (tab == Tab.GRADIENT) renderGradientTab(g, mouseX, mouseY);
+        if (tab == Tab.PALETTE) renderPaletteTab(g, mouseX, mouseY);
+        else if (tab == Tab.GRADIENT) renderGradientTab(g, mouseX, mouseY);
         else if (tab == Tab.NOISE) renderNoiseTab(g, mouseX, mouseY);
         else if (tab == Tab.SOLID) renderSolidTab(g, mouseX, mouseY);
         else if (tab == Tab.FINDER) renderFinderTab(g, mouseX, mouseY);
@@ -1762,6 +1991,10 @@ public class GradientScreen extends Screen {
 
     @Override
     public boolean keyPressed(KeyEvent event) {
+        if (confirmDeleteId != null && event.key() == 256) { // Esc dismisses the delete confirm
+            confirmDeleteId = null;
+            return true;
+        }
         if (previewExpanded && event.key() == 256) { // Esc closes the expanded preview first
             previewExpanded = false;
             return true;
