@@ -34,6 +34,7 @@ public final class ConfigManager {
     public static void init(Path dir) {
         configDir = dir;
         load();
+        co.fax.wang.palette.PaletteStore.load();
     }
 
     private static Path path() {

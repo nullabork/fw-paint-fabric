@@ -175,6 +175,15 @@ public class GradientConfig {
     /** Item ids excluded from Solid placement (never placed, even on exact match). */
     public List<String> solidExcludedBlocks = new ArrayList<>();
 
+    // ---- palettes -------------------------------------------------------------------------------
+
+    /**
+     * What happens when a palette's explicitly-defined blocks aren't all available at paint time:
+     * refuse to place (default) or skip the unavailable segments. Global Settings-tab toggle.
+     */
+    public co.fax.wang.palette.MissingBlockPolicy missingBlockPolicy =
+            co.fax.wang.palette.MissingBlockPolicy.DONT_PAINT;
+
     // ---- misc -----------------------------------------------------------------------------------
 
     /** When on, the mod logs debug detail (e.g. the preview block order) to the game log. */
