@@ -1082,6 +1082,16 @@ public class GradientScreen extends Screen {
                     c.perceptualColor = !c.perceptualColor;
                     GradientRamp.perceptual = c.perceptualColor;
                 });
+        y += 24;
+        // What happens when a palette's blocks aren't all in the inventory at paint time.
+        cycleButton(rx, y, rw,
+                () -> Component.literal("Missing blocks: " + ConfigManager.get().missingBlockPolicy.label()),
+                () -> {
+                    GradientConfig c = ConfigManager.get();
+                    c.missingBlockPolicy = c.missingBlockPolicy == co.fax.wang.palette.MissingBlockPolicy.DONT_PAINT
+                            ? co.fax.wang.palette.MissingBlockPolicy.SKIP_MISSING
+                            : co.fax.wang.palette.MissingBlockPolicy.DONT_PAINT;
+                });
 
         // Left column: the paint-tool assign button (overlay shows it's armed) + filter + list.
         int cx = contentX(), w = leftW();

@@ -663,9 +663,9 @@ public final class PaintPlacer {
         previewPos.clear();
         previewDir.clear();
         List<String> src = new ArrayList<>();
-        boolean pickerAlways = cfg.activePaintType == PaintType.NOISE
+        boolean paletteAlways = cfg.activePaintType == PaintType.NOISE
                 || (cfg.activePaintType == PaintType.GRADIENT && pm == PlacementMode.FILL3D);
-        if (pickerAlways) src.add("Selected from picker");
+        if (paletteAlways) src.add("Selected from palette");
 
         // Paint stays at normal block reach (the crosshair hit) — only markers target further.
         BlockHitResult hit = (mc.hitResult instanceof BlockHitResult bhr
@@ -696,7 +696,7 @@ public final class PaintPlacer {
             }
         } else if (cfg.activePaintType == PaintType.GRADIENT
                 && (pm == PlacementMode.SINGLE || pm == PlacementMode.FACE)) {
-            src.add("Selected from picker");
+            src.add("Selected from palette");
         }
         sourcing = src;
     }
@@ -709,20 +709,19 @@ public final class PaintPlacer {
         previewDir.add(d);
     }
 
-    /** What the aimed column's gradient endpoints would be — the truth behind the HUD lines. */
+    /** What the aimed column's gradient anchors would be — the truth behind the HUD lines. */
     private static List<String> gradientSourcingAt(Minecraft mc, GradientConfig cfg, BlockPos b, Direction d) {
-        if (!cfg.gradientFromMarkers) return List.of("Selected from picker");
         int first = firstAirOffset(mc, b, d);
         BlockPos cell = b.relative(d, Math.max(1, first));
         Seg seg = segmentForCell(cell);
-        if (seg == null) return List.of("Selected from picker");
+        if (seg == null) return List.of("Selected from palette");
         boolean sAir = mc.level.getBlockState(seg.s()).isAir();
         boolean eAir = mc.level.getBlockState(seg.e()).isAir();
-        if (!sAir && !eAir) return List.of("Selected from markers");
-        if (sAir && eAir) return List.of("Selected from picker");
+        if (!sAir && !eAir) return List.of("Anchored to markers");
+        if (sAir && eAir) return List.of("Selected from palette");
         return sAir
-                ? List.of("Start selected from picker", "End selected from marker")
-                : List.of("Start selected from marker", "End selected from picker");
+                ? List.of("Start from palette", "End anchored to marker")
+                : List.of("Start anchored to marker", "End from palette");
     }
 
     /** Submit the green face tint + direction arrows (each loader's level-render submit hook). */
