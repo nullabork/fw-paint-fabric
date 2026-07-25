@@ -189,23 +189,36 @@ public final class PaletteChoice {
         List<List<Block>> perSegment = new ArrayList<>(n);
         List<AutoMode> segMode = new ArrayList<>(n);
         Block prev = null; // last resolved block so far (Automatic-at-start falls back to the anchor)
-        for (int i = 0; i < n; i++) {
+        int i = 0;
+        while (i < n) {
             PaletteSegment s = segs.get(i);
             if (!s.isAutomatic()) {
                 Block b = Gradient.blockOfItemId(s.block);
-                if (b == null) continue; // unresolvable id — treat like a skipped segment
-                perSegment.add(List.of(b));
-                segMode.add(null);
-                prev = b;
+                if (b != null) { // unresolvable id — treat like a skipped segment
+                    perSegment.add(List.of(b));
+                    segMode.add(null);
+                    prev = b;
+                }
+                i++;
                 continue;
             }
+            // A run of consecutive Automatic segments: each resolves to exactly ONE block, its
+            // target interpolated between the run's anchors at the segment's position — so a strip
+            // of nothing but Automatics still forms a deterministic block distribution.
+            int runEnd = i;
+            while (runEnd + 1 < n && segs.get(runEnd + 1).isAutomatic()) runEnd++;
             Block from = prev != null ? prev : startAnchor;
-            Block to = nextStatic[i] != null ? nextStatic[i] : endAnchor;
-            List<Block> resolved = resolveAuto(p.autoPool, s.auto, from, to);
-            if (resolved == null) return null; // no colour anywhere to resolve against
-            perSegment.add(resolved);
-            segMode.add(s.auto);
-            prev = resolved.get(resolved.size() - 1);
+            Block to = nextStatic[runEnd] != null ? nextStatic[runEnd] : endAnchor;
+            int k = runEnd - i + 1;
+            for (int j = 0; j < k; j++) {
+                AutoMode mode = segs.get(i + j).auto;
+                Block chosen = resolveAutoOne(p.autoPool, mode, from, to, (j + 1) / (double) (k + 1));
+                if (chosen == null) return null; // no colour anywhere to resolve against
+                perSegment.add(List.of(chosen));
+                segMode.add(mode);
+                prev = chosen;
+            }
+            i = runEnd + 1;
         }
         if (perSegment.isEmpty()) return null;
 
@@ -214,45 +227,45 @@ public final class PaletteChoice {
         int[] counts = new int[perSegment.size()];
         List<Block> flat = new ArrayList<>();
         List<AutoMode> flatMode = new ArrayList<>();
-        for (int i = 0; i < perSegment.size(); i++) {
-            counts[i] = perSegment.get(i).size();
-            for (Block b : perSegment.get(i)) {
+        for (int s = 0; s < perSegment.size(); s++) {
+            counts[s] = perSegment.get(s).size();
+            for (Block b : perSegment.get(s)) {
                 flat.add(b);
-                flatMode.add(segMode.get(i));
+                flatMode.add(segMode.get(s));
             }
         }
         double[] bounds = PaletteMath.flatBounds(segBounds, counts);
 
         List<List<Block>> bands = new ArrayList<>(flat.size());
-        for (int i = 0; i < flat.size(); i++) {
-            bands.add(bandFor(p, flat.get(i), flatMode.get(i)));
+        for (int f = 0; f < flat.size(); f++) {
+            bands.add(bandFor(p, flat.get(f), flatMode.get(f)));
         }
         return new Ramp(flat.toArray(new Block[0]), bounds, bands);
     }
 
     /**
-     * The blocks an Automatic segment stands for: the pool blocks lying on the from→to ramp
-     * (ordered, deviation-gated with a built-in widen-to-closest fallback). A single anchor gives
-     * the single closest pool block; no anchor at all is unresolvable (null).
+     * The single block an Automatic segment stands for: the pool block closest to the colour (or
+     * brightness) interpolated between the anchors at {@code frac} along the run. Deterministic —
+     * the same anchors and inventory always resolve the same block — so hand-crafted curves keep
+     * their shape while the blocks are chosen for you. A single anchor makes every target that
+     * anchor's colour; no anchor at all is unresolvable (null).
      */
-    private static List<Block> resolveAuto(List<SourceEntry> pool, AutoMode mode, Block from, Block to) {
-        if (from == null && to == null) return null;
-        if (pool.isEmpty()) return null;
+    private static Block resolveAutoOne(List<SourceEntry> pool, AutoMode mode,
+                                        Block from, Block to, double frac) {
+        if ((from == null && to == null) || pool.isEmpty()) return null;
         GradientMode metric = mode == AutoMode.BRIGHTNESS ? GradientMode.BRIGHTNESS : GradientMode.COLOR;
-        if (from == null || to == null) {
-            Block anchor = from != null ? from : to;
-            return List.of(closestTo(pool, colorOf(anchor), metric));
-        }
-        int fromRgb = colorOf(from), toRgb = colorOf(to);
-        int[] rgbs = new int[pool.size()];
-        for (int i = 0; i < pool.size(); i++) rgbs[i] = pool.get(i).rgb();
-        // gradientOrder widens to the least-deviating single block when nothing fits the budget,
-        // so an Automatic segment always resolves to at least one block.
-        int[] order = GradientRamp.gradientOrder(
-                rgbs, fromRgb, toRgb, metric, GradientRamp.STEP_ELIGIBILITY_BUDGET, null);
-        List<Block> out = new ArrayList<>(order.length);
-        for (int idx : order) out.add(pool.get(idx).block());
-        return out.isEmpty() ? List.of(closestTo(pool, fromRgb, metric)) : out;
+        int target;
+        if (from == null) target = colorOf(to);
+        else if (to == null) target = colorOf(from);
+        else target = lerpRgb(colorOf(from), colorOf(to), frac);
+        return closestTo(pool, target, metric);
+    }
+
+    private static int lerpRgb(int a, int b, double t) {
+        int r = (int) Math.round(((a >> 16) & 0xFF) + (((b >> 16) & 0xFF) - ((a >> 16) & 0xFF)) * t);
+        int g = (int) Math.round(((a >> 8) & 0xFF) + (((b >> 8) & 0xFF) - ((a >> 8) & 0xFF)) * t);
+        int bl = (int) Math.round((a & 0xFF) + ((b & 0xFF) - (a & 0xFF)) * t);
+        return (r << 16) | (g << 8) | bl;
     }
 
     private static Block closestTo(List<SourceEntry> pool, int rgb, GradientMode metric) {

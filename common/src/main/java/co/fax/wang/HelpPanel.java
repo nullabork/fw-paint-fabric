@@ -325,42 +325,46 @@ public final class HelpPanel {
                     + "segments instead.",
                 "Saving a palette also makes it active. Everything on a palette persists "
                     + "between sessions - only your inventory can differ later."),
-            t("The editor", "Preview on top, blocks left, strip middle, settings right.", List.of(
-                "The preview at the top renders the palette as a gradient cylinder or a noise "
-                    + "cube - the G/N button switches, the expand button goes full screen. The "
-                    + "name box and Save/Cancel sit under it; an empty name saves as Untitled, "
-                    + "and names must be unique. The whole page scrolls when it doesn't fit.",
-                "Left column: the blocks from the chosen Source, sorted by colour, plus the two "
-                    + "pinned Automatic rows. Double-click anything to append it to the strip as "
-                    + "a new segment (the same block can appear more than once). Right-click a "
-                    + "block to ban it from Automatic segments (red = banned, saved with the "
-                    + "palette).",
-                "Right column: Variation, Chaos, Step length, the Sizing mode, and the noise "
-                    + "settings (type, scale, seed - used only when noise painting). The (?) "
-                    + "icons show each control's help; hovering a control for a second does too.")),
+            t("The editor", "Previews on top; settings left, blocks middle, strip right.", List.of(
+                "The two previews at the top render the palette as a gradient cylinder and a "
+                    + "noise cube side by side - each has its own expand button. The name box "
+                    + "and Save/Cancel sit under them; an empty name saves as Untitled, and "
+                    + "names must be unique. The whole page scrolls when it doesn't fit.",
+                "Middle column: the blocks from the chosen Source, sorted by colour, plus the "
+                    + "two pinned Auto rows. Double-click anything to append it to the strip, "
+                    + "or drag it onto the strip to insert it exactly where you drop it (the "
+                    + "same block can appear more than once). Right-click a block to ban it "
+                    + "from Automatic segments (red = banned, saved with the palette).",
+                "Left column: Variation, Chaos, Step length, the Sizing mode, and the noise "
+                    + "settings (type, scale, seed - used only when noise painting), grouped "
+                    + "under small headings. The circled-? icons show each control's help; "
+                    + "hovering a control for a second does too.")),
             t("The segment strip", "The palette itself - order, sizes, and stops.", List.of(
                 "Each segment is drawn with its block (crosshatch for Automatic), its name in "
-                    + "the gutter beside it; names too long to fit scroll, and when segments get "
-                    + "too short the labels pack together in order. A red outline means that "
-                    + "block is missing from your inventory.",
-                "Drag the small handles beside the strip to resize segments - the Curve flips "
-                    + "to Custom and placement uses exactly the shares you drew. Cycling the "
-                    + "Curve button (Linear, Ease In/Out, Step...) snaps back to an automatic "
-                    + "shape.",
+                    + "the gutter to its right; names too long to fit scroll, and when segments "
+                    + "get too short the labels pack together in order, never leaving the "
+                    + "strip. A red outline means that block is missing from your inventory.",
+                "Drag the pointed handles left of the strip to resize segments - the Curve "
+                    + "flips to Custom and placement uses exactly the shares you drew. Cycling "
+                    + "the Curve button (Linear, Ease In/Out, Step...) snaps back to an "
+                    + "automatic shape; it needs at least 3 segments.",
                 "Reorder by dragging a segment up or down - it swaps with its neighbours as it "
                     + "crosses them, and only the two swapping segments change place. Or click a "
                     + "segment (white outline) and use the arrow keys. Any manual reorder sets "
-                    + "the Order toggle to Custom; pressing Colour or Brightness re-sorts the "
-                    + "strip instead. Delete/Backspace removes the selected segment - or drag a "
-                    + "segment sideways out of the strip and let go.")),
+                    + "the Order toggle to Custom; the Order button re-sorts by colour or "
+                    + "brightness, ascending or descending (needs 2 blocks; Automatics sort as "
+                    + "a middle grey). Delete/Backspace removes the selected segment - or drag "
+                    + "a segment sideways out of the strip and let go.")),
             t("Automatic segments", "Wildcards resolved when you paint.", List.of(
-                "An Automatic segment picks real blocks from your inventory at paint time - "
-                    + "Automatic colour matches by perceived colour, Automatic brightness by "
-                    + "lightness. It widens its tolerance until something fits, so it always "
-                    + "finds a block (banned blocks excepted).",
-                "At the start of the strip it resolves to the block you started painting on. At "
-                    + "the end it scans ahead for an end marker, or the first solid block, and "
-                    + "uses that. In the middle it blends between its neighbouring segments.",
+                "An Auto segment picks ONE real block from your inventory at paint time - "
+                    + "Auto colour matches by perceived colour, Auto brightness by lightness. "
+                    + "The choice is deterministic (closest match to the segment's spot in the "
+                    + "ramp), so a strip of nothing but Auto segments still gives a stable, "
+                    + "hand-shaped distribution.",
+                "At the start of the strip it resolves against the block you started painting "
+                    + "on. At the end it scans ahead for an end marker, or the first solid "
+                    + "block, and uses that. In the middle it blends between its neighbouring "
+                    + "segments.",
                 "3D fills must know their whole range up front, so a 3D paint needs the strip "
                     + "to end in a real block (Automatic at the start is fine - it reads the "
                     + "clicked block). A palette that's all Automatic with nothing to anchor to "

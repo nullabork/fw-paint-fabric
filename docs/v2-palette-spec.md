@@ -117,22 +117,23 @@ The default view of the Palette tab. Full content width (no three-column layout)
 Entered via New/Edit. It's a temporary mode of the Palette tab (the tab bar stays visible but
 switching tabs or pressing Done acts like **Cancel**, with an "unsaved changes" confirm if dirty).
 
-Vertical layout, top to bottom: tab bar → **preview** → **name/save row** → the three columns.
-The columns are like today's Gradient tab, but the **middle column is wider** and the **right
-column is narrower** (helper text no longer needs inline space — see §5.6). Because the preview
-row makes the page taller, the **entire editor content below the tab bar is vertically
-scrollable** (mouse wheel + a slim scrollbar on the right edge) whenever it doesn't fit the
-window height; the tab bar stays fixed.
+Vertical layout, top to bottom: tab bar → **previews** → **name/save row** → the three columns.
+*(Revised 2026-07-26)*: column order is **settings (left) · block source list (middle) ·
+segment strip (right)**, with the strip's labels on its right. Because the preview row makes the
+page taller, the **entire editor content below the tab bar is vertically scrollable** (mouse
+wheel + a slim scrollbar on the right edge) whenever it doesn't fit the window height; the tab
+bar stays fixed.
 
-### 5.1 Preview (directly under the tab bar, spans all columns)
+Draggable things advertise themselves: hovering a strip segment or a block-list row switches the
+OS mouse cursor to a **move** cursor; hovering a stop handle switches it to a **vertical-resize**
+cursor.
 
-- Centered horizontally, with a **max width** so it doesn't balloon on wide windows (roughly
-  the v1 preview size; implementer picks the exact cap).
-- Renders the palette as either the **gradient cylinder** or the **isometric noise cube**.
-  Next to the existing **⛶ expand** button sits a new **preview toggle** that switches between
-  the two (e.g. a small "G/N" button). The noise preview uses the palette's noise
-  type/scale/seed and stays draggable-to-pan as in v1; the expand overlay expands whichever
-  preview is active. The chosen preview mode is remembered (UI state, not saved on the palette).
+### 5.1 Previews (directly under the tab bar, spans all columns)
+
+- Both previews render **side by side** (no toggle): the **gradient cylinder** on the left, the
+  **isometric noise cube** on the right — centered, each with a max width, no boxes around them.
+- Each has its own **⛶ expand** button opening it full screen. The noise preview uses the
+  palette's noise type/scale/seed and stays draggable-to-pan as in v1.
 
 ### 5.2 Name row (spans all three columns, under the preview)
 
@@ -143,26 +144,28 @@ window height; the tab bar stays fixed.
   does not save. Save persists everything (segments, stop positions, all sliders/toggles) and
   returns to the list view with the palette selected.
 
-### 5.3 Left column — block source list
+### 5.3 Middle column — block source list
 
 - **Source toggle** (unchanged): Hotbar | Hotbar + Inv | Inventory. This is saved per-palette and
   also defines the pool Automatic segments and variation swaps draw from at placement time.
 - Below it: a vertically scrollable box — dark translucent background, white outline — listing
   the blocks from the chosen source with sprite + name, **sorted by colour** (existing
   `ColorOrder` colour ordering).
-- **Two special rows pinned at the top**, crosshatch icon instead of a sprite:
-  - `Automatic colour`
-  - `Automatic brightness`
-- **Double-click any row** to append it to the strip in the middle column as a new segment.
-  The same block may be added more than once. No [S]/[E]/✓/✗ buttons — that whole assign-mode
-  system is gone.
+- **Two special rows pinned at the top** (always first, regardless of sorting), crosshatch icon
+  instead of a sprite:
+  - `Auto colour`
+  - `Auto brightness`
+- **Double-click any row** to append it to the strip as a new segment, or **drag a row onto the
+  strip** to insert it exactly where it's dropped (a caret shows the insertion point). The same
+  block may be added more than once. No [S]/[E]/✓/✗ buttons — that whole assign-mode system is
+  gone.
 - **Right-click a block row** to toggle it as **excluded from Automatic segments**: its name
   turns red; right-click again restores white. Excluded blocks are never chosen when an
   Automatic segment resolves at placement time. The exclusion list is saved on the palette.
   (The two Automatic rows themselves can't be excluded. Whether the exclusion also applies to
   the Variation swap pool is open — see §12.)
 
-### 5.4 Middle column — the segment strip
+### 5.4 Right column — the segment strip
 
 The heart of the editor. Vertical strip, same rendering style as today's curve strip (iso-tiled
 block sprites per segment, draggable boundary handles), plus:
@@ -171,15 +174,19 @@ block sprites per segment, draggable boundary handles), plus:
   (rotated 90°) placeholder text: *"select a block"*.
 - **Adding**: double-clicking in the left list appends a segment at the bottom; existing
   segments rescale proportionally to make room (equal share for the newcomer).
-- **Labels**: to the left of the strip, each segment's block name is drawn horizontally,
-  pointing at its segment ("Automatic colour"/"Automatic brightness" for automatic segments).
-  - Name wider than the label gutter → auto-scrolling marquee (scrolls left, loops).
-  - Segments too short for every label to sit beside its segment → labels stack vertically,
-    packed with a few px margin, in correct strip order even if not perfectly aligned with
-    their segment. When room returns (segment resized/reordered), labels realign.
+- **Labels**: to the **right** of the strip, each segment's block name drawn horizontally,
+  aiming at its segment's centre ("Auto colour"/"Auto brightness" for automatic segments).
+  - Name wider than the label gutter → auto-scrolling marquee.
+  - Packing is tight: at most ~2 px of vertical padding, so squeezed labels sit ~4 px apart.
+    Labels keep strip order; when a stop drag squeezes them, inner labels push their
+    neighbours, but **no label ever leaves the strip's vertical span** — the outer labels pin
+    at the strip's ends and the rest stack against them, even if that means a label no longer
+    lines up with its segment. When room returns, labels re-centre on their segments.
   - Labels move live with their segment during a drag.
-- **Stops** (boundary handles): drag to resize adjacent segments — same mechanic as v1.
-  Dragging a stop switches the Curve toggle to **Custom**.
+- **Stops** (boundary handles): all on the **left** of the strip, drawn as a sideways
+  "house" pentagon whose point touches the boundary line. Drag to resize adjacent segments;
+  dragging a stop switches the Curve toggle to **Custom**. Hovering shows the vertical-resize
+  cursor.
 - **Reordering by drag**: hovering the body of a segment shows a ↕ move cursor. Click-drag
   moves the segment up/down, keeping its size (% share). While dragging, the segment visibly
   follows the cursor; when it overlaps a neighbour past the midpoint, the two **swap places**
@@ -202,13 +209,16 @@ block sprites per segment, draggable boundary handles), plus:
 
 Two stacked controls above the strip (order on top, curve under it):
 
-- **Order: Colour | Brightness | Custom** — Colour/Brightness auto-sort the segments (by the
-  existing perceptual colour ordering / Oklab lightness). Custom cannot be clicked into: it is
-  entered only by manually reordering (drag or arrow keys). Clicking Colour/Brightness while
-  in Custom re-sorts and leaves Custom.
+- **Order: Colour asc | Colour desc | Brightness asc | Brightness desc | Custom** — the four
+  sort values re-sort every segment on click (Automatic segments rank as a **middle grey** —
+  strip-sorting only; the Auto rows in the block selector are always pinned at its top).
+  Custom cannot be clicked into: it is entered only by manually reordering (drag or arrow
+  keys). **Disabled while the strip has fewer than 2 static block segments.**
 - **Curve: Linear | Ease-in | Ease-out | Ease-in-out | Step | Custom** — unchanged cycle, but
   as in v1, Custom is only entered by dragging a stop. Changing curve away from Custom resets
-  stops to that curve's distribution.
+  stops to that curve's distribution. **Disabled while the strip has fewer than 3 segments.**
+- Hovering a disabled toggle shows a short hint explaining how to enable it (e.g. "Add at
+  least 3 segments to shape the curve").
 
 ### 5.6 Right column — settings (narrower)
 
@@ -243,32 +253,36 @@ Removed from v1's right column:
 ### 5.7 Helper text → help popups
 
 The always-visible yellow helper lines are removed from the editor. Instead every control gets a
-small **(?)** circle icon after it; clicking it (or hovering the control for ~1s) shows the
-yellow helper text as a small popup anchored at the mouse position. One popup at a time;
-click-away or mouse-out dismisses it.
+small **circled question mark** icon (a proper ring with a tiny "?" inside, rendered small)
+after it; clicking it (or hovering the control for ~1s) shows the yellow helper text as a small
+popup anchored at the mouse position. One popup at a time; click-away or mouse-out dismisses it.
+The left settings column is split by small group headings — **"Gradient & noise"** (variation,
+chaos, step length, sizing) and **"Noise only"** (type, scale, lock, seed).
 
 ---
 
 ## 6. Automatic segments — placement semantics
 
-An Automatic segment is a wildcard resolved when painting. `Automatic colour` matches by
-perceptual colour distance (Oklab), `Automatic brightness` by lightness. Resolution always draws
-from the palette's source (hotbar/inventory), minus the palette's auto-exclusion list (§5.3),
-widening the acceptance threshold until *some* block qualifies — it always finds something if
-the source has any non-excluded placeable block.
+An Automatic segment is a wildcard resolved when painting. `Auto colour` matches by perceptual
+colour distance (Oklab), `Auto brightness` by lightness. Resolution always draws from the
+palette's source (hotbar/inventory), minus the palette's auto-exclusion list (§5.3).
 
-Per position in the strip:
+**One block per segment, deterministically** *(revised 2026-07-26)*: each Automatic segment
+resolves to exactly **one** block. For a run of k consecutive Automatic segments between two
+anchors, segment j's target is the colour interpolated at j/(k+1) along the anchors, and the
+segment takes the source block **closest** to that target (widening implicitly — closest always
+exists). The same anchors + inventory always resolve the same blocks, so you can craft your own
+curve/distribution out of nothing but Automatic segments and still get a stable ramp.
 
-- **Automatic at the START**: the gradient's start colour is the block the paint started on —
-  the clicked/placed block for that column, row, or 3D fill (per-column, exactly like today's
-  marker-driven endpoint resolution).
+Anchors per position in the strip:
+
+- **Automatic at the START**: the run's start anchor is the block the paint started on — the
+  clicked/placed block for that column, row, or 3D fill.
 - **Automatic at the END**: scan ahead along the paint direction for an **end marker**; if none,
-  use the **first non-air block** hit. That block's colour is the end colour.
-- **Automatic in the MIDDLE**: interpolate between the nearest *resolved* neighbours — the
-  previous segment's block (static, or the last placed block if that was also automatic) and
-  the next statically-defined segment's block (or, at the end, the resolved end block). The
-  automatic span fills its share of the strip with the closest available blocks along that
-  colour ramp.
+  use the **first non-air block** hit. That block's colour is the end anchor.
+- **Automatic in the MIDDLE**: anchored by the neighbouring resolved segments — the previous
+  segment's block (static or resolved-automatic) and the next static segment's block (or the
+  resolved end anchor).
 
 Error cases (on-screen action-bar error, nothing is placed):
 

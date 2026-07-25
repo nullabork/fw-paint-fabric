@@ -28,7 +28,7 @@ public final class Palette {
     public GradientSource source = GradientSource.HOTBAR_AND_INVENTORY;
 
     /** Segment ordering mode; CUSTOM is reached only by manual reordering in the editor. */
-    public PaletteOrder order = PaletteOrder.COLOR;
+    public PaletteOrder order = PaletteOrder.COLOR_ASC;
 
     /** Easing curve for the strip; CUSTOM is reached only by dragging a stop. */
     public CurveFunction curve = CurveFunction.LINEAR;

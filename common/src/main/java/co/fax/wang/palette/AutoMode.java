@@ -5,8 +5,8 @@ package co.fax.wang.palette;
  * (Oklab) or by lightness alone.
  */
 public enum AutoMode {
-    COLOR("Automatic colour"),
-    BRIGHTNESS("Automatic brightness");
+    COLOR("Auto colour"),
+    BRIGHTNESS("Auto brightness");
 
     private final String label;
 
