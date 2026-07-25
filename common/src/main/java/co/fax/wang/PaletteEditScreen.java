@@ -56,8 +56,10 @@ public class PaletteEditScreen extends Screen {
     // Vertical layout (base y positions — the page scroll offsets them).
     private static final int PREVIEW_Y = 30;
     private static final int PREVIEW_H = 104;
-    private static final int NAME_Y = PREVIEW_Y + PREVIEW_H + 6;
-    private static final int COL_TOP = NAME_Y + 26;
+    private static final int NAME_LABEL_Y = PREVIEW_Y + PREVIEW_H + 6;
+    private static final int NAME_Y = NAME_LABEL_Y + 10;
+    private static final int SEP_Y = NAME_Y + 20 + 8;      // separator line, 8px above + below
+    private static final int COL_TOP = SEP_Y + 1 + 8;
     private static final int LIST_H = 204;
     private static final int STRIP_H = 224;
     private static final int HEADING_H = 14;
@@ -134,11 +136,11 @@ public class PaletteEditScreen extends Screen {
     private int[][] cylCells;
     private int cylD, cylH;
 
-    // Help popups (the circled-? icons).
+    // Help popups (the circled-? icons). Clicking an icon shows its help instantly, but the
+    // popup only lives while the mouse stays over the control — moving away dismisses it.
     private record HelpSpot(int x, int baseY, int w, int h, String text) {}
     private final List<HelpSpot> helpSpots = new ArrayList<>();
-    private String pinnedHelp;
-    private double pinnedX, pinnedY;
+    private HelpSpot clickedSpot;
     private HelpSpot hoverSpot;
     private long hoverSince;
 
@@ -240,12 +242,14 @@ public class PaletteEditScreen extends Screen {
         helpSpots.add(new HelpSpot(paneX(), COL_TOP, paneW(), 20,
                 "Where painting draws blocks from — also the pool for Automatic segments"));
 
-        // Right column: Order + Curve toggles above the strip.
+        // Right column: Order + Curve toggles above the strip, left-aligned with the strip
+        // itself (starting at rightX() they'd overlap the Source toggle's help icon).
+        int togX = stripX(), togW = STRIP_W + 4 + LABEL_W;
         orderBtn = addScrolled(Button.builder(orderLabel(), b -> {
             sortSegments(editing.order.nextSort());
             b.setMessage(orderLabel());
-        }).bounds(rightX(), COL_TOP, RIGHT_W, 20).build());
-        helpSpots.add(new HelpSpot(rightX(), COL_TOP, RIGHT_W, 20,
+        }).bounds(togX, COL_TOP, togW, 20).build());
+        helpSpots.add(new HelpSpot(togX, COL_TOP, togW, 20,
                 "Sorts the strip by colour or brightness, ascending or descending. Drag segments "
                         + "(or arrow keys) for Custom"));
         curveBtn = addScrolled(Button.builder(curveLabel(), b -> {
@@ -253,8 +257,8 @@ public class PaletteEditScreen extends Screen {
             dirty = true;
             resetPreview();
             b.setMessage(curveLabel());
-        }).bounds(rightX(), COL_TOP + 24, RIGHT_W, 20).build());
-        helpSpots.add(new HelpSpot(rightX(), COL_TOP + 24, RIGHT_W, 20,
+        }).bounds(togX, COL_TOP + 24, togW, 20).build());
+        helpSpots.add(new HelpSpot(togX, COL_TOP + 24, togW, 20,
                 "How fast the gradient progresses. Drag a stop handle for Custom"));
 
         // Left column: the grouped settings.
@@ -664,9 +668,6 @@ public class PaletteEditScreen extends Screen {
             }
             return true;
         }
-        if (pinnedHelp != null) {
-            pinnedHelp = null; // any click dismisses a pinned popup (the click still lands below)
-        }
         // Title bar: switching tabs leaves the editor (confirming unsaved changes).
         if (my < BAR_H && event.button() == 0) {
             int[] xs = tabXs();
@@ -678,15 +679,13 @@ public class PaletteEditScreen extends Screen {
                 }
             }
         }
-        // Circled-? icons pin their popup.
+        // Circled-? icons show their popup immediately (it hides again on mouse-away).
         if (event.button() == 0) {
             for (HelpSpot h : helpSpots) {
                 int hy = h.baseY() - scroll;
                 if (mx >= h.x() + h.w() + 2 && mx <= h.x() + h.w() + 13
                         && my >= hy + 5 && my <= hy + 16) {
-                    pinnedHelp = h.text();
-                    pinnedX = mx;
-                    pinnedY = my;
+                    clickedSpot = h;
                     return true;
                 }
             }
@@ -917,8 +916,8 @@ public class PaletteEditScreen extends Screen {
             expandedPreview = 0;
             return true;
         }
-        if (pinnedHelp != null && key == 256) {
-            pinnedHelp = null;
+        if (clickedSpot != null && key == 256) {
+            clickedSpot = null;
             return true;
         }
         boolean typing = nameBox != null && nameBox.isFocused();
@@ -1158,9 +1157,19 @@ public class PaletteEditScreen extends Screen {
     }
 
     private void renderNameRow(GuiGraphicsExtractor g) {
-        int y = NAME_Y - scroll;
-        if (!nameError.isEmpty()) {
-            g.text(this.font, nameError, contentX(), y + 22, RED);
+        int cx = contentX();
+        int total = SET_W + COL_GAP + paneW() + COL_GAP + RIGHT_W;
+        int labelY = NAME_LABEL_Y - scroll;
+        if (labelY >= BAR_H + 2 && labelY <= viewBottom() - 8) {
+            g.text(this.font, "Name:", cx, labelY, GREY);
+            if (!nameError.isEmpty()) {
+                g.text(this.font, nameError, cx + this.font.width("Name: ") + 4, labelY, RED);
+            }
+        }
+        // Separator between the name row and the settings, spanning all three columns.
+        int sepY = SEP_Y - scroll;
+        if (sepY >= BAR_H + 2 && sepY <= viewBottom()) {
+            g.fill(cx, sepY, cx + total, sepY + 1, 0x50FFFFFF);
         }
     }
 
@@ -1572,6 +1581,20 @@ public class PaletteEditScreen extends Screen {
         int count = editing.segments.size();
         if (count == 0) return;
         double[] cb = PaletteMath.segmentBounds(count, editing.curve, editing.stops);
+        // Step length: jitter the band boundaries once (stable seed → stable preview).
+        if (editing.stepWobble > 0 && cb.length > 0) {
+            Random wr = new Random(43);
+            double[] wob = new double[cb.length];
+            for (int k = 0; k < cb.length; k++) {
+                double lo = k == 0 ? 0 : cb[k - 1];
+                double hi = k == cb.length - 1 ? 1 : cb[k + 1];
+                double room = Math.min(cb[k] - lo, hi - cb[k]);
+                wob[k] = cb[k] + (wr.nextDouble() < editing.stepWobble
+                        ? (wr.nextDouble() - 0.5) * room : 0);
+            }
+            cb = wob;
+        }
+        List<List<ItemStack>> bands = previewBands();
         long seed = noiseSeedLong();
         int[] a = noiseAnchor();
         g.pose().pushMatrix();
@@ -1582,12 +1605,21 @@ public class PaletteEditScreen extends Screen {
                 for (int gx = Math.max(0, sum - (n - 1)); gx <= Math.min(n - 1, sum); gx++) {
                     int gz = sum - gx;
                     if (gx != n - 1 && gz != n - 1 && gy != n - 1) continue;
-                    double v = Noise.sample(editing.noiseType, a[0] + gx, a[1] + gy, a[2] + gz, seed,
+                    int wx = a[0] + gx, wy = a[1] + gy, wz = a[2] + gz;
+                    double v = Noise.sample(editing.noiseType, wx, wy, wz, seed,
                             editing.noiseScaleX, editing.noiseScaleY, editing.noiseScaleZ);
                     int idx = PaletteMath.indexFor(PaletteMath.curved(editing.curve, v), cb);
+                    // Chaos + Variation, rolled per cell from its world position so the preview
+                    // is stable frame to frame — the same maths placement applies.
+                    Random cell = new Random(wx * 73428767L ^ wy * 912931L ^ wz * 31337L);
+                    if (editing.chaos > 0 && cell.nextDouble() < editing.chaos) {
+                        idx = Math.max(0, Math.min(count - 1, cell.nextBoolean() ? idx - 1 : idx + 1));
+                    }
+                    ItemStack st = segStacks.get(idx);
+                    List<ItemStack> band = bands.get(idx);
+                    if (!band.isEmpty()) st = band.get(cell.nextInt(band.size()));
                     g.pose().pushMatrix();
                     g.pose().translate((gx - gz + (n - 1)) * ISO_X, (gx + gz) * ISO_DOWN + (n - 1 - gy) * ISO_UP);
-                    ItemStack st = segStacks.get(idx);
                     if (editing.segments.get(idx).isAutomatic() || st.isEmpty()) {
                         PaletteListPanel.drawCrosshatch(g, 0, 0, 16);
                     } else {
@@ -1691,27 +1723,25 @@ public class PaletteEditScreen extends Screen {
     }
 
     private void renderHelpPopup(GuiGraphicsExtractor g, int mouseX, int mouseY) {
-        String text = pinnedHelp;
-        double px = pinnedX, py = pinnedY;
-        if (text == null) {
-            // Hover-dwell: a second over a control shows its help at the mouse.
-            HelpSpot over = null;
-            for (HelpSpot h : helpSpots) {
-                int y = h.baseY() - scroll;
-                if (mouseX >= h.x() && mouseX <= h.x() + h.w() + 13 && mouseY >= y && mouseY <= y + h.h()) {
-                    over = h;
-                    break;
-                }
+        // Which control (incl. its ? icon) is the mouse over right now?
+        HelpSpot over = null;
+        for (HelpSpot h : helpSpots) {
+            int y = h.baseY() - scroll;
+            if (mouseX >= h.x() && mouseX <= h.x() + h.w() + 13 && mouseY >= y && mouseY <= y + h.h()) {
+                over = h;
+                break;
             }
-            if (over != hoverSpot) {
-                hoverSpot = over;
-                hoverSince = System.currentTimeMillis();
-            }
-            if (over == null || System.currentTimeMillis() - hoverSince < 1000) return;
-            text = over.text();
-            px = mouseX;
-            py = mouseY;
         }
+        if (over != hoverSpot) {
+            hoverSpot = over;
+            hoverSince = System.currentTimeMillis();
+        }
+        // A clicked ? shows instantly, but only while the mouse stays on that control.
+        if (clickedSpot != null && over != clickedSpot) clickedSpot = null;
+        if (over == null) return;
+        if (over != clickedSpot && System.currentTimeMillis() - hoverSince < 1000) return;
+        String text = over.text();
+        double px = mouseX, py = mouseY;
         List<String> lines = wrap(text, 150);
         int w = 0;
         for (String l : lines) w = Math.max(w, this.font.width(l));

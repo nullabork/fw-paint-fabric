@@ -354,15 +354,15 @@ public final class PaletteChoice {
 
     /**
      * Inventory slot for a noise cell: sample the palette's noise field at the cell position,
-     * map through the palette curve/stops, chaos-nudge the step. No wobble — noise cells have no
-     * progression for step lengths to act on.
+     * map through the palette curve/stops (with the step-length wobble applied to the band
+     * boundaries, rolled once per ramp so the pattern stays coherent), chaos-nudge the step.
      */
     public static int noiseSlot(LocalPlayer player, Prepared p, Ramp r, int x, int y, int z) {
         if (r.steps() == 0) return -1;
         Palette pal = p.palette;
         double t = Noise.sample(pal.noiseType, x, y, z, noiseSeedLong(pal),
                 pal.noiseScaleX, pal.noiseScaleY, pal.noiseScaleZ);
-        int idx = PaletteMath.indexFor(PaletteMath.curved(pal.curve, t), r.bounds);
+        int idx = PaletteMath.indexFor(PaletteMath.curved(pal.curve, t), wobbled(p, r, r));
         if (pal.chaos > 0 && RANDOM.nextDouble() < pal.chaos) {
             idx = Math.max(0, Math.min(r.steps() - 1, RANDOM.nextBoolean() ? idx - 1 : idx + 1));
         }
