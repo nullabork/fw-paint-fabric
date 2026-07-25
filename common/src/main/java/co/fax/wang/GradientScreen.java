@@ -2,6 +2,10 @@ package co.fax.wang;
 
 import co.fax.wang.config.ConfigManager;
 import co.fax.wang.config.GradientConfig;
+import co.fax.wang.palette.MissingBlockPolicy;
+import co.fax.wang.palette.Palette;
+import co.fax.wang.palette.PaletteSegment;
+import co.fax.wang.palette.PaletteStore;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.Button;
@@ -9,7 +13,6 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
@@ -21,29 +24,26 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Random;
 import java.util.Set;
 
 /**
- * The FW Paint screen (opened by K). Six tabs:
+ * The FW Paint screen (opened by K). Five tabs:
  * <ul>
  *   <li><b>Solid</b> — block picker with ✓ (one block to place) / ✗ (exclusions) + match mode;</li>
- *   <li><b>Gradient</b> — block picker (left) + gradient settings (right);</li>
- *   <li><b>Noise Paint</b> — block picker (left) + noise settings (right);</li>
+ *   <li><b>Palette</b> — the saved palettes driving gradient AND noise painting: a list view
+ *       (use/edit/delete) plus the editor ({@link PaletteEditScreen});</li>
  *   <li><b>Finder</b> — every block ranked by colour or brightness ({@link ColorIndex}), centred
  *       on a chosen reference block or pure colour, to discover close blocks you don't have;</li>
- *   <li><b>Settings</b> — pick the paint tool item, per-paint-type mode, marker options,
+ *   <li><b>Settings</b> — pick the paint tool item, placement mode, marker options,
  *       helper-text position;</li>
  *   <li><b>Help</b> — the in-game manual (the drill-down {@link HelpPanel}).</li>
  * </ul>
- * The block list is the modular {@link BlockPickerPanel}.
  */
 public class GradientScreen extends Screen {
 
     private static final int WHITE = 0xFFFFFFFF;
     private static final int GREY = 0xFFA0A0A0;
-    private static final int BLUE = 0xFF5599FF;   // not picked this preview
-    private static final int GREEN = 0xFF55FF55;  // must-use
+    private static final int GREEN = 0xFF55FF55;  // solid ✓ block
     private static final int RED = 0xFFFF5555;    // excluded
     private static final int YELLOW = 0xFFFFE34D; // help text
     private static final int HOVER_BG = 0x33FFFFFF;
@@ -56,45 +56,34 @@ public class GradientScreen extends Screen {
     private static final int COL_GAP = 12;
     private static final int TOOL_LIST_TOP = 78;
 
-    private enum Tab { PALETTE, GRADIENT, NOISE, SOLID, FINDER, SETTINGS, HELP }
+    private enum Tab { PALETTE, SOLID, FINDER, SETTINGS, HELP }
 
     /** Title-bar order, left to right (right-aligned as a group). */
     private static final Tab[] BAR_ORDER = {Tab.SOLID, Tab.PALETTE, Tab.FINDER, Tab.SETTINGS, Tab.HELP};
-    private enum Assign { NONE, START, END, REQUIRE, EXCLUDE }
     private enum SolidAssign { NONE, TICK, CROSS }
 
     private static final int TOOL_BTN_Y = 30;
     private static final int TOOL_BTN_H = 20;
     private static final int TOOL_FILTER_Y = 54;
 
-    // Picker-tab left column (aligned with the right column's first button at y=30).
+    // Solid-tab left column layout.
     private static final int PICK_SRC_Y = 30;
     private static final int PICK_BTN_Y = 54;
     private static final int PICK_LIST_Y = 78;
     private static final int LEGEND_H = 26; // two key lines under the list
     private static final int PRESSED_OVERLAY = 0x80000000; // darkens a vanilla button to show "on"
 
-    private Assign assign = Assign.NONE;
-
     private record SourceBlock(String id, ItemStack stack, Block block) {}
     private record ToolRow(String id, String name) {}
 
     private static Tab tab = Tab.SOLID; // set on open to the active paint type's tab
 
-    // Picker tabs (Gradient + Noise) state.
+    // Solid tab state.
     private BlockPickerPanel picker;
     private List<SourceBlock> sourceBlocks = new ArrayList<>();
-    private List<SourceBlock> orderedBlocks = new ArrayList<>(); // distinct gradient order (valley→peak)
-    private int whiteCount = 0;
-    private final List<String> whiteOrder = new ArrayList<>(); // ids of the placement sequence (for logging)
-    private String previewStartId, previewEndId;
-    private String pickSelectedId; // the single selected row in Pick mode (»» chevron)
-    private int modeDescY, endpointsDescY, deviationDescY, chaosDescY, stepWobbleDescY;
-    private int legendY; // y of the yellow button key under the block list
-
-    // Solid tab state.
     private SolidAssign solidAssign = SolidAssign.NONE;
     private int solidMatchDescY;
+    private int legendY; // y of the yellow button key under the block list
 
     // Manual double-click tracking for list rows (the vanilla flag only fires on real widgets).
     private String lastRowClickId;
@@ -153,8 +142,6 @@ public class GradientScreen extends Screen {
                 case SOLID -> Tab.SOLID;
                 case GRADIENT, NOISE -> Tab.PALETTE;
             };
-        } else if (tab == Tab.GRADIENT || tab == Tab.NOISE) {
-            tab = Tab.PALETTE; // retired tabs can't be revisited
         }
     }
 
@@ -181,7 +168,6 @@ public class GradientScreen extends Screen {
             out[i] = switch (BAR_ORDER[i]) {
                 case PALETTE -> "Palette"; case SOLID -> "Solid"; case FINDER -> "Finder";
                 case SETTINGS -> "Settings"; case HELP -> "Help";
-                case GRADIENT -> "Gradient"; case NOISE -> "Noise Paint";
             };
         }
         return out;
@@ -197,21 +183,15 @@ public class GradientScreen extends Screen {
 
     // ---- layout helpers -------------------------------------------------------------------------
 
-    // The Gradient/Noise tabs slot a thin third column (the curve strip) between the picker and the
-    // settings. The outer columns keep their two-column width — the strip shifts them apart.
-    private static final int MID_W = 44;
-
-    private boolean threeCol() { return tab == Tab.GRADIENT || tab == Tab.NOISE; }
     private int colW() {
         int avail = this.width - 2 * LEFT_X;
         return Math.max(60, Math.min(COL_W_MAX, (avail - COL_GAP) / 2));
     }
     private int contentX() {
-        int total = 2 * colW() + COL_GAP + (threeCol() ? MID_W + COL_GAP : 0);
+        int total = 2 * colW() + COL_GAP;
         return Math.max(LEFT_X, (this.width - total) / 2);
     }
-    private int midX() { return contentX() + colW() + COL_GAP; }
-    private int rightX() { return midX() + (threeCol() ? MID_W + COL_GAP : 0); }
+    private int rightX() { return contentX() + colW() + COL_GAP; }
     private int rightW() { return colW(); }
     private int leftW() { return colW(); }
 
@@ -219,7 +199,6 @@ public class GradientScreen extends Screen {
     protected void init() {
         toolRowHeight = this.font.lineHeight + 3;
         if (tab == Tab.PALETTE) initPaletteTab();
-        else if (tab == Tab.GRADIENT || tab == Tab.NOISE) initPickerTab();
         else if (tab == Tab.SOLID) initSolidTab();
         else if (tab == Tab.FINDER) initFinderTab();
         else if (tab == Tab.HELP) initHelpTab();
@@ -259,14 +238,14 @@ public class GradientScreen extends Screen {
                 ? "In use ✓" : "Use " + t.label());
     }
 
-    private void setTab(Tab t) { tab = t; previewExpanded = false; rebuildWidgets(); }
+    private void setTab(Tab t) { tab = t; rebuildWidgets(); }
 
     // ---- tabs in the title bar ------------------------------------------------------------------
 
     private String tabName(Tab t) {
         return switch (t) {
-            case PALETTE -> "Palette"; case GRADIENT -> "Gradient"; case NOISE -> "Noise Paint";
-            case FINDER -> "Finder"; case SOLID -> "Solid"; case SETTINGS -> "Settings"; case HELP -> "Help";
+            case PALETTE -> "Palette"; case FINDER -> "Finder"; case SOLID -> "Solid";
+            case SETTINGS -> "Settings"; case HELP -> "Help";
         };
     }
     private String tabText(Tab t) { return tab == t ? "» " + tabName(t) : tabName(t); }
@@ -285,238 +264,6 @@ public class GradientScreen extends Screen {
         }
         return out;
     }
-
-    // ---- Gradient / Noise tab -------------------------------------------------------------------
-
-    private void initPickerTab() {
-        sourceBlocks = gatherSourceBlocks();
-        // Restore the persisted ordering endpoints (shared with the placer).
-        GradientConfig pc = ConfigManager.get();
-        if (previewStartId == null && !pc.orderStartBlock.isEmpty()) previewStartId = pc.orderStartBlock;
-        if (previewEndId == null && !pc.orderEndBlock.isEmpty()) previewEndId = pc.orderEndBlock;
-        picker = new BlockPickerPanel(this.font);
-        int cx = contentX(), w = leftW(), bw = w / 4;
-
-        // Source button (vanilla) — cycles the palette source.
-        addRenderableWidget(Button.builder(sourceLabel(), b -> {
-            GradientConfig c = ConfigManager.get(); c.source = c.source.next(); ConfigManager.save();
-            sourceBlocks = gatherSourceBlocks(); rebuildDisplayRows(); b.setMessage(sourceLabel());
-        }).bounds(cx, PICK_SRC_Y, w, 20).build());
-
-        if (activeMode().isPick()) {
-            // Pick mode: three action buttons (+ / − / ✗) that act on the selected row.
-            assign = Assign.NONE;
-            ensurePickSelection();
-            int bw3 = w / 3;
-            addRenderableWidget(Button.builder(Component.literal("+"), b -> pickAdjust(1)).bounds(cx, PICK_BTN_Y, bw3, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("−"), b -> pickAdjust(-1)).bounds(cx + bw3, PICK_BTN_Y, bw3, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("✗"), b -> pickExclude()).bounds(cx + bw3 * 2, PICK_BTN_Y, w - bw3 * 2, 20).build());
-        } else {
-            // Four assign buttons under Source: [S] [E] ✓ ✗ — set the click-assign mode (overlay shows on).
-            addRenderableWidget(Button.builder(Component.literal("[S]"),
-                    b -> assign = assign == Assign.START ? Assign.NONE : Assign.START).bounds(cx, PICK_BTN_Y, bw, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("[E]"),
-                    b -> assign = assign == Assign.END ? Assign.NONE : Assign.END).bounds(cx + bw, PICK_BTN_Y, bw, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("✓"),
-                    b -> assign = assign == Assign.REQUIRE ? Assign.NONE : Assign.REQUIRE).bounds(cx + bw * 2, PICK_BTN_Y, bw, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("✗"),
-                    b -> assign = assign == Assign.EXCLUDE ? Assign.NONE : Assign.EXCLUDE).bounds(cx + bw * 3, PICK_BTN_Y, w - bw * 3, 20).build());
-        }
-
-        // List capped at 10½ rows (the half row + scrollbar show it scrolls), leaving room for the
-        // yellow button key underneath (Pick mode's key runs four lines instead of two).
-        int availH = (this.height - 30) - PICK_LIST_Y;
-        int legendH = activeMode().isPick() ? 50 : LEGEND_H;
-        int listH = Math.max(BlockPickerPanel.ROW_H, Math.min(BlockPickerPanel.MAX_H, availH - legendH));
-        picker.setBounds(cx, PICK_LIST_Y, w, listH);
-        legendY = PICK_LIST_Y + listH + 4;
-
-        // Centre column: the curve button (its icon is drawn over it in render; the distribution
-        // strip below it is render-only, with hand-rolled handle dragging).
-        addRenderableWidget(Button.builder(Component.empty(), b -> {
-            GradientConfig c = ConfigManager.get();
-            if (tab == Tab.NOISE) c.noiseCurve = c.noiseCurve.next();
-            else c.curve = c.curve.next();
-            ConfigManager.save();
-            rebuildDisplayRows();
-        }).bounds(midX(), 30, MID_W, 20).build());
-
-        rebuildDisplayRows();
-
-        if (tab == Tab.GRADIENT) initGradientSettings();
-        else initNoiseSettings();
-    }
-
-    /** x of the assign button for the current mode (for the pressed overlay). */
-    private int assignBtnX() {
-        int cx = contentX(), bw = leftW() / 4;
-        return switch (assign) {
-            case START -> cx; case END -> cx + bw; case REQUIRE -> cx + bw * 2; case EXCLUDE -> cx + bw * 3;
-            default -> cx;
-        };
-    }
-    private int assignBtnW() {
-        int bw = leftW() / 4;
-        return assign == Assign.EXCLUDE ? leftW() - bw * 3 : bw;
-    }
-
-    /** Toggle {@code id} in {@code on}, removing it from the mutually-exclusive {@code off} list. */
-    private void toggle(List<String> on, List<String> off, String id) {
-        off.remove(id);
-        if (on.contains(id)) on.remove(id); else on.add(id);
-        ConfigManager.save();
-        rebuildDisplayRows();
-    }
-
-    private void initGradientSettings() {
-        int rx = rightX(), rw = rightW();
-        GradientConfig cfg = ConfigManager.get();
-        int y = 30;
-
-        addRenderableWidget(Button.builder(gradientLabel(), b -> {
-            GradientConfig c = ConfigManager.get(); c.gradientMode = c.gradientMode.next();
-            ConfigManager.save(); rebuildWidgets();
-        }).bounds(rx, y, rw, 20).build());
-        y += 24;
-        if (cfg.gradientMode.usesPixelPercent()) {
-            addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.pixelPercent,
-                    v -> "Pixel %: " + Math.round(v * 100) + "%",
-                    v -> { ConfigManager.get().pixelPercent = v; rebuildDisplayRows(); }));
-            y += 24;
-        }
-        modeDescY = y; y += 12;
-
-        cycleButton(rx, y, rw, this::endpointsLabel, () -> {
-            GradientConfig c = ConfigManager.get(); c.gradientFromMarkers = !c.gradientFromMarkers; });
-        y += 24; endpointsDescY = y; y += 12;
-
-        addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.deviationBudget,
-                v -> "Variation: " + Math.round(v * 100) + "%",
-                v -> { ConfigManager.get().deviationBudget = v; rebuildDisplayRows(); }));
-        y += 24; deviationDescY = y; y += 12;
-
-        addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.chaos,
-                v -> "Chaos: " + Math.round(v * 100) + "%",
-                v -> { ConfigManager.get().chaos = v; rebuildDisplayRows(); }));
-        y += 24; chaosDescY = y; y += 12;
-
-        addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.stepWobble,
-                v -> "Step length: " + Math.round(v * 100) + "%",
-                v -> ConfigManager.get().stepWobble = v));
-        y += 24; stepWobbleDescY = y; y += 12;
-
-        addRenderableWidget(new ConfigSlider(rx, y, rw, stepsToSlider(cfg.maxSteps),
-                v -> "Max steps: " + sliderToSteps(v),
-                v -> { ConfigManager.get().maxSteps = sliderToSteps(v); rebuildDisplayRows(); }));
-        y += 26;
-        gradPreviewY = y;
-        if (gradPreviewY + 12 < this.height - 32) {
-            addRenderableWidget(Button.builder(Component.literal("⛶"), b -> previewExpanded = true)
-                    .bounds(rx + rw - 16, gradPreviewY - 2, 16, 14).build());
-        }
-    }
-
-    private int noisePreviewY;          // y where the noise preview cube starts (set in initNoiseSettings)
-    private int noiseModeDescY, noiseDevDescY, noiseChaosDescY; // yellow help lines on the noise tab
-    private double previewOffX, previewOffY, previewOffZ; // pan offset (in blocks) from the player anchor
-    private enum CubeFace { TOP, RIGHT, LEFT }
-    private CubeFace dragFace; // face pressed at mouse-down — the drag pans along it until release
-
-    // Curve strip (centre column): index of the boundary handle being dragged, −1 when none.
-    private int dragHandle = -1;
-
-    // Expanded preview: the tab's preview blown up over a dark backdrop (⛶ opens, ✗/Esc closes).
-    private boolean previewExpanded;
-    private static final int CLOSE_X_SIZE = 24;
-
-    // Gradient tab cylinder preview: gradient start at the top rim, end at the bottom. The cell
-    // choices are cached (chaos/wobble/variation are random) and re-rolled when settings change.
-    private int gradPreviewY; // y where the cylinder preview starts (set in initGradientSettings)
-    private List<List<ItemStack>> previewStepGroups = new ArrayList<>(); // step → its variation group
-    private ItemStack[][] cylCache; // [ring cell][row, 0 = top rim] chosen sprite
-    private int[][] cylCells;       // ring cells (x,z) of the cached cylinder, painter-sorted
-    private int cylD, cylH;
-
-    private void initNoiseSettings() {
-        int rx = rightX(), rw = rightW();
-        GradientConfig cfg = ConfigManager.get();
-        int y = 30;
-
-        cycleButton(rx, y, rw, () -> Component.literal("Noise: " + ConfigManager.get().noiseType.displayName()),
-                () -> ConfigManager.get().noiseType = ConfigManager.get().noiseType.next());
-        y += 24;
-        // Block-ordering mode for the noise tool (its own, separate from the gradient tool).
-        addRenderableWidget(Button.builder(Component.literal("Order: " + cfg.noiseGradientMode.displayName()), b -> {
-            GradientConfig c = ConfigManager.get(); c.noiseGradientMode = c.noiseGradientMode.next();
-            ConfigManager.save(); rebuildWidgets(); // relayout so the Pixel % slider shows/hides
-        }).bounds(rx, y, rw, 20).build());
-        y += 24;
-        // Pixel % sits directly under the Order button, only for the "top %" texture modes.
-        if (cfg.noiseGradientMode.usesPixelPercent()) {
-            addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.noisePixelPercent,
-                    v -> "Pixel %: " + Math.round(v * 100) + "%",
-                    v -> { ConfigManager.get().noisePixelPercent = v; rebuildDisplayRows(); }));
-            y += 24;
-        }
-        noiseModeDescY = y; y += 12;
-
-        EditBox seed = new EditBox(this.font, rx, y, rw, 20, Component.literal("Seed"));
-        seed.setHint(Component.literal("Seed…"));
-        seed.setMaxLength(32);
-        seed.setValue(cfg.noiseSeed);
-        seed.setResponder(s -> { ConfigManager.get().noiseSeed = s; ConfigManager.save(); });
-        addRenderableWidget(seed);
-        y += 24;
-
-        if (cfg.noiseLock) {
-            addRenderableWidget(new ConfigSlider(rx, y, rw, scaleToSlider(cfg.noiseScaleX),
-                    v -> "Scale: " + sliderToScale(v),
-                    v -> { GradientConfig c = ConfigManager.get(); double s = sliderToScale(v); c.noiseScaleX = c.noiseScaleY = c.noiseScaleZ = s; }));
-            y += 24;
-        } else {
-            addRenderableWidget(new ConfigSlider(rx, y, rw, scaleToSlider(cfg.noiseScaleX),
-                    v -> "Scale X: " + sliderToScale(v), v -> ConfigManager.get().noiseScaleX = sliderToScale(v)));
-            y += 24;
-            addRenderableWidget(new ConfigSlider(rx, y, rw, scaleToSlider(cfg.noiseScaleY),
-                    v -> "Scale Y: " + sliderToScale(v), v -> ConfigManager.get().noiseScaleY = sliderToScale(v)));
-            y += 24;
-            addRenderableWidget(new ConfigSlider(rx, y, rw, scaleToSlider(cfg.noiseScaleZ),
-                    v -> "Scale Z: " + sliderToScale(v), v -> ConfigManager.get().noiseScaleZ = sliderToScale(v)));
-            y += 24;
-        }
-
-        cycleButton(rx, y, rw, () -> Component.literal("Lock XYZ: " + (ConfigManager.get().noiseLock ? "On" : "Off")),
-                () -> { ConfigManager.get().noiseLock = !ConfigManager.get().noiseLock; rebuildWidgets(); });
-        y += 24;
-
-        // Gradient shaping for the noise tool (its own values, separate from the gradient tool).
-        addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.noiseDeviation,
-                v -> "Variation: " + Math.round(v * 100) + "%",
-                v -> { ConfigManager.get().noiseDeviation = v; rebuildDisplayRows(); }));
-        y += 24; noiseDevDescY = y; y += 12;
-        addRenderableWidget(new ConfigSlider(rx, y, rw, cfg.noiseChaos,
-                v -> "Chaos: " + Math.round(v * 100) + "%",
-                v -> { ConfigManager.get().noiseChaos = v; rebuildDisplayRows(); }));
-        y += 24; noiseChaosDescY = y; y += 12;
-        addRenderableWidget(new ConfigSlider(rx, y, rw, stepsToSlider(cfg.noiseMaxSteps),
-                v -> "Max steps: " + sliderToSteps(v),
-                v -> { ConfigManager.get().noiseMaxSteps = sliderToSteps(v); rebuildDisplayRows(); }));
-        y += 26;
-        noisePreviewY = y;
-        if (noisePreviewY + 12 < this.height - 32) {
-            addRenderableWidget(Button.builder(Component.literal("⛶"), b -> previewExpanded = true)
-                    .bounds(rx + rw - 16, noisePreviewY - 2, 16, 14).build());
-        }
-    }
-
-    private long noiseSeedLong() {
-        String s = ConfigManager.get().noiseSeed.trim();
-        if (s.isEmpty()) return 0L;
-        try { return Long.parseLong(s); } catch (NumberFormatException e) { return s.hashCode(); }
-    }
-
-    private static int sliderToScale(double v) { return Math.max(1, Math.min(15, 1 + (int) Math.round(v * 14))); }
-    private static double scaleToSlider(double s) { return (Math.max(1, Math.min(15, s)) - 1) / 14.0; }
 
     private List<SourceBlock> gatherSourceBlocks() {
         List<SourceBlock> out = new ArrayList<>();
@@ -542,228 +289,6 @@ public class GradientScreen extends Screen {
         return out;
     }
 
-    private Block blockOfId(String id, List<SourceBlock> list) {
-        if (id != null) for (SourceBlock sb : list) if (sb.id().equals(id)) return sb.block();
-        return null;
-    }
-
-    // The gradient and noise tools each have their own ordering mode + shaping values; the picker
-    // shows whichever belongs to the active tab.
-    private GradientMode activeMode() {
-        GradientConfig c = ConfigManager.get();
-        return tab == Tab.NOISE ? c.noiseGradientMode : c.gradientMode;
-    }
-    /**
-     * Budget used to filter eligible blocks when building the order. The gradient tool uses the
-     * FIXED sanity budget (its Variation slider widens step bands, it never gates steps); the noise
-     * tool uses a full budget — every range-eligible block is a candidate step.
-     */
-    private double orderingBudget() {
-        return tab == Tab.NOISE ? 1.0 : GradientRamp.STEP_ELIGIBILITY_BUDGET;
-    }
-    private int activeMaxSteps() {
-        GradientConfig c = ConfigManager.get();
-        return tab == Tab.NOISE ? c.noiseMaxSteps : c.maxSteps;
-    }
-    private double activePixelPercent() {
-        GradientConfig c = ConfigManager.get();
-        return tab == Tab.NOISE ? c.noisePixelPercent : c.pixelPercent;
-    }
-
-    private void rebuildDisplayRows() {
-        if (picker == null) return;
-        if (activeMode().isPick()) { rebuildPickRows(); return; }
-
-        GradientConfig cfg = ConfigManager.get();
-        Set<String> excluded = new HashSet<>(cfg.excludedBlocks);
-        Set<String> required = new HashSet<>(cfg.requiredBlocks);
-
-        List<SourceBlock> nonEx = new ArrayList<>();
-        for (SourceBlock sb : sourceBlocks) if (!excluded.contains(sb.id())) nonEx.add(sb);
-
-        ensureEndpoints(nonEx);
-
-        // Persist the endpoints so the noise placer uses the same valley→peak ordering.
-        cfg.orderStartBlock = previewStartId == null ? "" : previewStartId;
-        cfg.orderEndBlock = previewEndId == null ? "" : previewEndId;
-
-        Block startBlock = blockOfId(previewStartId, nonEx);
-        Block endBlock = blockOfId(previewEndId, nonEx);
-        GradientMode mode = activeMode(); // gradient tab vs noise tab use their own ordering mode
-        double pct = activePixelPercent();
-        int startRgb = startBlock == null ? 0 : BlockTextures.gradientValue(startBlock, startBlock, mode, pct);
-        int endRgb = endBlock == null ? 0 : BlockTextures.gradientValue(endBlock, startBlock, mode, pct);
-        int[] rgbs = new int[nonEx.size()];
-        Set<Integer> forced = new HashSet<>();
-        for (int i = 0; i < nonEx.size(); i++) {
-            rgbs[i] = BlockTextures.gradientValue(nonEx.get(i).block(), startBlock, mode, pct);
-            if (required.contains(nonEx.get(i).id())) forced.add(i);
-        }
-
-        int[] order = nonEx.isEmpty() ? new int[0]
-                : GradientRamp.gradientOrder(rgbs, startRgb, endRgb, mode, orderingBudget(), forced);
-        int[] used = GradientRamp.subsample(order, activeMaxSteps());
-        orderedBlocks = new ArrayList<>();
-        for (int idx : used) orderedBlocks.add(nonEx.get(idx)); // distinct valley→peak order for noise
-
-        // Each step's band-variation group (its swappable similar blocks), shown as icons on the
-        // step's row — both tabs, each using its own Variation slider.
-        double variation = tab == Tab.NOISE ? cfg.noiseDeviation : cfg.deviationBudget;
-        java.util.Map<Integer, List<ItemStack>> extrasByStep = new java.util.HashMap<>();
-        List<int[]> groups = GradientRamp.bandGroups(rgbs, used, order, mode, variation);
-        previewStepGroups = new ArrayList<>();
-        cylCache = null; // settings changed — re-roll the cylinder preview
-        for (int i = 0; i < used.length; i++) {
-            List<ItemStack> ex = new ArrayList<>();
-            List<ItemStack> full = new ArrayList<>();
-            for (int member : groups.get(i)) {
-                full.add(nonEx.get(member).stack());
-                if (member != used[i]) ex.add(nonEx.get(member).stack());
-            }
-            previewStepGroups.add(full);
-            if (!ex.isEmpty()) extrasByStep.put(used[i], ex);
-        }
-
-        // White rows: the distinct gradient STEPS, start→end — one row per step, matching exactly
-        // what placement distributes across the fill. (The curve/chaos shape how many cells each
-        // step gets in-world, which depends on the marker distance — they never add, remove, or
-        // reorder steps, so they don't belong in this list.)
-        int[] seq = used;
-
-        List<BlockPickerPanel.Row> rows = new ArrayList<>();
-        whiteOrder.clear();
-        Set<Integer> inSeq = new HashSet<>();
-        for (int j = 0; j < seq.length; j++) {
-            int idx = seq[j];
-            inSeq.add(idx);
-            SourceBlock sb = nonEx.get(idx);
-            String tag = (j == 0) ? " [S]" : (j == seq.length - 1 && seq.length > 1) ? " [E]" : "";
-            int color = required.contains(sb.id()) ? GREEN : WHITE;
-            List<ItemStack> extras = extrasByStep.getOrDefault(idx, List.of());
-            rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), color, tag, "", extras));
-            whiteOrder.add(sb.id());
-        }
-        whiteCount = seq.length;
-        // Not in the sequence: green if must-use, else blue.
-        for (int i = 0; i < nonEx.size(); i++) {
-            if (inSeq.contains(i)) continue;
-            SourceBlock sb = nonEx.get(i);
-            int color = required.contains(sb.id()) ? GREEN : BLUE;
-            rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), color, "", ""));
-        }
-        // Excluded (red) at the bottom.
-        for (SourceBlock sb : sourceBlocks) {
-            if (excluded.contains(sb.id())) rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), RED, "", ""));
-        }
-
-        picker.setRows(rows);
-        logPreview();
-    }
-
-    /**
-     * Pick mode: numbered blocks are white (sorted low→high, with [S]/[E]); everything unnumbered is
-     * red (not used). The selected row shows a »» chevron; the +/−/✗ buttons act on the selection.
-     */
-    private void rebuildPickRows() {
-        GradientConfig cfg = ConfigManager.get();
-        ensurePickSelection();
-        List<String> ids = new ArrayList<>();
-        for (SourceBlock sb : sourceBlocks) ids.add(sb.id());
-        List<List<String>> groups = Picks.groups(ids, cfg.pickNumbers);
-
-        // Flatten to numbered blocks (low→high) and one representative per group for the preview.
-        List<SourceBlock> numbered = new ArrayList<>();
-        orderedBlocks = new ArrayList<>();
-        previewStepGroups = new ArrayList<>();
-        cylCache = null; // settings changed — re-roll the cylinder preview
-        for (List<String> grp : groups) {
-            SourceBlock rep = sbById(grp.get(0), sourceBlocks);
-            if (rep != null) orderedBlocks.add(rep);
-            List<ItemStack> full = new ArrayList<>();
-            for (String id : grp) {
-                SourceBlock sb = sbById(id, sourceBlocks);
-                if (sb != null) { numbered.add(sb); full.add(sb.stack()); }
-            }
-            if (!full.isEmpty()) previewStepGroups.add(full);
-        }
-
-        List<BlockPickerPanel.Row> rows = new ArrayList<>();
-        whiteOrder.clear();
-        Set<String> numberedIds = new HashSet<>();
-        for (int j = 0; j < numbered.size(); j++) {
-            SourceBlock sb = numbered.get(j);
-            numberedIds.add(sb.id());
-            String tag = (j == 0) ? " [S]" : (j == numbered.size() - 1 && numbered.size() > 1) ? " [E]" : "";
-            rows.add(pickRow(sb, WHITE, tag, cfg.pickNumbers.get(sb.id()) + " "));
-            whiteOrder.add(sb.id());
-        }
-        whiteCount = numbered.size();
-        // Unnumbered = not used = red.
-        for (SourceBlock sb : sourceBlocks) {
-            if (!numberedIds.contains(sb.id())) rows.add(pickRow(sb, RED, "", ""));
-        }
-        picker.setRows(rows);
-        logPreview();
-    }
-
-    /** Build a Pick row, adding the »» chevron prefix when it's the selected one. */
-    private BlockPickerPanel.Row pickRow(SourceBlock sb, int color, String tag, String numberPrefix) {
-        String prefix = (sb.id().equals(pickSelectedId) ? "» " : "") + numberPrefix;
-        return new BlockPickerPanel.Row(sb.stack(), sb.id(), color, tag, prefix);
-    }
-
-    private SourceBlock sbById(String id, List<SourceBlock> list) {
-        for (SourceBlock sb : list) if (sb.id().equals(id)) return sb;
-        return null;
-    }
-
-    /** Ensure a valid Pick selection (defaults to the first source block). */
-    private void ensurePickSelection() {
-        boolean ok = pickSelectedId != null && sourceBlocks.stream().anyMatch(s -> s.id().equals(pickSelectedId));
-        if (!ok) pickSelectedId = sourceBlocks.isEmpty() ? null : sourceBlocks.get(0).id();
-    }
-
-    /** + / − the selected block's pick number; reaching 0 removes the number (→ unused/red). */
-    private void pickAdjust(int delta) {
-        if (pickSelectedId == null) return;
-        GradientConfig cfg = ConfigManager.get();
-        int next = Math.max(0, cfg.pickNumbers.getOrDefault(pickSelectedId, 0) + delta);
-        if (next == 0) cfg.pickNumbers.remove(pickSelectedId);
-        else cfg.pickNumbers.put(pickSelectedId, next);
-        ConfigManager.save();
-        rebuildDisplayRows();
-    }
-
-    /** ✗ the selected block: just remove its number (→ unused/red). */
-    private void pickExclude() {
-        if (pickSelectedId == null) return;
-        ConfigManager.get().pickNumbers.remove(pickSelectedId);
-        ConfigManager.save();
-        rebuildDisplayRows();
-    }
-
-    private void ensureEndpoints(List<SourceBlock> nonEx) {
-        boolean startOk = previewStartId != null && nonEx.stream().anyMatch(s -> s.id().equals(previewStartId));
-        boolean endOk = previewEndId != null && nonEx.stream().anyMatch(s -> s.id().equals(previewEndId));
-        if (startOk && endOk) return;
-        SourceBlock lightest = null, darkest = null;
-        double lightestL = -1, darkestL = Double.MAX_VALUE;
-        for (SourceBlock sb : nonEx) {
-            double l = BlockTextures.baseLuminance(sb.block());
-            if (lightest == null || l > lightestL) { lightest = sb; lightestL = l; }
-            if (darkest == null || l < darkestL) { darkest = sb; darkestL = l; }
-        }
-        if (!startOk) previewStartId = lightest != null ? lightest.id() : null;
-        if (!endOk) previewEndId = darkest != null ? darkest.id() : null;
-    }
-
-    private void logPreview() {
-        if (!ConfigManager.get().debug) return;
-        GradientConfig cfg = ConfigManager.get();
-        Gradient.LOG.info("[preview] start={} end={} steps={} curve={} chaos={} | white={}",
-                previewStartId, previewEndId, whiteOrder.size(), cfg.curve, Math.round(cfg.chaos * 100) / 100.0, whiteOrder);
-    }
-
     // ---- Palette tab (list view) ----------------------------------------------------------------
 
     private void initPaletteTab() {
@@ -774,7 +299,7 @@ public class GradientScreen extends Screen {
         paletteUseBtn = addRenderableWidget(Button.builder(Component.literal("Use"), b -> {
             String id = paletteList.selectedId();
             if (!id.isEmpty()) {
-                co.fax.wang.palette.PaletteStore.setActive(id);
+                PaletteStore.setActive(id);
                 paletteList.setActiveId(id);
                 paletteList.expand(id); // using a palette auto-expands its summary
                 paletteSelectedId = id;
@@ -782,7 +307,7 @@ public class GradientScreen extends Screen {
             }
         }).bounds(cx + bw + 4, 30, bw, 20).build());
         paletteEditBtn = addRenderableWidget(Button.builder(Component.literal("Edit"), b -> {
-            co.fax.wang.palette.Palette p = co.fax.wang.palette.PaletteStore.byId(paletteList.selectedId());
+            Palette p = PaletteStore.byId(paletteList.selectedId());
             if (p != null) openEditor(p);
         }).bounds(cx + 2 * (bw + 4), 30, bw, 20).build());
         paletteDeleteBtn = addRenderableWidget(Button.builder(Component.literal("Delete"), b -> {
@@ -791,22 +316,22 @@ public class GradientScreen extends Screen {
 
         paletteList = new PaletteListPanel(this.font);
         paletteList.setBounds(cx, 56, w, this.height - 56 - 34);
-        paletteList.setActiveId(co.fax.wang.palette.PaletteStore.activeId());
+        paletteList.setActiveId(PaletteStore.activeId());
         paletteList.select(paletteSelectedId);
         if (!paletteExpandId.isEmpty()) paletteList.expand(paletteExpandId);
         rebuildPaletteEntries();
     }
 
-    private void openEditor(co.fax.wang.palette.Palette palette) {
+    private void openEditor(Palette palette) {
         if (this.minecraft != null) this.minecraft.setScreenAndShow(new PaletteEditScreen(palette));
     }
 
     private void rebuildPaletteEntries() {
         List<PaletteListPanel.Entry> entries = new ArrayList<>();
-        for (co.fax.wang.palette.Palette p : co.fax.wang.palette.PaletteStore.all()) {
+        for (Palette p : PaletteStore.all()) {
             List<ItemStack> sprites = new ArrayList<>();
             List<Boolean> auto = new ArrayList<>();
-            for (co.fax.wang.palette.PaletteSegment s : p.segments) {
+            for (PaletteSegment s : p.segments) {
                 auto.add(s.isAutomatic());
                 sprites.add(stackOfId(s.block));
             }
@@ -849,12 +374,12 @@ public class GradientScreen extends Screen {
 
     private void renderPaletteTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         boolean hasSelection = paletteList != null && !paletteList.selectedId().isEmpty()
-                && co.fax.wang.palette.PaletteStore.byId(paletteList.selectedId()) != null;
+                && PaletteStore.byId(paletteList.selectedId()) != null;
         if (paletteUseBtn != null) paletteUseBtn.active = hasSelection;
         if (paletteEditBtn != null) paletteEditBtn.active = hasSelection;
         if (paletteDeleteBtn != null) paletteDeleteBtn.active = hasSelection;
         if (paletteList != null) paletteList.render(g, mouseX, mouseY);
-        if (co.fax.wang.palette.PaletteStore.all().isEmpty()) {
+        if (PaletteStore.all().isEmpty()) {
             g.text(this.font, "No palettes yet — press + New to create one",
                     contentX() + 4, 64, YELLOW);
         }
@@ -879,7 +404,7 @@ public class GradientScreen extends Screen {
     }
 
     private void renderDeleteConfirm(GuiGraphicsExtractor g, int mouseX, int mouseY) {
-        co.fax.wang.palette.Palette p = co.fax.wang.palette.PaletteStore.byId(confirmDeleteId);
+        Palette p = PaletteStore.byId(confirmDeleteId);
         String name = p == null ? "?" : p.name;
         g.nextStratum();
         g.fill(0, 0, this.width, this.height, 0xB0000000);
@@ -904,8 +429,8 @@ public class GradientScreen extends Screen {
     /** Modal click handling; swallows everything while the confirmation is up. */
     private boolean handleDeleteConfirmClick(double mx, double my, int button) {
         if (button == 0 && inRect(confirmBtn(true), mx, my)) {
-            co.fax.wang.palette.PaletteStore.delete(confirmDeleteId);
-            paletteList.setActiveId(co.fax.wang.palette.PaletteStore.activeId());
+            PaletteStore.delete(confirmDeleteId);
+            paletteList.setActiveId(PaletteStore.activeId());
             if (paletteList.selectedId().equals(confirmDeleteId)) {
                 paletteList.select("");
                 paletteSelectedId = "";
@@ -1088,9 +613,9 @@ public class GradientScreen extends Screen {
                 () -> Component.literal("Missing blocks: " + ConfigManager.get().missingBlockPolicy.label()),
                 () -> {
                     GradientConfig c = ConfigManager.get();
-                    c.missingBlockPolicy = c.missingBlockPolicy == co.fax.wang.palette.MissingBlockPolicy.DONT_PAINT
-                            ? co.fax.wang.palette.MissingBlockPolicy.SKIP_MISSING
-                            : co.fax.wang.palette.MissingBlockPolicy.DONT_PAINT;
+                    c.missingBlockPolicy = c.missingBlockPolicy == MissingBlockPolicy.DONT_PAINT
+                            ? MissingBlockPolicy.SKIP_MISSING
+                            : MissingBlockPolicy.DONT_PAINT;
                 });
 
         // Left column: the paint-tool assign button (overlay shows it's armed) + filter + list.
@@ -1260,16 +785,6 @@ public class GradientScreen extends Screen {
         if (tab == Tab.PALETTE && confirmDeleteId != null) {
             return handleDeleteConfirmClick(event.x(), event.y(), event.button());
         }
-        if (previewExpanded && (tab == Tab.GRADIENT || tab == Tab.NOISE)) {
-            if (event.button() == 0) {
-                if (inCloseX(event.x(), event.y())) {
-                    previewExpanded = false;
-                } else if (tab == Tab.NOISE && inNoisePreview(event.x(), event.y())) {
-                    dragFace = faceAt(event.x(), event.y());
-                }
-            }
-            return true; // the settings underneath are covered by the backdrop — swallow everything
-        }
         if (event.y() < BAR_H && event.button() == 0) {
             int[] xs = tabXs();
             for (int i = 0; i < BAR_ORDER.length; i++) {
@@ -1280,67 +795,15 @@ public class GradientScreen extends Screen {
             }
         }
         if (super.mouseClicked(event, doubled)) return true;
-        if (threeCol() && event.button() == 0) {
-            int hIdx = handleAt(event.x(), event.y());
-            if (hIdx >= 0) {
-                beginHandleDrag(hIdx);
-                return true;
-            }
-        }
-        if (event.button() == 0 && inNoisePreview(event.x(), event.y())) {
-            dragFace = faceAt(event.x(), event.y()); // lock the drag to this face until release
-            return true;
-        }
         if (tab == Tab.HELP && event.button() == 0 && help != null
                 && help.mouseClicked(event.x(), event.y())) {
             return true;
         }
-        if ((tab == Tab.GRADIENT || tab == Tab.NOISE || tab == Tab.SOLID) && picker != null
-                && event.button() >= 0 && event.button() <= 2) {
+        if (tab == Tab.SOLID && picker != null && event.button() >= 0 && event.button() <= 2) {
             String id = picker.rowIdAt(event.x(), event.y());
             if (id == null) return false;
-            if (tab == Tab.SOLID) {
-                boolean dbl = event.button() == 0 && (doubled || isRowDoubleClick(id));
-                return handleSolidRowClick(id, event.button(), dbl);
-            }
-            GradientConfig cfg = ConfigManager.get();
-            // Pick mode: clicking a row selects it AND adjusts its number — left +1, right −1
-            // (reaching 0 removes the number). The +/−/✗ buttons still act on the selection.
-            if (activeMode().isPick()) {
-                pickSelectedId = id;
-                if (event.button() == 0) pickAdjust(1);
-                else if (event.button() == 1) pickAdjust(-1);
-                else rebuildDisplayRows(); // middle: just select
-                return true;
-            }
-            if (event.button() == 2) { // middle: ✓ → neutral, neutral ↔ excluded
-                if (cfg.requiredBlocks.contains(id)) cfg.requiredBlocks.remove(id);
-                else if (!cfg.excludedBlocks.remove(id)) cfg.excludedBlocks.add(id);
-                ConfigManager.save();
-                rebuildDisplayRows();
-                return true;
-            }
             boolean dbl = event.button() == 0 && (doubled || isRowDoubleClick(id));
-            if (dbl && assign == Assign.NONE) {
-                // double: excluded → neutral, ✓ → neutral, neutral → ✓ (must-use)
-                if (cfg.excludedBlocks.contains(id)) cfg.excludedBlocks.remove(id);
-                else if (!cfg.requiredBlocks.remove(id)) cfg.requiredBlocks.add(id);
-                ConfigManager.save();
-                rebuildDisplayRows();
-                return true;
-            }
-            if (event.button() == 0 && assign != Assign.NONE) {
-                lastRowClickId = null; // armed action — don't let a quick follow-up read as a double
-                switch (assign) {
-                    case START -> { previewStartId = id; assign = Assign.NONE; rebuildDisplayRows(); }
-                    case END -> { previewEndId = id; assign = Assign.NONE; rebuildDisplayRows(); }
-                    case REQUIRE -> toggle(cfg.requiredBlocks, cfg.excludedBlocks, id); // sticky
-                    case EXCLUDE -> toggle(cfg.excludedBlocks, cfg.requiredBlocks, id);
-                    default -> { }
-                }
-                return true;
-            }
-            return false;
+            return handleSolidRowClick(id, event.button(), dbl);
         }
         if (tab == Tab.PALETTE && event.button() == 0 && paletteList != null
                 && paletteList.click(event.x(), event.y())) {
@@ -1371,9 +834,7 @@ public class GradientScreen extends Screen {
                 && paletteList.mouseScrolled(mouseX, mouseY, scrollY)) {
             return true;
         }
-        if (previewExpanded && (tab == Tab.GRADIENT || tab == Tab.NOISE)) return true;
-        if ((tab == Tab.GRADIENT || tab == Tab.NOISE || tab == Tab.SOLID)
-                && picker != null && picker.mouseScrolled(mouseX, mouseY, scrollY)) {
+        if (tab == Tab.SOLID && picker != null && picker.mouseScrolled(mouseX, mouseY, scrollY)) {
             return true;
         }
         if (tab == Tab.HELP && help != null && help.mouseScrolled(mouseX, mouseY, scrollY)) {
@@ -1385,34 +846,36 @@ public class GradientScreen extends Screen {
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
     }
 
+    @Override
+    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        if (tab == Tab.FINDER && event.button() == 0) {
+            if (finderList != null && finderList.mouseDragged(event.y())) return true;
+            if (finderField != null && finderField.contains(event.x(), event.y())) {
+                double[] hs = finderField.pick(event.x(), event.y());
+                finderHue = hs[0];
+                finderSat = hs[1];
+                finderRef = FinderRef.COLOR;
+                recenterFinder();
+                return true;
+            }
+        }
+        return super.mouseDragged(event, dragX, dragY);
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        if (confirmDeleteId != null && event.key() == 256) { // Esc dismisses the delete confirm
+            confirmDeleteId = null;
+            return true;
+        }
+        return super.keyPressed(event);
+    }
+
     // ---- labels ---------------------------------------------------------------------------------
 
-    private Component gradientLabel() { return Component.literal("Gradient: " + ConfigManager.get().gradientMode.displayName()); }
     private Component sourceLabel() { return Component.literal("Source: " + ConfigManager.get().source.displayName()); }
-    private Component endpointsLabel() {
-        return Component.literal("From: " + (ConfigManager.get().gradientFromMarkers ? "Markers" : "Block list"));
-    }
-    private String endpointsDescription() {
-        return ConfigManager.get().gradientFromMarkers
-                ? "Ends = the real blocks at the markers"
-                : "Places exactly the preview list";
-    }
     private Component clearMarkersLabel() {
         return Component.literal("Clear Markers (" + (MarkerManager.startMarkers.size() + MarkerManager.endMarkers.size()) + ")");
-    }
-
-    private String modeDescription() {
-        return switch (activeMode()) {
-            case COLOR -> "Average texture colour.";
-            case BRIGHTNESS -> "Average texture brightness.";
-            case TOP_DARK_COLOR -> "Colour of the darkest pixels.";
-            case TOP_DARK -> "Brightness of the darkest pixels.";
-            case TOP_LIGHT_COLOR -> "Colour of the lightest pixels.";
-            case TOP_LIGHT -> "Brightness of the lightest pixels.";
-            case BW_DIFF -> "B&W texture difference from start.";
-            case COLOR_DIFF -> "Colour texture difference from start.";
-            case PICK -> "Left-click to number, right-click to lower.";
-        };
     }
 
     private void cycleButton(int x, int y, int w, java.util.function.Supplier<Component> label, Runnable onCycle) {
@@ -1421,8 +884,6 @@ public class GradientScreen extends Screen {
         }).bounds(x, y, w, 20).build());
     }
 
-    private static int sliderToSteps(double v) { return Math.max(1, Math.min(16, 1 + (int) Math.round(v * 15))); }
-    private static double stepsToSlider(int steps) { return (Math.max(1, Math.min(16, steps)) - 1) / 15.0; }
     private static int sliderToDist(double v) { return Math.max(1, Math.min(128, 1 + (int) Math.round(v * 127))); }
     private static double distToSlider(int d) { return (Math.max(1, Math.min(128, d)) - 1) / 127.0; }
     // Gradient memory: 10 s – 5 min.
@@ -1440,15 +901,10 @@ public class GradientScreen extends Screen {
         super.extractRenderState(g, mouseX, mouseY, partialTick);
         renderTitleBar(g);
         if (tab == Tab.PALETTE) renderPaletteTab(g, mouseX, mouseY);
-        else if (tab == Tab.GRADIENT) renderGradientTab(g, mouseX, mouseY);
-        else if (tab == Tab.NOISE) renderNoiseTab(g, mouseX, mouseY);
         else if (tab == Tab.SOLID) renderSolidTab(g, mouseX, mouseY);
         else if (tab == Tab.FINDER) renderFinderTab(g, mouseX, mouseY);
         else if (tab == Tab.HELP) { if (help != null) help.render(g, mouseX, mouseY); }
         else renderSettingsTab(g, mouseX, mouseY);
-        if (previewExpanded && (tab == Tab.GRADIENT || tab == Tab.NOISE)) {
-            renderExpandedOverlay(g, mouseX, mouseY);
-        }
     }
 
     private void renderTitleBar(GuiGraphicsExtractor g) {
@@ -1463,553 +919,13 @@ public class GradientScreen extends Screen {
         }
     }
 
-    /** Darken the active assign button (drawn over the vanilla button) to show it's toggled on. */
-    private void renderAssignOverlay(GuiGraphicsExtractor g) {
-        if (assign == Assign.NONE || activeMode().isPick()) return;
-        g.fill(assignBtnX(), PICK_BTN_Y, assignBtnX() + assignBtnW(), PICK_BTN_Y + 20, PRESSED_OVERLAY);
-    }
-
-    /** Yellow key under the block list explaining the picker buttons (or Pick-mode clicks). */
+    /** Yellow key under the block list explaining the Solid picker buttons. */
     private void renderPickerLegend(GuiGraphicsExtractor g) {
         int cx = contentX(), w = leftW();
-        String[] lines;
-        if (tab == Tab.SOLID) {
-            lines = new String[]{"✓ block to place · ✗ exclude", "Dbl-click: ✓ · middle-click: ✗"};
-        } else if (activeMode().isPick()) {
-            lines = new String[]{
-                "Numbers = order · lowest first",
-                "Click selects (») and adds +1",
-                "Right-click −1 · 0 = unused",
-                "+ − adjust selected · ✗ clears"};
-        } else {
-            lines = new String[]{"[S] start block · [E] end block", "✓ must use · ✗ exclude"};
-        }
+        String[] lines = {"✓ block to place · ✗ exclude", "Dbl-click: ✓ · middle-click: ✗"};
         for (int i = 0; i < lines.length; i++) {
             g.text(this.font, this.font.plainSubstrByWidth(lines[i], w), cx, legendY + i * 11, YELLOW);
         }
-    }
-
-    private void renderGradientTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
-        if (picker != null) picker.render(g, mouseX, mouseY);
-        renderAssignOverlay(g);
-        renderPickerLegend(g);
-        int rx = rightX(), rw = rightW();
-        g.text(this.font, this.font.plainSubstrByWidth(modeDescription(), rw), rx, modeDescY, YELLOW);
-        g.text(this.font, this.font.plainSubstrByWidth(endpointsDescription(), rw), rx, endpointsDescY, YELLOW);
-        g.text(this.font, this.font.plainSubstrByWidth("Similar blocks swap within each step", rw), rx, deviationDescY, YELLOW);
-        g.text(this.font, this.font.plainSubstrByWidth("Chance to repeat or skip a step", rw), rx, chaosDescY, YELLOW);
-        g.text(this.font, this.font.plainSubstrByWidth("Chance steps run longer or shorter", rw), rx, stepWobbleDescY, YELLOW);
-        renderCurveStrip(g, mouseX, mouseY);
-        renderGradientPreview(g);
-    }
-
-    private void renderNoiseTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
-        if (picker != null) picker.render(g, mouseX, mouseY);
-        renderAssignOverlay(g);
-        renderPickerLegend(g);
-        int rx = rightX(), rw = rightW();
-        g.text(this.font, this.font.plainSubstrByWidth(modeDescription(), rw), rx, noiseModeDescY, YELLOW);
-        g.text(this.font, this.font.plainSubstrByWidth("Similar blocks swap within each step", rw), rx, noiseDevDescY, YELLOW);
-        g.text(this.font, this.font.plainSubstrByWidth("Chance to repeat or skip a step", rw), rx, noiseChaosDescY, YELLOW);
-        renderCurveStrip(g, mouseX, mouseY);
-        renderNoisePreview(g);
-    }
-
-    // GUI block sprites are a 30° dimetric render with a 10px block edge: one block over in +X is
-    // (+7.07, +3.54) px on screen, +Z is (−7.07, +3.54), and one block up is (0, −8.66). Drawing
-    // sprites at exactly these offsets tiles them into one solid composite cube.
-    private static final float ISO_X = 7.0711f;   // half the projected block width
-    private static final float ISO_DOWN = 3.5355f; // screen drop per horizontal step
-    private static final float ISO_UP = 8.6603f;  // screen rise per vertical step
-
-    /** Anchor world coords of the preview cube: the player's feet plus the pan offsets. */
-    private int[] noiseAnchor() {
-        BlockPos feet = this.minecraft != null && this.minecraft.player != null
-                ? this.minecraft.player.blockPosition() : BlockPos.ZERO;
-        return new int[]{feet.getX() + (int) Math.round(previewOffX),
-                feet.getY() + (int) Math.round(previewOffY),
-                feet.getZ() + (int) Math.round(previewOffZ)};
-    }
-
-    /**
-     * The noise field as a packed isometric cube of world blocks, anchored at the player's feet and
-     * extending East (+X, the right face), South (+Z, the left face) and up (top face). Each visible
-     * block samples the noise at its real world coordinate exactly as placement does
-     * ({@link NoisePlacer#slotForCell}: integer coords, same seed and scales, no curve) — so the
-     * preview is literally what painting that region would produce (before chaos/variation swaps).
-     */
-    private void renderNoisePreview(GuiGraphicsExtractor g) {
-        int rx = rightX(), rw = rightW();
-        g.text(this.font, "Preview:", rx, noisePreviewY, GREY);
-        if (previewExpanded) return; // drawn by the overlay instead
-        int gridY = noisePreviewY + 12;
-        if (orderedBlocks.isEmpty()) {
-            g.text(this.font, this.font.plainSubstrByWidth("Select blocks to preview", rw), rx, gridY, YELLOW);
-            return;
-        }
-        float[] l = noiseCubeLayout(false);
-        drawNoiseCube(g, l);
-        int[] a = noiseAnchor();
-        int hintY = (int) (l[2] + l[3] * (((int) l[0] - 1) * (2 * ISO_DOWN + ISO_UP) + 16)) + 3;
-        g.text(this.font, this.font.plainSubstrByWidth(
-                "At " + a[0] + " " + a[1] + " " + a[2] + " · right = East · left = South", rw), rx, hintY, GREY);
-        g.text(this.font, this.font.plainSubstrByWidth("Drag a face to pan along that face", rw),
-                rx, hintY + 11, YELLOW);
-    }
-
-    /** Draw the noise cube for a {@link #noiseCubeLayout} layout {n, tx, ty, scale}. */
-    private void drawNoiseCube(GuiGraphicsExtractor g, float[] l) {
-        int n = (int) l[0];
-        GradientConfig cfg = ConfigManager.get();
-        long seed = noiseSeedLong();
-        int[] a = noiseAnchor();
-        g.pose().pushMatrix();
-        g.pose().translate(l[1], l[2]);
-        g.pose().scale(l[3], l[3]);
-        // Painter's order: bottom layer up, back-to-front within each layer.
-        for (int gy = 0; gy < n; gy++) {
-            for (int sum = 0; sum <= 2 * (n - 1); sum++) {
-                for (int gx = Math.max(0, sum - (n - 1)); gx <= Math.min(n - 1, sum); gx++) {
-                    int gz = sum - gx;
-                    if (gx != n - 1 && gz != n - 1 && gy != n - 1) continue; // hidden inside the cube
-                    double v = Noise.sample(cfg.noiseType, a[0] + gx, a[1] + gy, a[2] + gz, seed,
-                            cfg.noiseScaleX, cfg.noiseScaleY, cfg.noiseScaleZ);
-                    int idx = GradientRamp.stepFor(orderedBlocks.size(), v, cfg.noiseCurve, cfg.noiseCurveBounds);
-                    g.pose().pushMatrix();
-                    g.pose().translate((gx - gz + (n - 1)) * ISO_X, (gx + gz) * ISO_DOWN + (n - 1 - gy) * ISO_UP);
-                    g.item(orderedBlocks.get(idx).stack(), 0, 0);
-                    g.pose().popMatrix();
-                }
-            }
-        }
-        g.pose().popMatrix();
-    }
-
-    /**
-     * Noise cube layout {n, tx, ty, scale}: (tx,ty) is the on-screen top-left of the cube's bounding
-     * box. Collapsed sits in the settings column at 1×; expanded is centred at 2× over the backdrop.
-     */
-    private float[] noiseCubeLayout(boolean expanded) {
-        if (expanded) {
-            float s = 2f;
-            float availW = this.width - 60, availH = this.height - 70;
-            int n = 1 + (int) Math.min((availW / s - 16) / (2 * ISO_X), (availH / s - 16) / (2 * ISO_DOWN + ISO_UP));
-            n = Math.max(2, Math.min(12, n));
-            float w = s * (2 * (n - 1) * ISO_X + 16), h = s * ((n - 1) * (2 * ISO_DOWN + ISO_UP) + 16);
-            return new float[]{n, (this.width - w) / 2f, (this.height - h) / 2f, s};
-        }
-        int rw = rightW();
-        int gridY = noisePreviewY + 12;
-        int availH = (this.height - 30 - 24) - gridY; // room for the two hint lines underneath
-        int n = 1 + (int) Math.min((rw - 16) / (2 * ISO_X), (availH - 16) / (2 * ISO_DOWN + ISO_UP));
-        n = Math.max(2, Math.min(10, n));
-        float w = 2 * (n - 1) * ISO_X + 16;
-        return new float[]{n, rightX() + (rw - w) / 2f, gridY, 1f};
-    }
-
-    /**
-     * Which composite-cube face the point is over, by inverting the iso projection relative to the
-     * cube's top vertex: u,v are the point's world X/Z if it lay in the top-face plane — inside
-     * [0,n]² means the top face; otherwise the sign of the horizontal offset from the front vertical
-     * edge picks the East (right) or South (left) face. Off-cube points get the nearest face.
-     */
-    private CubeFace faceAt(double mx, double my) {
-        float[] l = noiseCubeLayout(previewExpanded);
-        float n = l[0];
-        double dx = (mx - l[1]) / l[3] - ((n - 1) * ISO_X + 8); // top vertex: sprite (0,n−1,0) top-centre
-        double dy = (my - l[2]) / l[3];
-        double u = (dx / ISO_X + dy / ISO_DOWN) / 2, v = (dy / ISO_DOWN - dx / ISO_X) / 2;
-        if (u >= 0 && u <= n && v >= 0 && v <= n) return CubeFace.TOP;
-        return dx >= 0 ? CubeFace.RIGHT : CubeFace.LEFT;
-    }
-
-    // ---- curve strip (centre column) ------------------------------------------------------------
-
-    private CurveFunction activeCurve() {
-        GradientConfig c = ConfigManager.get();
-        return tab == Tab.NOISE ? c.noiseCurve : c.curve;
-    }
-    private List<Double> activeCurveBounds() {
-        GradientConfig c = ConfigManager.get();
-        return tab == Tab.NOISE ? c.noiseCurveBounds : c.curveBounds;
-    }
-    private void setActiveCurve(CurveFunction curve) {
-        GradientConfig c = ConfigManager.get();
-        if (tab == Tab.NOISE) c.noiseCurve = curve; else c.curve = curve;
-    }
-
-    private int stripX() { return midX() + 8; }
-    private int stripW() { return MID_W - 16; }
-    private int stripY() { return 54; }
-    private int stripH() { return Math.max(0, this.height - 34 - stripY()); }
-
-    /**
-     * Boundary fractions (size count−1) of the active curve's step distribution — where each step
-     * hands over to the next along the fill. CUSTOM reads the stored handle positions; any other
-     * curve is scanned to find its handovers.
-     */
-    private double[] displayBounds(int count) {
-        CurveFunction curve = activeCurve();
-        List<Double> custom = activeCurveBounds();
-        double[] b = new double[Math.max(0, count - 1)];
-        if (curve == CurveFunction.CUSTOM && custom.size() == count - 1) {
-            for (int i = 0; i < b.length; i++) b[i] = custom.get(i);
-            return b;
-        }
-        int samples = 400, pos = 0;
-        for (int i = 0; i <= samples && pos < b.length; i++) {
-            double t = i / (double) samples;
-            int idx = GradientRamp.rampIndex(count, curve.apply(t));
-            while (pos < idx && pos < b.length) b[pos++] = t;
-        }
-        while (pos < b.length) b[pos++] = 1.0;
-        return b;
-    }
-
-    /** Pixel y of each strip segment edge, size count+1 (first = strip top, last = strip bottom). */
-    private int[] stripEdges(int count) {
-        double[] b = displayBounds(count);
-        int[] edges = new int[count + 1];
-        edges[0] = stripY();
-        edges[count] = stripY() + stripH();
-        for (int k = 0; k < count - 1; k++) edges[k + 1] = stripY() + (int) Math.round(b[k] * stripH());
-        return edges;
-    }
-
-    /** Handle hit test: boundary index at (mx,my), or −1. Handles alternate left/right. */
-    private int handleAt(double mx, double my) {
-        int count = orderedBlocks.size();
-        if (count < 2 || stripH() < 40) return -1;
-        int[] edges = stripEdges(count);
-        for (int k = 1; k < count; k++) {
-            int hx = k % 2 == 1 ? stripX() - 8 : stripX() + stripW() + 1;
-            if (mx >= hx - 2 && mx <= hx + 9 && my >= edges[k] - 6 && my <= edges[k] + 6) return k - 1;
-        }
-        return -1;
-    }
-
-    /** Start dragging a handle: seed the custom bounds from the current curve, switch it to "C". */
-    private void beginHandleDrag(int idx) {
-        int count = orderedBlocks.size();
-        List<Double> bounds = activeCurveBounds();
-        if (activeCurve() != CurveFunction.CUSTOM || bounds.size() != count - 1) {
-            double[] cur = displayBounds(count);
-            bounds.clear();
-            for (double v : cur) bounds.add(v);
-            setActiveCurve(CurveFunction.CUSTOM);
-        }
-        dragHandle = idx;
-        cylCache = null;
-    }
-
-    /**
-     * The centre column: the curve's shape drawn over its button (a "C" when CUSTOM), then the
-     * distribution strip — one segment per step, its height the step's share of the fill, its
-     * background the step's sprite iso-tiled and clipped. Drag a boundary handle to reshape.
-     */
-    private void renderCurveStrip(GuiGraphicsExtractor g, int mouseX, int mouseY) {
-        renderCurveButtonIcon(g);
-        int count = orderedBlocks.size();
-        int sx = stripX(), sw = stripW(), sh = stripH();
-        if (count == 0 || sh < 40) return;
-        int[] edges = stripEdges(count);
-        for (int k = 0; k < count; k++) {
-            int top = edges[k], bot = edges[k + 1];
-            if (bot <= top) continue;
-            SourceBlock sb = orderedBlocks.get(k);
-            int avg = BlockTextures.gradientValue(sb.block(), sb.block(), GradientMode.COLOR, 1.0);
-            g.enableScissor(sx, top, sx + sw, bot);
-            g.fill(sx, top, sx + sw, bot, 0xFF000000 | (avg & 0xFFFFFF));
-            for (int row = 0; top - 16 + row * ISO_UP < bot; row++) {
-                float y = top - 16 + row * ISO_UP;
-                for (int col = 0; col * 2 * ISO_X < sw + 16; col++) {
-                    g.pose().pushMatrix();
-                    g.pose().translate(sx - 16 + col * 2 * ISO_X + (row % 2) * ISO_X, y);
-                    g.item(sb.stack(), 0, 0);
-                    g.pose().popMatrix();
-                }
-            }
-            g.disableScissor();
-        }
-        for (int k = 1; k < count; k++) {
-            int yb = edges[k];
-            g.fill(sx, yb - 1, sx + sw, yb + 1, 0xFF000000);
-            int hx = k % 2 == 1 ? sx - 8 : sx + sw + 1;
-            boolean hot = dragHandle == k - 1
-                    || (mouseX >= hx - 2 && mouseX <= hx + 9 && mouseY >= yb - 6 && mouseY <= yb + 6);
-            g.fill(hx, yb - 5, hx + 7, yb + 5, 0xFF000000);
-            g.fill(hx + 1, yb - 4, hx + 6, yb + 4, hot ? 0xFFFFE34D : 0xFFE0E0E0);
-        }
-    }
-
-    /** The curve drawn as a small plot on the centre-column button; CUSTOM shows a "C" instead. */
-    private void renderCurveButtonIcon(GuiGraphicsExtractor g) {
-        int bx = midX(), by = 30;
-        CurveFunction curve = activeCurve();
-        if (curve == CurveFunction.CUSTOM) {
-            g.text(this.font, "C", bx + MID_W / 2 - this.font.width("C") / 2, by + 6, WHITE);
-            return;
-        }
-        int w = MID_W - 12, h = 12, x0 = bx + 6, y0 = by + 16;
-        for (int i = 0; i < w; i++) {
-            double v = curve.apply(i / (double) (w - 1));
-            int py = y0 - (int) Math.round(v * h);
-            g.fill(x0 + i, py - 1, x0 + i + 1, py + 1, 0xFFFFFFFF);
-        }
-    }
-
-    // ---- gradient cylinder preview --------------------------------------------------------------
-
-    /**
-     * The gradient as a hollow open-topped cylinder: the top rim is the start of the gradient, the
-     * bottom the end, and every ring cell is its own vertical run through the same choice pipeline
-     * as placement ({@link GradientChoice}): Curve, then Chaos nudges, per-column Step-length wobble
-     * boundaries, and a random pick within each step's Variation band group.
-     */
-    private void renderGradientPreview(GuiGraphicsExtractor g) {
-        int rx = rightX(), rw = rightW();
-        if (gradPreviewY + 12 >= this.height - 32) return; // no room at all — ⛶ hidden too
-        g.text(this.font, "Preview:", rx, gradPreviewY, GREY);
-        if (previewExpanded) return; // drawn by the overlay instead
-        int gridY = gradPreviewY + 12;
-        if (previewStepGroups.isEmpty()) {
-            g.text(this.font, this.font.plainSubstrByWidth("Select blocks to preview", rw), rx, gridY, YELLOW);
-            return;
-        }
-        int availH = (this.height - 34) - gridY;
-        int d = rw >= 5 * 2 * ISO_X + 16 ? 5 : 3;
-        int h = cylinderRows(d, availH);
-        if (h < 3 && d > 3) { d = 3; h = cylinderRows(d, availH); }
-        if (h < 3) {
-            g.text(this.font, this.font.plainSubstrByWidth("No room — use ⛶ to expand", rw), rx, gridY, YELLOW);
-            return;
-        }
-        h = Math.min(h, Math.max(whiteCount, 8)); // don't stretch a short gradient absurdly tall
-        float w = 2 * (d - 1) * ISO_X + 16;
-        drawCylinder(g, rx + (rw - w) / 2f, gridY, 1f, d, h);
-    }
-
-    /** Rows that fit a d-wide cylinder into {@code availH} pixels (bounding height inverted). */
-    private static int cylinderRows(int d, float availH) {
-        return 1 + (int) ((availH - 16 - (d - 1) * 2 * ISO_DOWN) / ISO_UP);
-    }
-
-    /** Ring cells (x,z) of a d-wide hollow circle, painter-sorted (back to front). */
-    private static int[][] ringCells(int d) {
-        double c = (d - 1) / 2.0, r = (d - 1) / 2.0;
-        List<int[]> cells = new ArrayList<>();
-        for (int x = 0; x < d; x++) {
-            for (int z = 0; z < d; z++) {
-                if (Math.abs(Math.hypot(x - c, z - c) - r) <= 0.5) cells.add(new int[]{x, z});
-            }
-        }
-        cells.sort(java.util.Comparator.comparingInt(a -> a[0] + a[1]));
-        return cells.toArray(new int[0][]);
-    }
-
-    /**
-     * Fill {@link #cylCache} for a d×h cylinder. Fixed-seed random: the preview is stable from frame
-     * to frame and re-rolls only when the settings change (rebuild clears the cache) or it resizes.
-     */
-    private void ensureCylinder(int d, int h) {
-        if (cylCache != null && cylD == d && cylH == h) return;
-        cylD = d;
-        cylH = h;
-        cylCells = ringCells(d);
-        cylCache = new ItemStack[cylCells.length][h];
-        if (previewStepGroups.isEmpty()) return;
-        GradientConfig cfg = ConfigManager.get();
-        Random rnd = new Random(42);
-        int count = previewStepGroups.size();
-        double band = 1.0 / count;
-        List<Double> custom = cfg.curve == CurveFunction.CUSTOM && cfg.curveBounds.size() == count - 1
-                ? cfg.curveBounds : null;
-        for (int i = 0; i < cylCells.length; i++) {
-            // Per-column wobble boundaries, like placement's per-column wobble key.
-            double[] bounds = new double[count - 1];
-            for (int k = 0; k < count - 1; k++) {
-                double off = cfg.stepWobble > 0 && rnd.nextDouble() < cfg.stepWobble
-                        ? (rnd.nextDouble() - 0.5) * band : 0.0;
-                bounds[k] = (custom != null ? custom.get(k) : (k + 1) * band) + off;
-            }
-            for (int j = 0; j < h; j++) {
-                double t = h == 1 ? 0 : (double) j / (h - 1);
-                double tc = cfg.curve.apply(t);
-                if (cfg.chaos > 0 && t > 0 && t < 1 && rnd.nextDouble() < cfg.chaos) {
-                    double stepFrac = count > 1 ? 1.0 / (count - 1) : 0.1;
-                    tc = Math.max(0, Math.min(1, rnd.nextBoolean() ? tc - stepFrac : tc + stepFrac));
-                }
-                int pos = 0;
-                while (pos < bounds.length && tc >= bounds[pos]) pos++;
-                List<ItemStack> group = previewStepGroups.get(pos);
-                cylCache[i][j] = group.get(rnd.nextInt(group.size()));
-            }
-        }
-    }
-
-    /** Draw the cylinder with its bounding box top-left at (tx,ty), sprites scaled by {@code s}. */
-    private void drawCylinder(GuiGraphicsExtractor g, float tx, float ty, float s, int d, int h) {
-        ensureCylinder(d, h);
-        g.pose().pushMatrix();
-        g.pose().translate(tx, ty);
-        g.pose().scale(s, s);
-        for (int gy = 0; gy < h; gy++) {  // bottom layer up
-            int row = h - 1 - gy;          // row 0 = top rim = gradient start
-            for (int i = 0; i < cylCells.length; i++) { // back to front (pre-sorted)
-                ItemStack st = cylCache[i][row];
-                if (st == null) continue;
-                int cx = cylCells[i][0], cz = cylCells[i][1];
-                g.pose().pushMatrix();
-                g.pose().translate((cx - cz + (d - 1)) * ISO_X, (cx + cz) * ISO_DOWN + row * ISO_UP);
-                g.item(st, 0, 0);
-                g.pose().popMatrix();
-            }
-        }
-        g.pose().popMatrix();
-    }
-
-    // ---- expanded preview overlay ---------------------------------------------------------------
-
-    private boolean inCloseX(double mx, double my) {
-        return mx >= this.width - 10 - CLOSE_X_SIZE && mx <= this.width - 10
-                && my >= 10 && my <= 10 + CLOSE_X_SIZE;
-    }
-
-    /** The expanded preview: dark backdrop over the settings, the preview centred and 2×, ✗ closes. */
-    private void renderExpandedOverlay(GuiGraphicsExtractor g, int mouseX, int mouseY) {
-        g.nextStratum();
-        g.fill(0, 0, this.width, this.height, 0xD0000000);
-        if (tab == Tab.GRADIENT) {
-            if (previewStepGroups.isEmpty()) {
-                g.text(this.font, "Select blocks to preview", this.width / 2 - 60, this.height / 2, YELLOW);
-            } else {
-                float s = 2f;
-                float availW = this.width - 60, availH = this.height - 70;
-                int d = 7;
-                while (d > 3 && s * (2 * (d - 1) * ISO_X + 16) > availW) d -= 2;
-                int h = Math.max(3, Math.min(24, cylinderRows(d, availH / s)));
-                h = Math.min(h, Math.max(whiteCount * 2, 12));
-                float w = s * (2 * (d - 1) * ISO_X + 16);
-                float hp = s * ((d - 1) * 2 * ISO_DOWN + (h - 1) * ISO_UP + 16);
-                drawCylinder(g, (this.width - w) / 2f, (this.height - hp) / 2f, s, d, h);
-                g.text(this.font, "Top rim = start · bottom = end",
-                        this.width / 2 - this.font.width("Top rim = start · bottom = end") / 2,
-                        (int) ((this.height + hp) / 2f) + 5, GREY);
-            }
-        } else {
-            if (orderedBlocks.isEmpty()) {
-                g.text(this.font, "Select blocks to preview", this.width / 2 - 60, this.height / 2, YELLOW);
-            } else {
-                float[] l = noiseCubeLayout(true);
-                drawNoiseCube(g, l);
-                int[] a = noiseAnchor();
-                String coords = "At " + a[0] + " " + a[1] + " " + a[2]
-                        + " · right = East · left = South · drag a face to pan";
-                g.text(this.font, coords, this.width / 2 - this.font.width(coords) / 2,
-                        (int) (l[2] + l[3] * (((int) l[0] - 1) * (2 * ISO_DOWN + ISO_UP) + 16)) + 5, GREY);
-            }
-        }
-        // Contrasting close ✗, top-right (Esc works too).
-        boolean hover = inCloseX(mouseX, mouseY);
-        int bx = this.width - 10 - CLOSE_X_SIZE;
-        if (hover) g.fill(bx, 10, bx + CLOSE_X_SIZE, 10 + CLOSE_X_SIZE, 0x30FFFFFF);
-        g.pose().pushMatrix();
-        g.pose().translate(bx + (CLOSE_X_SIZE - 2f * this.font.width("✗")) / 2f,
-                10 + (CLOSE_X_SIZE - 2f * this.font.lineHeight) / 2f);
-        g.pose().scale(2f, 2f);
-        g.text(this.font, "✗", 0, 0, hover ? YELLOW : WHITE);
-        g.pose().popMatrix();
-    }
-
-    private boolean inNoisePreview(double mx, double my) {
-        if (tab != Tab.NOISE) return false;
-        if (previewExpanded) {
-            float[] l = noiseCubeLayout(true);
-            float w = l[3] * (2 * ((int) l[0] - 1) * ISO_X + 16);
-            float h = l[3] * (((int) l[0] - 1) * (2 * ISO_DOWN + ISO_UP) + 16);
-            return mx >= l[1] && mx <= l[1] + w && my >= l[2] && my <= l[2] + h;
-        }
-        int rx = rightX();
-        return mx >= rx && mx <= rx + rightW() && my >= noisePreviewY + 12 && my < this.height - 30;
-    }
-
-    @Override
-    public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
-        if (event.button() == 0 && dragHandle >= 0) {
-            int count = orderedBlocks.size();
-            List<Double> bounds = activeCurveBounds();
-            if (bounds.size() == count - 1 && dragHandle < bounds.size() && stripH() > 0) {
-                double v = (event.y() - stripY()) / (double) stripH();
-                double min = 4.0 / stripH(); // keep every step at least a few px tall
-                double lo = (dragHandle == 0 ? 0 : bounds.get(dragHandle - 1)) + min;
-                double hi = (dragHandle == bounds.size() - 1 ? 1 : bounds.get(dragHandle + 1)) - min;
-                bounds.set(dragHandle, Math.max(lo, Math.min(hi, v)));
-                cylCache = null; // the cylinder re-rolls with the new distribution
-            }
-            return true;
-        }
-        if (event.button() == 0 && dragFace != null) {
-            // Project the mouse delta onto the locked face's world axes (coords follow the mouse:
-            // dragging up a side face shifts the anchor up). The face keeps the lock even when the
-            // pointer leaves it mid-drag; releasing the button clears it.
-            double mx = -dragX, my = -dragY;
-            switch (dragFace) {
-                case TOP -> {
-                    previewOffX += mx / (2 * ISO_X) + my / (2 * ISO_DOWN);
-                    previewOffZ += my / (2 * ISO_DOWN) - mx / (2 * ISO_X);
-                }
-                case RIGHT -> { // East face: Z runs down-left across it, Y runs up
-                    double dz = -mx / ISO_X;
-                    previewOffZ += dz;
-                    previewOffY += (dz * ISO_DOWN - my) / ISO_UP;
-                }
-                case LEFT -> {  // South face: X runs down-right across it, Y runs up
-                    double dxw = mx / ISO_X;
-                    previewOffX += dxw;
-                    previewOffY += (dxw * ISO_DOWN - my) / ISO_UP;
-                }
-            }
-            return true;
-        }
-        if (tab == Tab.FINDER && event.button() == 0) {
-            if (finderList != null && finderList.mouseDragged(event.y())) return true;
-            if (finderField != null && finderField.contains(event.x(), event.y())) {
-                double[] hs = finderField.pick(event.x(), event.y());
-                finderHue = hs[0];
-                finderSat = hs[1];
-                finderRef = FinderRef.COLOR;
-                recenterFinder();
-                return true;
-            }
-        }
-        return super.mouseDragged(event, dragX, dragY);
-    }
-
-    @Override
-    public boolean mouseReleased(MouseButtonEvent event) {
-        if (event.button() == 0 && dragHandle >= 0) {
-            dragHandle = -1;
-            ConfigManager.save();
-            return true;
-        }
-        if (event.button() == 0 && dragFace != null) {
-            dragFace = null;
-            return true;
-        }
-        return super.mouseReleased(event);
-    }
-
-    @Override
-    public boolean keyPressed(KeyEvent event) {
-        if (confirmDeleteId != null && event.key() == 256) { // Esc dismisses the delete confirm
-            confirmDeleteId = null;
-            return true;
-        }
-        if (previewExpanded && event.key() == 256) { // Esc closes the expanded preview first
-            previewExpanded = false;
-            return true;
-        }
-        return super.keyPressed(event);
     }
 
     private void renderSettingsTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {

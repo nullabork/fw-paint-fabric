@@ -1,7 +1,5 @@
 package co.fax.wang.config;
 
-import co.fax.wang.CurveFunction;
-import co.fax.wang.GradientMode;
 import co.fax.wang.GradientSource;
 import co.fax.wang.PaintType;
 import co.fax.wang.PlacementMode;
@@ -85,86 +83,13 @@ public class GradientConfig {
      */
     public int gradientCacheSeconds = 60;
 
-    // ---- gradient settings ----------------------------------------------------------------------
-
-    /** Whether the gradient is measured by colour, brightness, or a texture analysis. */
-    public GradientMode gradientMode = GradientMode.COLOR;
-
-    /** Easing curve applied to gradient progress. */
-    public CurveFunction curve = CurveFunction.LINEAR;
+    // ---- shared block source --------------------------------------------------------------------
 
     /**
-     * Custom-curve step boundaries for the gradient tool: ascending fractions of the fill (one per
-     * internal step boundary, so size = steps − 1), edited by dragging the curve strip's handles.
-     * Used only while {@link #curve} is CUSTOM; ignored (falls back to even steps) when the size
-     * doesn't match the current step count.
+     * Where the Solid tool's candidate blocks come from. (Gradient/noise painting reads the
+     * per-palette source instead — see {@code Palette.source}.)
      */
-    public List<Double> curveBounds = new ArrayList<>();
-
-    /** Where the candidate-block palette is sourced from. */
     public GradientSource source = GradientSource.HOTBAR_AND_INVENTORY;
-
-    /**
-     * Place-time gradient endpoints: true = the real blocks sitting at the markers in the world
-     * ("Markers"); false = exactly the block list's [S]/[E] from the settings screen ("Block list"),
-     * so what's placed matches the preview regardless of what the markers are made of.
-     */
-    public boolean gradientFromMarkers = true;
-
-    /** Dithering amount 0..1: 0 = clean (always the next step), higher = more repeat/skip noise. */
-    public double chaos = 0.0;
-
-    /**
-     * Chance 0..1 that each step's length is randomly wobbled: a boundary between two steps shifts,
-     * so one step runs longer and its neighbour correspondingly shorter. 1 = every step wobbles.
-     */
-    public double stepWobble = 0.0;
-
-    /** How far a block may stray from the gradient and still be used, 0..1 (fraction of full range). */
-    public double deviationBudget = 0.43;
-
-    /** Maximum number of distinct gradient steps (1..16). A cap, not a target. */
-    public int maxSteps = 16;
-
-    /** Fraction of texture pixels (0..1) analysed by the "top %" gradient modes. */
-    public double pixelPercent = 0.5;
-
-    /** Item ids the user has force-excluded from the palette (red). */
-    public List<String> excludedBlocks = new ArrayList<>();
-    /** Item ids the user has marked must-use (green): force-eligible past the deviation budget. */
-    public List<String> requiredBlocks = new ArrayList<>();
-
-    /** The picker's [S]/[E] ordering endpoints (block ids) — define valley→peak for noise placement. */
-    public String orderStartBlock = "";
-    public String orderEndBlock = "";
-
-    /** Manual "Pick" order: block id → assigned number (1+). Lowest number = start, highest = end. */
-    public java.util.Map<String, Integer> pickNumbers = new java.util.HashMap<>();
-
-    // ---- noise fill -----------------------------------------------------------------------------
-
-    /** Seed for noise generation (persisted). Empty = 0. */
-    public String noiseSeed = "";
-    /** Noise function used to drive the fill. */
-    public co.fax.wang.NoiseType noiseType = co.fax.wang.NoiseType.SMOOTH;
-    /** Per-axis feature sizes (blocks) of the noise. */
-    public double noiseScaleX = 12.0;
-    public double noiseScaleY = 12.0;
-    public double noiseScaleZ = 12.0;
-    /** When on, the three axis scales stay locked together (one Scale slider). */
-    public boolean noiseLock = true;
-    /** Block-ordering mode for the noise tool (separate from the gradient tool's). */
-    public GradientMode noiseGradientMode = GradientMode.COLOR;
-    /** Noise-tool band variation: similar blocks swap within a step (like the gradient's slider). */
-    public double noiseDeviation = 0.43;
-    public double noiseChaos = 0.0;
-    public int noiseMaxSteps = 16;
-    public double noisePixelPercent = 0.5;
-    /** Easing curve applied to the noise value before mapping it onto the order (its own, like
-     *  every other noise setting). */
-    public CurveFunction noiseCurve = CurveFunction.LINEAR;
-    /** Custom-curve boundaries for the noise tool (see {@link #curveBounds}). */
-    public List<Double> noiseCurveBounds = new ArrayList<>();
 
     // ---- solid paint ------------------------------------------------------------------------------
 
