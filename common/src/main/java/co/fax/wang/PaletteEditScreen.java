@@ -136,9 +136,11 @@ public class PaletteEditScreen extends Screen {
     private int[][] cylCells;
     private int cylD, cylH;
 
-    // Help popups (the circled-? icons). Clicking an icon shows its help instantly, but the
-    // popup only lives while the mouse stays over the control — moving away dismisses it.
-    private record HelpSpot(int x, int baseY, int w, int h, String text) {}
+    // Help popups. Spots with an icon get the circled-?; clicking it shows the help instantly,
+    // but the popup only lives while the mouse stays over the control — moving away dismisses
+    // it. Texts are suppliers so they always describe the control's CURRENT state.
+    private record HelpSpot(int x, int baseY, int w, int h,
+                            java.util.function.Supplier<String> text, boolean icon) {}
     private final List<HelpSpot> helpSpots = new ArrayList<>();
     private HelpSpot clickedSpot;
     private HelpSpot hoverSpot;
@@ -175,7 +177,7 @@ public class PaletteEditScreen extends Screen {
 
     private int stripX() { return rightX() + HANDLE_W; }
     private int labelX() { return stripX() + STRIP_W + 4; }
-    private int stripYBase() { return COL_TOP + 50; }
+    private int stripYBase() { return COL_TOP + 26; } // one toggle row above the strip
     private int stripY() { return stripYBase() - scroll; }
 
     private int contentHeight() {
@@ -240,26 +242,29 @@ public class PaletteEditScreen extends Screen {
             refreshSegmentDisplay();
         }).bounds(paneX(), COL_TOP, paneW(), 20).build());
         helpSpots.add(new HelpSpot(paneX(), COL_TOP, paneW(), 20,
-                "Where painting draws blocks from — also the pool for Automatic segments"));
+                () -> "Painting draws blocks from " + editing.source.displayName()
+                        + " (also the pool for Automatic segments)", true));
 
-        // Right column: Order + Curve toggles above the strip, left-aligned with the strip
-        // itself (starting at rightX() they'd overlap the Source toggle's help icon).
+        // Right column: Order + Curve icon toggles side by side above the strip, left-aligned
+        // with the strip itself. Their icons render from live state (see renderToggleIcons), so
+        // manual reordering / stop drags show Custom immediately. One shared (?) for the row;
+        // hovering either button describes what it's currently doing.
         int togX = stripX(), togW = STRIP_W + 4 + LABEL_W;
-        orderBtn = addScrolled(Button.builder(orderLabel(), b -> {
-            sortSegments(editing.order.nextSort());
-            b.setMessage(orderLabel());
-        }).bounds(togX, COL_TOP, togW, 20).build());
-        helpSpots.add(new HelpSpot(togX, COL_TOP, togW, 20,
-                "Sorts the strip by colour or brightness, ascending or descending. Drag segments "
-                        + "(or arrow keys) for Custom"));
-        curveBtn = addScrolled(Button.builder(curveLabel(), b -> {
+        int togBw = (togW - 16 - 4) / 2;
+        orderBtn = addScrolled(Button.builder(Component.empty(),
+                b -> sortSegments(editing.order.nextSort()))
+                .bounds(togX, COL_TOP, togBw, 20).build());
+        helpSpots.add(new HelpSpot(togX, COL_TOP, togBw, 20, this::orderStateText, false));
+        curveBtn = addScrolled(Button.builder(Component.empty(), b -> {
             editing.curve = editing.curve.next();
             dirty = true;
             resetPreview();
-            b.setMessage(curveLabel());
-        }).bounds(togX, COL_TOP + 24, togW, 20).build());
-        helpSpots.add(new HelpSpot(togX, COL_TOP + 24, togW, 20,
-                "How fast the gradient progresses. Drag a stop handle for Custom"));
+        }).bounds(togX + togBw + 4, COL_TOP, togBw, 20).build());
+        helpSpots.add(new HelpSpot(togX + togBw + 4, COL_TOP, togBw, 20, this::curveStateText, false));
+        helpSpots.add(new HelpSpot(togX + 2 * togBw + 5, COL_TOP, 0, 20,
+                () -> "Left: sort order — cycles colour/brightness, ascending/descending. "
+                        + "Right: curve — cycles the easing shape. Reordering segments by hand "
+                        + "or dragging a stop turns either Custom (C).", true));
 
         // Left column: the grouped settings.
         int rx = contentX(), rw = SET_W - 14; // room for the (?) icons
@@ -283,9 +288,11 @@ public class PaletteEditScreen extends Screen {
             dirty = true;
             rebuildWidgets(); // the Steps slider shows/hides
         }).bounds(rx, y, rw, 20).build());
-        helpSpots.add(new HelpSpot(rx, y, rw, 20,
-                "Min blocks: shortest run that fits the ratios. Fill space: out to the end "
-                        + "marker or first block. Set steps: a fixed length"));
+        helpSpots.add(new HelpSpot(rx, y, rw, 20, () -> switch (editing.sizing) {
+            case MIN_BLOCKS -> "Min blocks: the shortest run that fits the segment ratios";
+            case FILL_SPACE -> "Fill space: expands out to the end marker or first block";
+            case SET_STEPS -> "Set steps: a fixed length (the Steps slider below)";
+        }, true));
         y += 24;
         if (editing.sizing == SizingMode.SET_STEPS) {
             y = addSlider(rx, y, rw, (editing.steps - 1) / 15.0,
@@ -301,7 +308,11 @@ public class PaletteEditScreen extends Screen {
             dirty = true;
             b.setMessage(Component.literal("Noise: " + editing.noiseType.displayName()));
         }).bounds(rx, y, rw, 20).build());
-        helpSpots.add(new HelpSpot(rx, y, rw, 20, "Only used when noise painting"));
+        helpSpots.add(new HelpSpot(rx, y, rw, 20, () -> switch (editing.noiseType) {
+            case SMOOTH -> "Smooth noise: soft rounded blobs — noise painting only";
+            case PERLIN -> "Perlin noise: natural ridged shapes — noise painting only";
+            case FRACTAL -> "Fractal noise: layered detail — noise painting only";
+        }, true));
         y += 24;
         if (editing.noiseLock) {
             y = addSlider(rx, y, rw, (clampScale(editing.noiseScaleX) - 1) / 14.0,
@@ -335,7 +346,8 @@ public class PaletteEditScreen extends Screen {
             dirty = true;
         });
         addScrolled(seed);
-        helpSpots.add(new HelpSpot(rx, y, rw, 20, "Noise seed — only used when noise painting"));
+        helpSpots.add(new HelpSpot(rx, y, rw, 20,
+                () -> "Noise seed — only used when noise painting", true));
         y += 24;
         settingsBottomBase = y;
 
@@ -349,9 +361,26 @@ public class PaletteEditScreen extends Screen {
 
     private static String pct(double v) { return Math.round(v * 100) + "%"; }
 
-    private Component orderLabel() { return Component.literal("Order: " + editing.order.label()); }
+    private String orderStateText() {
+        return switch (editing.order) {
+            case COLOR_ASC -> "Sorted by colour, ascending";
+            case COLOR_DESC -> "Sorted by colour, descending";
+            case BRIGHTNESS_ASC -> "Sorted by brightness, ascending";
+            case BRIGHTNESS_DESC -> "Sorted by brightness, descending";
+            case CUSTOM -> "Custom order — arranged by hand";
+        };
+    }
 
-    private Component curveLabel() { return Component.literal("Curve: " + editing.curve.displayName()); }
+    private String curveStateText() {
+        return switch (editing.curve) {
+            case LINEAR -> "Linear: even change end to end";
+            case EASE_IN -> "Ease In: holds the start colour longer";
+            case EASE_OUT -> "Ease Out: reaches the end colour sooner";
+            case EASE_IN_OUT -> "Ease In/Out: lingers at both ends";
+            case STEP -> "Step: hard quantised bands";
+            case CUSTOM -> "Custom: exactly the stop positions you dragged";
+        };
+    }
 
     private <T extends AbstractWidget> T addScrolled(T w) {
         scrolledWidgets.add(new ScrolledWidget(w, w.getY()));
@@ -365,7 +394,7 @@ public class PaletteEditScreen extends Screen {
             onChange.accept(v);
             dirty = true;
         }));
-        if (help != null) helpSpots.add(new HelpSpot(x, y, w, 20, help));
+        if (help != null) helpSpots.add(new HelpSpot(x, y, w, 20, () -> help, true));
         return y + 24;
     }
 
@@ -1106,6 +1135,7 @@ public class PaletteEditScreen extends Screen {
         renderPageScrollbar(g);
         renderTitleBar(g);
         updateToggleStates();
+        renderToggleIcons(g);
         renderDisabledHints(g, mouseX, mouseY);
         renderPaneDragChip(g);
         renderHelpPopup(g, mouseX, mouseY);
@@ -1117,6 +1147,97 @@ public class PaletteEditScreen extends Screen {
     private void updateToggleStates() {
         if (orderBtn != null) orderBtn.active = orderEnabled();
         if (curveBtn != null) curveBtn.active = curveEnabled();
+    }
+
+    /** The Order/Curve buttons carry icons drawn from live state, so Custom shows instantly. */
+    private void renderToggleIcons(GuiGraphicsExtractor g) {
+        if (orderBtn != null && orderBtn.visible) drawOrderIcon(g, orderBtn);
+        if (curveBtn != null && curveBtn.visible) drawCurveIcon(g, curveBtn);
+    }
+
+    /** Order: palette (colour) or sun (brightness) + an asc/desc arrow; palette + C for Custom. */
+    private void drawOrderIcon(GuiGraphicsExtractor g, AbstractWidget b) {
+        boolean dim = !b.active;
+        int cx = b.getX() + b.getWidth() / 2, cy = b.getY() + b.getHeight() / 2;
+        PaletteOrder ord = editing.order;
+        boolean sun = ord.byBrightness();
+        int iconX = cx - 10, iconY = cy - 5;
+        if (ord == PaletteOrder.CUSTOM) {
+            drawPaletteIcon(g, iconX, iconY, dim);
+            g.text(this.font, "C", cx + 4, cy - 4, dim ? 0xFF808080 : WHITE);
+            return;
+        }
+        if (sun) drawSunIcon(g, iconX, iconY, dim);
+        else drawPaletteIcon(g, iconX, iconY, dim);
+        drawArrowIcon(g, cx + 5, cy - 4, !ord.descending(), dim);
+    }
+
+    /** Curve: the current easing drawn as a little line; Custom = a pronounced bell + C. */
+    private void drawCurveIcon(GuiGraphicsExtractor g, AbstractWidget b) {
+        boolean dim = !b.active;
+        int color = dim ? 0xFF808080 : WHITE;
+        int w = Math.min(26, b.getWidth() - 12), h = 10;
+        boolean custom = editing.curve == CurveFunction.CUSTOM;
+        int x0 = b.getX() + (b.getWidth() - w - (custom ? 8 : 0)) / 2;
+        int y0 = b.getY() + (b.getHeight() + h) / 2 - 1;
+        for (int i = 0; i < w; i++) {
+            double t = i / (double) (w - 1);
+            double v = custom
+                    ? Math.exp(-Math.pow(t - 0.5, 2) / (2 * 0.15 * 0.15)) // pronounced bell
+                    : editing.curve.apply(t);
+            int py = y0 - (int) Math.round(v * h);
+            g.fill(x0 + i, py - 1, x0 + i + 1, py + 1, color);
+        }
+        if (custom) g.text(this.font, "C", x0 + w + 3, b.getY() + (b.getHeight() - 8) / 2, color);
+    }
+
+    /** A tiny painter's palette: ring outline, three paint dots, a thumb notch. */
+    private static void drawPaletteIcon(GuiGraphicsExtractor g, int x, int y, boolean dim) {
+        int c = dim ? 0xFF707070 : 0xFFD8D8D8;
+        // Blob outline (a squashed 11×10 ring with a bite at the bottom-right).
+        g.fill(x + 3, y, x + 8, y + 1, c);
+        g.fill(x + 1, y + 1, x + 3, y + 2, c);
+        g.fill(x + 8, y + 1, x + 10, y + 2, c);
+        g.fill(x, y + 2, x + 1, y + 7, c);
+        g.fill(x + 10, y + 2, x + 11, y + 5, c);
+        g.fill(x + 1, y + 7, x + 3, y + 8, c);
+        g.fill(x + 3, y + 8, x + 8, y + 9, c);
+        g.fill(x + 8, y + 7, x + 10, y + 8, c);
+        g.fill(x + 8, y + 5, x + 9, y + 6, c);  // thumb-notch bite
+        // Paint dots.
+        g.fill(x + 3, y + 2, x + 4, y + 3, dim ? 0xFF804040 : 0xFFFF5555);
+        g.fill(x + 6, y + 2, x + 7, y + 3, dim ? 0xFF408040 : 0xFF55FF55);
+        g.fill(x + 4, y + 5, x + 5, y + 6, dim ? 0xFF404080 : 0xFF5599FF);
+    }
+
+    /** A tiny sun: 3×3 core + rays. */
+    private static void drawSunIcon(GuiGraphicsExtractor g, int x, int y, boolean dim) {
+        int c = dim ? 0xFF707070 : 0xFFFFE34D;
+        g.fill(x + 4, y + 3, x + 7, y + 6, c);          // core
+        g.fill(x + 5, y, x + 6, y + 2, c);              // N ray
+        g.fill(x + 5, y + 7, x + 6, y + 9, c);          // S
+        g.fill(x, y + 4, x + 2, y + 5, c);              // W
+        g.fill(x + 9, y + 4, x + 11, y + 5, c);         // E
+        g.fill(x + 2, y + 1, x + 3, y + 2, c);          // diagonals
+        g.fill(x + 8, y + 1, x + 9, y + 2, c);
+        g.fill(x + 2, y + 7, x + 3, y + 8, c);
+        g.fill(x + 8, y + 7, x + 9, y + 8, c);
+    }
+
+    /** A small up/down arrow (triangle head + stem). */
+    private static void drawArrowIcon(GuiGraphicsExtractor g, int x, int y, boolean up, boolean dim) {
+        int c = dim ? 0xFF707070 : 0xFFD8D8D8;
+        if (up) {
+            g.fill(x + 2, y, x + 3, y + 1, c);
+            g.fill(x + 1, y + 1, x + 4, y + 2, c);
+            g.fill(x, y + 2, x + 5, y + 3, c);
+            g.fill(x + 2, y + 3, x + 3, y + 8, c);
+        } else {
+            g.fill(x + 2, y, x + 3, y + 5, c);
+            g.fill(x, y + 5, x + 5, y + 6, c);
+            g.fill(x + 1, y + 6, x + 4, y + 7, c);
+            g.fill(x + 2, y + 7, x + 3, y + 8, c);
+        }
     }
 
     /** Short hover hints on the disabled toggles, explaining how to enable them. */
@@ -1692,6 +1813,7 @@ public class PaletteEditScreen extends Screen {
 
     private void renderHelpIcons(GuiGraphicsExtractor g) {
         for (HelpSpot h : helpSpots) {
+            if (!h.icon()) continue; // icon-less spots only contribute hover text
             int y = h.baseY() - scroll;
             if (y < BAR_H + 2 || y + h.h() > viewBottom()) continue;
             drawHelpIcon(g, h.x() + h.w() + 3, y + 5);
@@ -1740,7 +1862,7 @@ public class PaletteEditScreen extends Screen {
         if (clickedSpot != null && over != clickedSpot) clickedSpot = null;
         if (over == null) return;
         if (over != clickedSpot && System.currentTimeMillis() - hoverSince < 1000) return;
-        String text = over.text();
+        String text = over.text().get();
         double px = mouseX, py = mouseY;
         List<String> lines = wrap(text, 150);
         int w = 0;
