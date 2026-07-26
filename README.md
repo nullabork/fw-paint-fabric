@@ -92,6 +92,8 @@ The mod is client-side only; servers need nothing.
   has no matching `v<version>` tag yet creates the tag and publishes a GitHub Release with both
   jars attached (body from `docs/release-notes/v<version>.md`) — so merging a version-bump PR is
   the release action. Manually pushing a `v*` tag still works too.
+- Repo rulesets: `master` is PR-only (no direct pushes, no deletes, no force-pushes — no
+  bypass), and new branches must match `feature/*`, `release/*`, `fix/*`, or `chore/*`.
 
 ## Project layout
 
