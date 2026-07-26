@@ -209,6 +209,12 @@ public final class PaletteChoice {
             while (runEnd + 1 < n && segs.get(runEnd + 1).isAutomatic()) runEnd++;
             Block from = prev != null ? prev : startAnchor;
             Block to = nextStatic[runEnd] != null ? nextStatic[runEnd] : endAnchor;
+            // Nothing to anchor the far side to (no marker / non-air found): synthesize the
+            // OPPOSITE of the near anchor — opposite brightness for a brightness auto (dark
+            // start → lightest source block and vice versa), the furthest colour (Oklab) for a
+            // colour auto — so the run still spans a real gradient instead of collapsing.
+            if (to == null && from != null) to = oppositeAnchor(p.autoPool, from, segs.get(runEnd).auto);
+            if (from == null && to != null) from = oppositeAnchor(p.autoPool, to, segs.get(i).auto);
             int k = runEnd - i + 1;
             for (int j = 0; j < k; j++) {
                 AutoMode mode = segs.get(i + j).auto;
@@ -266,6 +272,37 @@ public final class PaletteChoice {
         int g = (int) Math.round(((a >> 8) & 0xFF) + (((b >> 8) & 0xFF) - ((a >> 8) & 0xFF)) * t);
         int bl = (int) Math.round((a & 0xFF) + ((b & 0xFF) - (a & 0xFF)) * t);
         return (r << 16) | (g << 8) | bl;
+    }
+
+    /**
+     * The pool block "most opposite" an anchor: max/min brightness for brightness autos (whichever
+     * is opposite the anchor's side), or the perceptually furthest colour for colour autos.
+     */
+    private static Block oppositeAnchor(List<SourceEntry> pool, Block anchor, AutoMode mode) {
+        if (pool.isEmpty()) return null;
+        int rgb = colorOf(anchor);
+        SourceEntry best = pool.get(0);
+        if (mode == AutoMode.BRIGHTNESS) {
+            boolean dark = GradientRamp.brightness(rgb) < 128;
+            double bestV = dark ? -Double.MAX_VALUE : Double.MAX_VALUE;
+            for (SourceEntry e : pool) {
+                double v = GradientRamp.brightness(e.rgb());
+                if (dark ? v > bestV : v < bestV) {
+                    bestV = v;
+                    best = e;
+                }
+            }
+        } else {
+            double bestD = -1;
+            for (SourceEntry e : pool) {
+                double d = distance(e.rgb(), rgb, GradientMode.COLOR);
+                if (d > bestD) {
+                    bestD = d;
+                    best = e;
+                }
+            }
+        }
+        return best.block();
     }
 
     private static Block closestTo(List<SourceEntry> pool, int rgb, GradientMode metric) {
@@ -369,21 +406,27 @@ public final class PaletteChoice {
         return slotForStep(player, p, r, idx);
     }
 
-    /** Random available block in the step's band, widening to neighbouring steps when exhausted. */
+    // The block a strict slot lookup most recently failed to find (for the "out of X" error).
+    private static Block lastMissing;
+
+    /** The block placement most recently ran out of ({@link #pickSlot}/{@link #noiseSlot} → -1). */
+    public static Block lastMissingBlock() {
+        return lastMissing;
+    }
+
+    /**
+     * Random available block in the step's own band — STRICT: the ramp is known (it's what the
+     * cache/preview promised), so running out of a block is an error for the caller to surface,
+     * never a silent substitution from a neighbouring step.
+     */
     private static int slotForStep(LocalPlayer player, Prepared p, Ramp r, int idx) {
-        for (int step = 0; step < r.steps(); step++) {
-            for (int sgn = -1; sgn <= 1; sgn += 2) {
-                int i = idx + sgn * step;
-                if (i < 0 || i >= r.steps()) continue;
-                List<Block> band = new ArrayList<>(r.bands.get(i));
-                Collections.shuffle(band, RANDOM);
-                for (Block b : band) {
-                    int slot = findSlot(player, b, p.palette);
-                    if (slot >= 0) return slot;
-                }
-                if (step == 0) break; // idx itself only needs one look
-            }
+        List<Block> band = new ArrayList<>(r.bands.get(idx));
+        Collections.shuffle(band, RANDOM);
+        for (Block b : band) {
+            int slot = findSlot(player, b, p.palette);
+            if (slot >= 0) return slot;
         }
+        lastMissing = r.blocks[idx];
         return -1;
     }
 

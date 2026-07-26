@@ -297,6 +297,9 @@ public final class PaintPlacer {
                 }
                 col.cells = PaletteChoice.columnCells(prepared, col.ramp,
                         scan.boundary() > 0 ? scan.boundary() - first : -1);
+                // A finished gradient stays finished in the cache — but a fresh click on it
+                // should start a NEW gradient on top, not be blocked by the old one's progress.
+                if (col.progress >= col.cells) col.progress = 0;
             }
             columns.add(col);
         }
@@ -578,6 +581,7 @@ public final class PaintPlacer {
                 continue;
             }
             int slot;
+            boolean ranOut = false;
             switch (type) {
                 case SOLID -> {
                     slot = slotOf(player, solidChosen);
@@ -588,11 +592,31 @@ public final class PaintPlacer {
                         return;
                     }
                 }
-                case NOISE -> slot = PaletteChoice.noiseSlot(player, prepared, noiseRamp,
-                        p.cell().getX(), p.cell().getY(), p.cell().getZ());
-                case GRADIENT -> slot = (p.g() == null || p.g().ramp() == null) ? -1
-                        : PaletteChoice.pickSlot(player, prepared, p.g().ramp(), p.g().t(), p.g().wobbleKey());
+                case NOISE -> {
+                    slot = PaletteChoice.noiseSlot(player, prepared, noiseRamp,
+                            p.cell().getX(), p.cell().getY(), p.cell().getZ());
+                    ranOut = slot < 0;
+                }
+                case GRADIENT -> {
+                    if (p.g() == null || p.g().ramp() == null) {
+                        slot = -1;
+                    } else {
+                        slot = PaletteChoice.pickSlot(player, prepared, p.g().ramp(), p.g().t(), p.g().wobbleKey());
+                        ranOut = slot < 0;
+                    }
+                }
                 default -> slot = -1;
+            }
+            if (ranOut) {
+                // The ramp is known (and cached) — running out of one of its blocks stops the
+                // paint with an error rather than quietly substituting something else.
+                Block missing = PaletteChoice.lastMissingBlock();
+                String name = missing == null ? "a block"
+                        : new ItemStack(missing.asItem()).getHoverName().getString();
+                String pal = prepared != null && prepared.palette != null ? prepared.palette.name : "palette";
+                overlay(mc, "'" + pal + "': out of " + name);
+                reset();
+                return;
             }
             if (slot < 0) continue;
             Direction face = Direction.getNearest(
