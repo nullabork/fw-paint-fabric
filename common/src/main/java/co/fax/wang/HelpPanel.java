@@ -366,8 +366,12 @@ public final class HelpPanel {
                     + "hand-shaped distribution.",
                 "At the start of the strip it resolves against the block you started painting "
                     + "on. At the end it scans ahead for an end marker, or the first solid "
-                    + "block, and uses that. In the middle it blends between its neighbouring "
-                    + "segments.",
+                    + "block - and if there is nothing to find, it picks the OPPOSITE of your "
+                    + "start from the inventory (lightest vs darkest for brightness, the "
+                    + "furthest colour for colour), so the ramp still spans. In the middle it "
+                    + "blends between its neighbouring segments.",
+                "Ramps are honest: running out of one of the ramp's blocks mid-paint stops with "
+                    + "an 'out of X' message instead of quietly substituting another block.",
                 "3D fills must know their whole range up front, so a 3D paint needs the strip "
                     + "to end in a real block (Automatic at the start is fine - it reads the "
                     + "clicked block). A palette that's all Automatic with nothing to anchor to "
@@ -404,7 +408,8 @@ public final class HelpPanel {
                     + "restarting.",
                 "The memory clears when you switch or edit the active palette, or after the "
                     + "\"Gradient memory\" idle time in Settings (default 1 minute) - stop for "
-                    + "longer than that and the next click starts a fresh gradient.",
+                    + "longer than that and the next click starts a fresh gradient. Clicking a "
+                    + "FINISHED gradient starts a new one on top rather than doing nothing.",
                 "3D fills remember their centre: click a block that belongs to one and it keeps "
                     + "growing the same sphere from the original middle; click elsewhere to start "
                     + "a new one."))),
