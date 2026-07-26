@@ -46,6 +46,7 @@ public class PaletteEditScreen extends Screen {
 
     private static final int WHITE = 0xFFFFFFFF;
     private static final int GREY = 0xFFA0A0A0;
+    private static final int LIGHT = 0xFFE0E0E0; // headings + interaction hints
     private static final int RED = 0xFFFF5555;
     private static final int YELLOW = 0xFFFFE34D;
     private static final int BAR_H = 22;
@@ -1125,6 +1126,9 @@ public class PaletteEditScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+        // Full-page rgba(0,0,0,0.3) underlay so the UI reads against any world (before super →
+        // beneath the widgets).
+        g.fill(0, 0, this.width, this.height, 0x4D000000);
         super.extractRenderState(g, mouseX, mouseY, partialTick);
         renderPreviewArea(g);
         renderNameRow(g);
@@ -1299,13 +1303,13 @@ public class PaletteEditScreen extends Screen {
         int x = contentX();
         int y1 = COL_TOP - scroll;
         if (y1 >= BAR_H + 2 && y1 <= viewBottom() - 10) {
-            g.text(this.font, "Gradient & noise", x, y1 + 2, GREY);
-            g.fill(x, y1 + 11, x + SET_W - 14, y1 + 12, 0x40FFFFFF);
+            g.text(this.font, "Gradient & noise", x, y1 + 2, LIGHT);
+            g.fill(x, y1 + 11, x + SET_W - 14, y1 + 12, 0x60FFFFFF);
         }
         int y2 = noiseHeadingY - scroll;
         if (y2 >= BAR_H + 2 && y2 <= viewBottom() - 10) {
-            g.text(this.font, "Noise only", x, y2 + 2, GREY);
-            g.fill(x, y2 + 11, x + SET_W - 14, y2 + 12, 0x40FFFFFF);
+            g.text(this.font, "Noise only", x, y2 + 2, LIGHT);
+            g.fill(x, y2 + 11, x + SET_W - 14, y2 + 12, 0x60FFFFFF);
         }
     }
 
@@ -1357,8 +1361,8 @@ public class PaletteEditScreen extends Screen {
             g.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, 0x90FFFFFF);
         }
         int hintY = ly + lh + 4;
-        g.text(this.font, this.font.plainSubstrByWidth("Dbl-click or drag: add to the strip", lw), cx, hintY, GREY);
-        g.text(this.font, this.font.plainSubstrByWidth("Right-click: ban from Automatic", lw), cx, hintY + 11, GREY);
+        g.text(this.font, this.font.plainSubstrByWidth("Dbl-click or drag: add to the strip", lw), cx, hintY, LIGHT);
+        g.text(this.font, this.font.plainSubstrByWidth("Right-click: ban from Automatic", lw), cx, hintY + 11, LIGHT);
     }
 
     /** The floating chip while dragging a block from the pane toward the strip. */
@@ -1490,7 +1494,7 @@ public class PaletteEditScreen extends Screen {
             }
             if (ys[k] < BAR_H + 2 || ys[k] > viewBottom() - 8) continue;
             String name = segNames.get(k);
-            int color = segMissing.get(k) ? RED : (k == selectedSeg ? WHITE : 0xFFD0D0D0);
+            int color = segMissing.get(k) ? RED : (k == selectedSeg ? WHITE : 0xFFE8E8E8);
             int tw = this.font.width(name);
             if (tw <= gw - 2) {
                 g.text(this.font, name, gx, ys[k], color);

@@ -43,6 +43,7 @@ public class GradientScreen extends Screen {
 
     private static final int WHITE = 0xFFFFFFFF;
     private static final int GREY = 0xFFA0A0A0;
+    private static final int LIGHT = 0xFFE0E0E0;  // interaction hints
     private static final int GREEN = 0xFF55FF55;  // solid ✓ block
     private static final int RED = 0xFFFF5555;    // excluded
     private static final int YELLOW = 0xFFFFE34D; // help text
@@ -552,8 +553,8 @@ public class GradientScreen extends Screen {
             g.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, 0x90FFFFFF);
         }
         int hintY = ly + lh + 4;
-        g.text(this.font, this.font.plainSubstrByWidth("Left-click: select · again to clear", w), cx, hintY, GREY);
-        g.text(this.font, this.font.plainSubstrByWidth("Right-click: exclude from closest match", w), cx, hintY + 11, GREY);
+        g.text(this.font, this.font.plainSubstrByWidth("Left-click: select · again to clear", w), cx, hintY, LIGHT);
+        g.text(this.font, this.font.plainSubstrByWidth("Right-click: exclude from closest match", w), cx, hintY + 11, LIGHT);
 
         renderSolidPreview(g);
     }
@@ -1019,6 +1020,9 @@ public class GradientScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
+        // Full-page rgba(0,0,0,0.3) underlay so every tab reads against any world (before super
+        // → beneath the widgets).
+        g.fill(0, 0, this.width, this.height, 0x4D000000);
         super.extractRenderState(g, mouseX, mouseY, partialTick);
         renderTitleBar(g);
         if (tab == Tab.PALETTE) renderPaletteTab(g, mouseX, mouseY);
