@@ -57,10 +57,11 @@ public class GradientScreen extends Screen {
     private static final int COL_GAP = 12;
     private static final int TOOL_LIST_TOP = 78;
 
-    private enum Tab { PALETTE, SOLID, FINDER, SETTINGS, HELP }
+    private enum Tab { PAINT, PALETTE, SOLID, FINDER, SETTINGS, HELP }
 
     /** Title-bar order, left to right (right-aligned as a group). */
-    private static final Tab[] BAR_ORDER = {Tab.SOLID, Tab.PALETTE, Tab.FINDER, Tab.SETTINGS, Tab.HELP};
+    private static final Tab[] BAR_ORDER =
+            {Tab.PAINT, Tab.SOLID, Tab.PALETTE, Tab.FINDER, Tab.SETTINGS, Tab.HELP};
 
     private static final int TOOL_BTN_Y = 30;
     private static final int TOOL_BTN_H = 20;
@@ -130,11 +131,7 @@ public class GradientScreen extends Screen {
         if (ConfigManager.get().paintTool.isEmpty()) {
             tab = Tab.SETTINGS; // no tool assigned yet — land where the tool picker lives
         } else if (followPaintType) {
-            // Open on the tab of whatever is being painted right now.
-            tab = switch (ConfigManager.get().activePaintType) {
-                case SOLID -> Tab.SOLID;
-                case GRADIENT, NOISE -> Tab.PALETTE;
-            };
+            tab = Tab.PAINT; // the hotkey always lands on the quick controls
         }
     }
 
@@ -159,8 +156,8 @@ public class GradientScreen extends Screen {
         String[] out = new String[BAR_ORDER.length];
         for (int i = 0; i < BAR_ORDER.length; i++) {
             out[i] = switch (BAR_ORDER[i]) {
-                case PALETTE -> "Palette"; case SOLID -> "Solid"; case FINDER -> "Finder";
-                case SETTINGS -> "Settings"; case HELP -> "Help";
+                case PAINT -> "Paint"; case PALETTE -> "Palette"; case SOLID -> "Solid";
+                case FINDER -> "Finder"; case SETTINGS -> "Settings"; case HELP -> "Help";
             };
         }
         return out;
@@ -192,44 +189,15 @@ public class GradientScreen extends Screen {
     protected void init() {
         toolRowHeight = this.font.lineHeight + 3;
         helpSpots.clear();
-        if (tab == Tab.PALETTE) initPaletteTab();
+        if (tab == Tab.PAINT) initPaintTab();
+        else if (tab == Tab.PALETTE) initPaletteTab();
         else if (tab == Tab.SOLID) initSolidTab();
         else if (tab == Tab.FINDER) initFinderTab();
         else if (tab == Tab.HELP) initHelpTab();
         else initSettingsTab();
 
-        // Tool tabs get "Use" buttons next to Done: make a paint type the active one (same as
-        // cycling with the paint-type keybind). The Palette tab serves both gradient and noise.
-        if (tab == Tab.SOLID) {
-            addRenderableWidget(Button.builder(useLabel(PaintType.SOLID), b -> {
-                ConfigManager.get().activePaintType = PaintType.SOLID;
-                ConfigManager.save();
-                b.setMessage(useLabel(PaintType.SOLID));
-            }).bounds(this.width / 2 - 102, this.height - 26, 100, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
-                    .bounds(this.width / 2 + 2, this.height - 26, 100, 20).build());
-        } else if (tab == Tab.PALETTE) {
-            addRenderableWidget(Button.builder(useLabel(PaintType.GRADIENT), b -> {
-                ConfigManager.get().activePaintType = PaintType.GRADIENT;
-                ConfigManager.save();
-                rebuildWidgets();
-            }).bounds(this.width / 2 - 154, this.height - 26, 100, 20).build());
-            addRenderableWidget(Button.builder(useLabel(PaintType.NOISE), b -> {
-                ConfigManager.get().activePaintType = PaintType.NOISE;
-                ConfigManager.save();
-                rebuildWidgets();
-            }).bounds(this.width / 2 - 50, this.height - 26, 100, 20).build());
-            addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
-                    .bounds(this.width / 2 + 54, this.height - 26, 100, 20).build());
-        } else {
-            addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
-                    .bounds(this.width / 2 - 50, this.height - 26, 100, 20).build());
-        }
-    }
-
-    private Component useLabel(PaintType t) {
-        return Component.literal(ConfigManager.get().activePaintType == t
-                ? "In use ✓" : "Use " + t.label());
+        addRenderableWidget(Button.builder(Component.literal("Done"), b -> onClose())
+                .bounds(this.width / 2 - 50, this.height - 26, 100, 20).build());
     }
 
     private void setTab(Tab t) { tab = t; rebuildWidgets(); }
@@ -238,8 +206,8 @@ public class GradientScreen extends Screen {
 
     private String tabName(Tab t) {
         return switch (t) {
-            case PALETTE -> "Palette"; case FINDER -> "Finder"; case SOLID -> "Solid";
-            case SETTINGS -> "Settings"; case HELP -> "Help";
+            case PAINT -> "Paint"; case PALETTE -> "Palette"; case FINDER -> "Finder";
+            case SOLID -> "Solid"; case SETTINGS -> "Settings"; case HELP -> "Help";
         };
     }
     private String tabText(Tab t) { return tab == t ? "» " + tabName(t) : tabName(t); }
@@ -281,6 +249,96 @@ public class GradientScreen extends Screen {
             out.add(new SourceBlock(id.toString(), st.copy(), b));
         }
         return out;
+    }
+
+    // ---- Paint tab (quick controls — the hotkey's landing page) ---------------------------------
+
+    private Button paletteCycleBtn;
+
+    /**
+     * A single centred column mirroring the HUD: cycle the paint type, cycle the placement mode,
+     * cycle the active palette (which shows the HUD's condensed sprites + name — or, while Solid
+     * is the paint type, the solid selection state, not cyclable).
+     */
+    private void initPaintTab() {
+        int w = 220;
+        int x = (this.width - w) / 2;
+        int y = 56;
+        cycleButton(x, y, w, () -> Component.literal("Paint: "
+                        + ConfigManager.get().activePaintType.label()),
+                () -> {
+                    GradientConfig c = ConfigManager.get();
+                    c.activePaintType = c.activePaintType.next();
+                });
+        y += 24;
+        cycleButton(x, y, w, () -> Component.literal("Placement: "
+                        + ConfigManager.get().placementMode.shortName()),
+                () -> {
+                    GradientConfig c = ConfigManager.get();
+                    c.placementMode = c.placementMode.next();
+                });
+        y += 24;
+        // The palette row: content is drawn over the button each frame (renderPaintTab).
+        paletteCycleBtn = addRenderableWidget(Button.builder(Component.empty(), b -> {
+            co.fax.wang.palette.PaletteStore.cycleActive(1);
+            paletteList = null; // stale-proof: the Palette tab rebuilds on next visit anyway
+        }).bounds(x, y, w, 20).build());
+    }
+
+    private void renderPaintTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        GradientConfig cfg = ConfigManager.get();
+        String title = "Quick controls — what the tool does right now";
+        g.text(this.font, title, (this.width - this.font.width(title)) / 2, 38, LIGHT);
+        if (paletteCycleBtn == null) return;
+        boolean solid = cfg.activePaintType == PaintType.SOLID;
+        paletteCycleBtn.active = !solid && !PaletteStore.all().isEmpty();
+
+        int bx = paletteCycleBtn.getX(), by = paletteCycleBtn.getY();
+        int bw = paletteCycleBtn.getWidth(), bh = paletteCycleBtn.getHeight();
+        g.enableScissor(bx + 2, by + 2, bx + bw - 2, by + bh - 2);
+        if (solid) {
+            // Mirrors the HUD: solid shows its selection / match state instead of a palette.
+            if (cfg.solidMatch == SolidMatch.SELECTED) {
+                ItemStack st = stackOfId(cfg.solidBlock);
+                String name = st.isEmpty() ? "Solid: no block picked"
+                        : st.getHoverName().getString();
+                int tw = (st.isEmpty() ? 0 : 20) + this.font.width(name);
+                int sx = bx + (bw - tw) / 2;
+                if (!st.isEmpty()) {
+                    g.item(st, sx, by + 2);
+                    sx += 20;
+                }
+                g.text(this.font, name, sx, by + 6, WHITE);
+            } else {
+                String name = "Match: " + cfg.solidMatch.displayName();
+                g.text(this.font, name, bx + (bw - this.font.width(name)) / 2, by + 6, WHITE);
+            }
+        } else {
+            Palette active = PaletteStore.active();
+            if (active == null) {
+                String s = "No palettes — create one on the Palette tab";
+                g.text(this.font, this.font.plainSubstrByWidth(s, bw - 8),
+                        bx + 4, by + 6, GREY);
+            } else {
+                int n = active.segments.size();
+                int spacing = 6;
+                int tw = (n == 0 ? 0 : (n - 1) * spacing + 16 + 8) + this.font.width(active.name);
+                int sx = bx + (bw - tw) / 2;
+                for (PaletteSegment seg : active.segments) {
+                    if (seg.isAutomatic()) {
+                        PaletteListPanel.drawCrosshatch(g, sx, by + 2, 16);
+                    } else {
+                        ItemStack st = stackOfId(seg.block);
+                        if (st.isEmpty()) PaletteListPanel.drawCrosshatch(g, sx, by + 2, 16);
+                        else g.item(st, sx, by + 2);
+                    }
+                    sx += spacing;
+                }
+                if (n > 0) sx += 16 - spacing + 8;
+                g.text(this.font, active.name, sx, by + 6, WHITE);
+            }
+        }
+        g.disableScissor();
     }
 
     // ---- Palette tab (list view) ----------------------------------------------------------------
@@ -1025,7 +1083,8 @@ public class GradientScreen extends Screen {
         g.fill(0, 0, this.width, this.height, 0x4D000000);
         super.extractRenderState(g, mouseX, mouseY, partialTick);
         renderTitleBar(g);
-        if (tab == Tab.PALETTE) renderPaletteTab(g, mouseX, mouseY);
+        if (tab == Tab.PAINT) renderPaintTab(g, mouseX, mouseY);
+        else if (tab == Tab.PALETTE) renderPaletteTab(g, mouseX, mouseY);
         else if (tab == Tab.SOLID) renderSolidTab(g, mouseX, mouseY);
         else if (tab == Tab.FINDER) renderFinderTab(g, mouseX, mouseY);
         else if (tab == Tab.HELP) { if (help != null) help.render(g, mouseX, mouseY); }

@@ -175,11 +175,12 @@ public final class HelpPanel {
                 + "blocks (or the Automatic rows) into the strip, then Save. Gradient and noise "
                 + "painting both use the active palette; press {palette} in-game to cycle "
                 + "through your saved ones.",
-            "3. Hold the tool. Press {paint} (or a Use button) to switch what it paints - "
-                + "Solid, Gradient, or Noise. Press {cycle} to cycle where blocks go: Marker, "
-                + "Marker corners, Marker draw, Single, Face, 3D Fill, Disabled. Any paint type "
-                + "works with any placement mode, with or without markers. The helper text in "
-                + "the top-left always shows both, plus the active palette.",
+            "3. Hold the tool. Press {paint} to switch what it paints - Solid, Gradient, or "
+                + "Noise - and {cycle} to cycle where blocks go: Marker, Marker corners, Marker "
+                + "draw, Single, Face, 3D Fill, Disabled. The Paint tab ({open} lands on it) "
+                + "has buttons for all of these too. Any paint type works with any placement "
+                + "mode, with or without markers. The helper text in the top-left always shows "
+                + "both, plus the active palette.",
             "4. Aim at a block face and right-click to paint (hold to keep going). Markers are "
                 + "optional - they bound what you paint and anchor Automatic segments.",
             "{open} opens and closes this screen. All keys are rebindable under "
