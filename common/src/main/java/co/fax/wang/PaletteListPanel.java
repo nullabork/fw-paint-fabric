@@ -256,19 +256,17 @@ public final class PaletteListPanel {
         g.fill(x + w - 1, y, x + w, y + h, color);
     }
 
-    /** A 45° crosshatch tile — the visual for an Automatic segment (no fixed block sprite). */
+    /** The 16×16 crosshatch texture — the visual for an Automatic segment. */
+    private static final net.minecraft.resources.Identifier CROSSHATCH =
+            net.minecraft.resources.Identifier.fromNamespaceAndPath("gradient", "textures/gui/crosshatch.png");
+
+    /**
+     * A 45° crosshatch tile. A static texture asset drawn with one blit — the old per-pixel fill
+     * version issued ~128 quads per tile and dragged the whole UI down once Automatic segments
+     * covered any real area (strip, previews, HUD).
+     */
     public static void drawCrosshatch(GuiGraphicsExtractor g, int x, int y, int size) {
-        g.fill(x, y, x + size, y + size, 0xFF3A3A3A);
-        for (int d = -size; d < size; d += 4) {
-            for (int i = 0; i < size; i++) {
-                int px = x + i, py = y + i + d;
-                if (py >= y && py < y + size) g.fill(px, py, px + 1, py + 1, 0xFF8A8A8A);
-            }
-        }
-        g.fill(x, y, x + size, y + 1, 0xFF555555);
-        g.fill(x, y + size - 1, x + size, y + size, 0xFF555555);
-        g.fill(x, y, x + 1, y + size, 0xFF555555);
-        g.fill(x + size - 1, y, x + size, y + size, 0xFF555555);
+        g.blit(CROSSHATCH, x, y, size, size, 0f, 0f, 1f, 1f);
     }
 
     /** Both PaletteSegment shapes rendered the same way everywhere: sprite or crosshatch. */
