@@ -87,9 +87,11 @@ public final class HudOverlay {
         int n = active.segments.size();
         int spacing = 6;
         int sx = x;
-        for (co.fax.wang.palette.PaletteSegment seg : active.segments) {
+        int[] tints = PaletteTints.forPalette(active);
+        for (int i = 0; i < n; i++) {
+            co.fax.wang.palette.PaletteSegment seg = active.segments.get(i);
             if (seg.isAutomatic()) {
-                PaletteListPanel.drawCrosshatch(g, sx, y, 16);
+                PaletteListPanel.drawCrosshatch(g, sx, y, 16, tints[i]);
             } else {
                 ItemStack st = GradientScreen.stackOfId(seg.block);
                 if (st.isEmpty()) PaletteListPanel.drawCrosshatch(g, sx, y, 16);

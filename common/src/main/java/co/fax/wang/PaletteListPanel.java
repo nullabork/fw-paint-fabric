@@ -18,9 +18,10 @@ import java.util.List;
  */
 public final class PaletteListPanel {
 
-    /** One palette plus everything precomputed for display (sprites, missing info). */
+    /** One palette plus everything precomputed for display (sprites, tints, missing info). */
     public record Entry(Palette palette, List<ItemStack> sprites, List<Boolean> auto,
-                        List<ItemStack> missingStacks, List<String> missingNames) {
+                        List<Integer> tints, List<ItemStack> missingStacks,
+                        List<String> missingNames) {
         public boolean missing() {
             return !missingNames.isEmpty();
         }
@@ -194,7 +195,7 @@ public final class PaletteListPanel {
             int spacing = n == 1 ? 0 : Math.min(17, (spriteAreaW - 16) / Math.max(1, n - 1));
             for (int i = 0; i < n; i++) {
                 int sx = spritesX + i * spacing;
-                if (e.auto().get(i)) drawCrosshatch(g, sx, ry + (ROW_H - 16) / 2, 16);
+                if (e.auto().get(i)) drawCrosshatch(g, sx, ry + (ROW_H - 16) / 2, 16, e.tints().get(i));
                 else g.item(e.sprites().get(i), sx, ry + (ROW_H - 16) / 2);
             }
         }

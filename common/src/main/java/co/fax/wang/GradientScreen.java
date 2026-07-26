@@ -324,9 +324,11 @@ public class GradientScreen extends Screen {
                 int spacing = 6;
                 int tw = (n == 0 ? 0 : (n - 1) * spacing + 16 + 8) + this.font.width(active.name);
                 int sx = bx + (bw - tw) / 2;
-                for (PaletteSegment seg : active.segments) {
+                int[] tints = PaletteTints.forPalette(active);
+                for (int i = 0; i < n; i++) {
+                    PaletteSegment seg = active.segments.get(i);
                     if (seg.isAutomatic()) {
-                        PaletteListPanel.drawCrosshatch(g, sx, by + 2, 16);
+                        PaletteListPanel.drawCrosshatch(g, sx, by + 2, 16, tints[i]);
                     } else {
                         ItemStack st = stackOfId(seg.block);
                         if (st.isEmpty()) PaletteListPanel.drawCrosshatch(g, sx, by + 2, 16);
@@ -383,9 +385,13 @@ public class GradientScreen extends Screen {
         for (Palette p : PaletteStore.all()) {
             List<ItemStack> sprites = new ArrayList<>();
             List<Boolean> auto = new ArrayList<>();
-            for (PaletteSegment s : p.segments) {
+            List<Integer> tints = new ArrayList<>();
+            int[] segTints = PaletteTints.forPalette(p);
+            for (int i = 0; i < p.segments.size(); i++) {
+                PaletteSegment s = p.segments.get(i);
                 auto.add(s.isAutomatic());
                 sprites.add(stackOfId(s.block));
+                tints.add(segTints[i]);
             }
             List<String> missing = p.missingBlocks(availableIds(p.source));
             List<ItemStack> mStacks = new ArrayList<>();
@@ -395,7 +401,7 @@ public class GradientScreen extends Screen {
                 mStacks.add(st);
                 mNames.add(st.isEmpty() ? id : st.getHoverName().getString());
             }
-            entries.add(new PaletteListPanel.Entry(p, sprites, auto, mStacks, mNames));
+            entries.add(new PaletteListPanel.Entry(p, sprites, auto, tints, mStacks, mNames));
         }
         paletteList.setEntries(entries);
     }

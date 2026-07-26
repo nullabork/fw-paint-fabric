@@ -185,7 +185,7 @@ public class PaletteEditScreen extends Screen {
 
     private int contentHeight() {
         int paneBottom = COL_TOP + 24 + LIST_H + 26;
-        int stripBottom = stripYBase() + STRIP_H + 6;
+        int stripBottom = stripYBase() + STRIP_H + 34; // room for the adjacent-autos hint
         return Math.max(Math.max(paneBottom, stripBottom), settingsBottomBase) + 8;
     }
 
@@ -486,80 +486,10 @@ public class PaletteEditScreen extends Screen {
         resetPreview();
     }
 
-    /**
-     * Representative colours for Automatic segments — display only, nothing to do with what
-     * placement resolves; they just make autos legible in the strip and previews. Memoized here
-     * (recomputed only when segments change, never per frame). Autos between static blocks lerp
-     * between their neighbours' colours; an all-Automatic strip gets a position-stable rainbow
-     * (the colours stay in strip order even when segments are rearranged).
-     */
+    /** Memoize the shared representative Automatic tints (see {@link PaletteTints}). */
     private void computeSegTints() {
         segTints.clear();
-        int n = editing.segments.size();
-        int[] out = new int[n];
-        int[] staticColor = new int[n];
-        boolean anyStatic = false;
-        for (int i = 0; i < n; i++) {
-            PaletteSegment s = editing.segments.get(i);
-            if (!s.isAutomatic()) {
-                anyStatic = true;
-                Block b = Gradient.blockOfItemId(s.block);
-                staticColor[i] = b == null ? 0x808080
-                        : BlockTextures.gradientValue(b, null, GradientMode.COLOR, 0.5);
-            }
-        }
-        if (!anyStatic) {
-            for (int i = 0; i < n; i++) {
-                double hue = n <= 1 ? 0 : 300.0 * i / (n - 1); // rainbow (degrees), stable by position
-                out[i] = ColorOrder.hsvToRgb(hue, 0.65, 0.95);
-            }
-        } else {
-            // The next static colour strictly after each index (mirrors placement's anchors).
-            int[] nextC = new int[n];
-            boolean[] hasNext = new boolean[n];
-            int ahead = 0;
-            boolean has = false;
-            for (int i = n - 1; i >= 0; i--) {
-                hasNext[i] = has;
-                nextC[i] = ahead;
-                if (!editing.segments.get(i).isAutomatic()) {
-                    ahead = staticColor[i];
-                    has = true;
-                }
-            }
-            int prevC = 0;
-            boolean hasPrev = false;
-            int i = 0;
-            while (i < n) {
-                if (!editing.segments.get(i).isAutomatic()) {
-                    prevC = staticColor[i];
-                    hasPrev = true;
-                    i++;
-                    continue;
-                }
-                int runEnd = i;
-                while (runEnd + 1 < n && editing.segments.get(runEnd + 1).isAutomatic()) runEnd++;
-                int from = hasPrev ? prevC : (hasNext[runEnd] ? nextC[runEnd] : 0x808080);
-                int to = hasNext[runEnd] ? nextC[runEnd] : (hasPrev ? prevC : 0x808080);
-                int k = runEnd - i + 1;
-                for (int j = 0; j < k; j++) {
-                    out[i + j] = lerpRgb(from, to, (j + 1) / (double) (k + 1));
-                }
-                prevC = out[runEnd];
-                hasPrev = true;
-                i = runEnd + 1;
-            }
-        }
-        for (int i = 0; i < n; i++) {
-            segTints.add(editing.segments.get(i).isAutomatic() ? 0xFF000000 | (out[i] & 0xFFFFFF) : 0);
-        }
-    }
-
-    private static int lerpRgb(int a, int b, double t) {
-        int r = (int) Math.round(((a >> 16) & 0xFF) + (((b >> 16) & 0xFF) - ((a >> 16) & 0xFF)) * t);
-        int gr = (int) Math.round(((a >> 8) & 0xFF) + (((b >> 8) & 0xFF) - ((a >> 8) & 0xFF)) * t);
-        int bl = (int) Math.round((a & 0xFF) + ((b & 0xFF) - (a & 0xFF)) * t);
-        return (r << 16) | (gr << 8) | bl;
+        for (int t : PaletteTints.compute(editing.segments)) segTints.add(t);
     }
 
     private void resetPreview() {
@@ -1525,6 +1455,27 @@ public class PaletteEditScreen extends Screen {
         }
 
         renderStripLabels(g, count, edges);
+
+        // Adjacent Automatic segments can resolve to the same block — warn that a "step" may
+        // then look longer than the strip suggests.
+        boolean adjacentAutos = false;
+        for (int k = 0; k + 1 < count; k++) {
+            if (editing.segments.get(k).isAutomatic() && editing.segments.get(k + 1).isAutomatic()) {
+                adjacentAutos = true;
+                break;
+            }
+        }
+        if (adjacentAutos) {
+            int hy = sy + STRIP_H + 6;
+            List<String> lines = wrap("Adjacent Auto segments may resolve to the same block, "
+                    + "which then looks like one longer step.", RIGHT_W);
+            for (String line : lines) {
+                if (hy >= BAR_H + 2 && hy <= viewBottom() - 8) {
+                    g.text(this.font, line, rightX(), hy, YELLOW);
+                }
+                hy += 10;
+            }
+        }
     }
 
     /** A sideways "house" pentagon whose point touches the boundary line. Hot = yellow. */
