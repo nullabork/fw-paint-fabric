@@ -29,6 +29,8 @@ public final class Gradient {
     public static KeyMapping openKey;
     public static KeyMapping cycleKey;
     public static KeyMapping paintTypeKey;
+    /** Cycle the active palette through the saved list (default B). */
+    public static KeyMapping cyclePaletteKey;
     /** Held modifier (default L-Ctrl): a marker-removing click clears the whole connected plane. */
     public static KeyMapping clearConnectedKey;
 
@@ -42,6 +44,8 @@ public final class Gradient {
                 GLFW.GLFW_KEY_G, KeyMapping.Category.MISC);
         paintTypeKey = new KeyMapping("key.gradient.paint_type", InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_V, KeyMapping.Category.MISC);
+        cyclePaletteKey = new KeyMapping("key.gradient.cycle_palette", InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_B, KeyMapping.Category.MISC);
         clearConnectedKey = new KeyMapping("key.gradient.clear_connected", InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_LEFT_CONTROL, KeyMapping.Category.MISC);
     }
@@ -57,6 +61,9 @@ public final class Gradient {
         }
         while (paintTypeKey.consumeClick()) {
             switchPaintType();
+        }
+        while (cyclePaletteKey.consumeClick()) {
+            cyclePalette();
         }
         MarkerManager.tick(client);
         PaintPlacer.tick(client);
@@ -110,7 +117,27 @@ public final class Gradient {
         GradientConfig cfg = ConfigManager.get();
         cfg.activePaintType = cfg.activePaintType.next();
         ConfigManager.save();
-        overlay(mc, "FW Paint — Paint type: " + cfg.activePaintType.label());
+        // Landing on a palette-driven paint with nothing set up → guide instead of a dead tool.
+        if (cfg.activePaintType != PaintType.SOLID
+                && co.fax.wang.palette.PaletteStore.all().isEmpty()) {
+            overlay(mc, "FW Paint — " + cfg.activePaintType.label() + ": press "
+                    + boundKey("open") + " to set up a palette");
+        } else {
+            overlay(mc, "FW Paint — Paint type: " + cfg.activePaintType.label());
+        }
+    }
+
+    /** Step the active palette through the saved list (the palette keybind); persisted. */
+    public static void cyclePalette() {
+        Minecraft mc = Minecraft.getInstance();
+        if (!holdingPaintTool(mc)) {
+            overlay(mc, "FW Paint: hold your paint tool to cycle palettes");
+            return;
+        }
+        co.fax.wang.palette.Palette next = co.fax.wang.palette.PaletteStore.cycleActive(1);
+        overlay(mc, next == null
+                ? "FW Paint: no palettes — press " + boundKey("open") + " to set one up"
+                : "FW Paint — Palette: " + next.name);
     }
 
     private static void overlay(Minecraft mc, String msg) {
@@ -138,6 +165,7 @@ public final class Gradient {
             case "open" -> openKey;
             case "cycle" -> cycleKey;
             case "paint" -> paintTypeKey;
+            case "palette" -> cyclePaletteKey;
             case "clear" -> clearConnectedKey;
             default -> null;
         };

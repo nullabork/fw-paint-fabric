@@ -1,36 +1,20 @@
 package co.fax.wang;
 
-import co.fax.wang.config.ConfigManager;
-import co.fax.wang.config.GradientConfig;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.NonNullList;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Random;
-import java.util.Set;
-
 /**
- * Noise paint's block choice + region helpers, used by {@link PaintPlacer}: the valley→peak block
- * ordering (mirroring the noise tab preview), the per-cell slot choice, and the marked-region
- * tests for the classic in-marker flood fill. Input handling lives in {@link PaintPlacer}.
+ * Marked-region geometry for the in-marker noise flood fill, used by {@link PaintPlacer}. The
+ * per-cell block choice itself lives in {@link PaletteChoice#noiseSlot} (driven by the active
+ * palette); input handling lives in {@link PaintPlacer}.
  */
 public final class NoisePlacer {
 
     private NoisePlacer() {}
 
     private static final double REACH = 6.0;
-    private static final Random RANDOM = new Random();
 
     /** True if (x,y,z) lies strictly between some colinear start→end marker pair within maxDist. */
     static boolean inMarkedSegment(int x, int y, int z, int maxDist) {
@@ -86,146 +70,4 @@ public final class NoisePlacer {
         }
         return null;
     }
-
-    // ---- per-cell block choice --------------------------------------------------------------------
-
-    /**
-     * The inventory slot for a cell: sample the noise field at its position, apply chaos, map onto
-     * the order, and take the nearest step that still has an available block (random within a tie
-     * group). Returns -1 when none of the gradient blocks are in the inventory.
-     */
-    static int slotForCell(LocalPlayer player, List<List<Block>> order, int x, int y, int z) {
-        GradientConfig cfg = ConfigManager.get();
-        double t = Noise.sample(cfg.noiseType, x, y, z, noiseSeedLong(cfg),
-                cfg.noiseScaleX, cfg.noiseScaleY, cfg.noiseScaleZ);
-        // The noise tool's own curve (with the strip editor's boundaries when it's CUSTOM),
-        // matching the settings-screen cube preview. Chaos then nudges the chosen step.
-        int idx = GradientRamp.stepFor(order.size(), t, cfg.noiseCurve, cfg.noiseCurveBounds);
-        if (cfg.noiseChaos > 0 && RANDOM.nextDouble() < cfg.noiseChaos) {
-            idx = Math.max(0, Math.min(order.size() - 1, RANDOM.nextBoolean() ? idx - 1 : idx + 1));
-        }
-        return chooseSlot(player, order, idx);
-    }
-
-    /** Slot of a block for step {@code idx} (random within a tie group), nearest available. */
-    private static int chooseSlot(LocalPlayer player, List<List<Block>> order, int idx) {
-        for (int step = 0; step < order.size(); step++) {
-            for (int sgn = -1; sgn <= 1; sgn += 2) {
-                int i = idx + sgn * step;
-                if (i < 0 || i >= order.size()) continue;
-                List<Block> group = new ArrayList<>(order.get(i));
-                java.util.Collections.shuffle(group, RANDOM); // randomise ties on placement
-                for (Block b : group) {
-                    int slot = BlockPlacement.findSlot(player, b);
-                    if (slot >= 0) return slot;
-                }
-                if (step == 0) break; // avoid checking idx twice
-            }
-        }
-        return -1;
-    }
-
-    // ---- ordering (valley→peak), mirrors the noise tab preview -----------------------------------
-
-    static List<List<Block>> computeOrder(LocalPlayer player) {
-        GradientConfig cfg = ConfigManager.get();
-        List<Block> palette = gatherPalette(player);
-        if (palette.isEmpty()) return List.of();
-
-        // Pick mode: the order is exactly the numbered blocks (low→high), ties grouped.
-        if (cfg.noiseGradientMode.isPick()) {
-            List<String> ids = new ArrayList<>();
-            for (Block b : palette) {
-                Identifier id = BuiltInRegistries.ITEM.getKey(b.asItem());
-                ids.add(id == null ? "" : id.toString());
-            }
-            List<List<Block>> out = new ArrayList<>();
-            for (List<String> grp : Picks.groups(ids, cfg.pickNumbers)) {
-                List<Block> bg = new ArrayList<>();
-                for (String s : grp) { Block b = byId(s, palette); if (b != null) bg.add(b); }
-                if (!bg.isEmpty()) out.add(bg);
-            }
-            return out;
-        }
-
-        Block startBlock = byId(cfg.orderStartBlock, palette);
-        Block endBlock = byId(cfg.orderEndBlock, palette);
-        if (startBlock == null || endBlock == null) {
-            Block lightest = null, darkest = null;
-            double lo = Double.MAX_VALUE, hi = -1;
-            for (Block b : palette) {
-                double l = BlockTextures.baseLuminance(b);
-                if (l > hi) { hi = l; lightest = b; }
-                if (l < lo) { lo = l; darkest = b; }
-            }
-            if (startBlock == null) startBlock = lightest;
-            if (endBlock == null) endBlock = darkest;
-        }
-
-        GradientMode mode = cfg.noiseGradientMode;
-        double pct = cfg.noisePixelPercent;
-        int startRgb = BlockTextures.gradientValue(startBlock, startBlock, mode, pct);
-        int endRgb = BlockTextures.gradientValue(endBlock, startBlock, mode, pct);
-        int[] rgbs = new int[palette.size()];
-        Set<Integer> forced = new HashSet<>();
-        List<String> required = cfg.requiredBlocks;
-        for (int i = 0; i < palette.size(); i++) {
-            rgbs[i] = BlockTextures.gradientValue(palette.get(i), startBlock, mode, pct);
-            Identifier id = BuiltInRegistries.ITEM.getKey(palette.get(i).asItem());
-            if (id != null && required.contains(id.toString())) forced.add(i);
-        }
-        // Full budget: the Variation slider never gates steps — the step count depends only on max
-        // steps + the range-eligible blocks. Variation builds each step's band group of similar
-        // blocks (like the gradient tool), randomised at placement by chooseSlot.
-        int[] eligible = GradientRamp.gradientOrder(rgbs, startRgb, endRgb, mode, 1.0, forced);
-        int[] ord = GradientRamp.subsample(eligible, cfg.noiseMaxSteps);
-        List<List<Block>> out = new ArrayList<>();
-        for (int[] band : GradientRamp.bandGroups(rgbs, ord, eligible, mode, cfg.noiseDeviation)) {
-            List<Block> group = new ArrayList<>(band.length);
-            for (int i : band) group.add(palette.get(i));
-            out.add(group);
-        }
-        return out;
-    }
-
-    private static List<Block> gatherPalette(LocalPlayer player) {
-        NonNullList<ItemStack> items = player.getInventory().getNonEquipmentItems();
-        List<String> excluded = ConfigManager.get().excludedBlocks;
-        int from, to;
-        switch (ConfigManager.get().source) {
-            case HOTBAR -> { from = 0; to = 9; }
-            case INVENTORY -> { from = 9; to = 36; }
-            default -> { from = 0; to = 36; }
-        }
-        to = Math.min(to, items.size());
-        List<Block> out = new ArrayList<>();
-        Set<Block> seen = new HashSet<>();
-        for (int slot = from; slot < to; slot++) {
-            ItemStack st = items.get(slot);
-            if (!(st.getItem() instanceof BlockItem bi)) continue;
-            Block b = bi.getBlock();
-            if (b.defaultBlockState().isAir() || !seen.add(b)) continue;
-            Identifier id = BuiltInRegistries.ITEM.getKey(st.getItem());
-            if (id != null && excluded.contains(id.toString())) continue;
-            out.add(b);
-        }
-        return out;
-    }
-
-    private static Block byId(String id, List<Block> palette) {
-        if (id == null || id.isEmpty()) return null;
-        for (Block b : palette) {
-            Identifier bid = BuiltInRegistries.ITEM.getKey(b.asItem());
-            if (bid != null && bid.toString().equals(id)) return b;
-        }
-        return null;
-    }
-
-    private static long noiseSeedLong(GradientConfig cfg) {
-        String s = cfg.noiseSeed.trim();
-        if (s.isEmpty()) return 0L;
-        try { return Long.parseLong(s); } catch (NumberFormatException e) { return s.hashCode(); }
-    }
-
-    private static double clamp01(double v) { return Math.max(0.0, Math.min(1.0, v)); }
 }

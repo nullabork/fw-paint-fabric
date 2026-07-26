@@ -84,14 +84,15 @@ public final class HelpPanel {
     }
 
     /**
-     * Substitute the {open}/{cycle}/{paint}/{clear} placeholders with the CURRENT key bindings, so
-     * the manual stays correct after a rebind. Runs on every layout rebuild (each screen open).
+     * Substitute the {open}/{cycle}/{paint}/{palette}/{clear} placeholders with the CURRENT key
+     * bindings, so the manual stays correct after a rebind. Runs on every layout rebuild.
      */
     private static String subKeys(String s) {
         if (s.indexOf('{') < 0) return s;
         return s.replace("{open}", Gradient.boundKey("open"))
                 .replace("{cycle}", Gradient.boundKey("cycle"))
                 .replace("{paint}", Gradient.boundKey("paint"))
+                .replace("{palette}", Gradient.boundKey("palette"))
                 .replace("{clear}", Gradient.boundKey("clear"));
     }
 
@@ -167,16 +168,21 @@ public final class HelpPanel {
 
     private static final List<Topic> TOPICS = List.of(
 
-        t("Getting started", "Assign a tool item, hold it, paint.", List.of(
+        t("Getting started", "Assign a tool item, build a palette, paint.", List.of(
             "1. On the Settings tab, click \"Paint tool\" and pick any item (a stick works well). "
                 + "FW Paint only does anything while you hold that item.",
-            "2. Hold the tool. Press {paint} (or a tool tab's Use button) to switch what it "
-                + "paints - Solid, Gradient, or Noise. Press {cycle} to cycle where blocks go: "
-                + "Marker, Marker corners, Marker draw, Single, Face, 3D Fill, Disabled. Any "
-                + "paint type works with any placement mode, with or without markers. The helper "
-                + "text in the top-left always shows both.",
-            "3. Aim at a block face and right-click to paint (hold to keep going). Markers are "
-                + "optional - they bound what you paint and give gradients their endpoints.",
+            "2. On the Palette tab, press + New and build your first palette: double-click "
+                + "blocks (or the Automatic rows) into the strip, then Save. Gradient and noise "
+                + "painting both use the active palette; press {palette} in-game to cycle "
+                + "through your saved ones.",
+            "3. Hold the tool. Press {paint} to switch what it paints - Solid, Gradient, or "
+                + "Noise - and {cycle} to cycle where blocks go: Marker, Marker corners, Marker "
+                + "draw, Single, Face, 3D Fill, Disabled. The Paint tab ({open} lands on it) "
+                + "has buttons for all of these too. Any paint type works with any placement "
+                + "mode, with or without markers. The helper text in the top-left always shows "
+                + "both, plus the active palette.",
+            "4. Aim at a block face and right-click to paint (hold to keep going). Markers are "
+                + "optional - they bound what you paint and anchor Automatic segments.",
             "{open} opens and closes this screen. All keys are rebindable under "
                 + "Options > Controls > Key Binds > Misc (this manual always shows the current "
                 + "bindings). Placement is done with normal block-place actions the server "
@@ -295,111 +301,125 @@ public final class HelpPanel {
         t("Solid paint", "One block: walls, columns, and volumes fast.",
             List.of(
                 "Solid places one kind of block through any placement mode - Single columns, "
-                    + "whole Faces, or 3D blobs. Which block it places comes from the Match "
-                    + "button."),
+                    + "whole Faces, or 3D blobs. Left-click a block in the list to select it "
+                    + "(click again to clear); right-click excludes it from the closest-match "
+                    + "modes. The big preview shows the selected block - or a ? when the mode "
+                    + "picks the block at click time."),
             t("Match modes", "How Solid picks the block it places.", List.of(
-                "Selected block: places the block you ticked in the list on the left.",
+                "Selected block: places the block you selected in the list.",
                 "Exact block: copies exactly the block you clicked.",
                 "Closest color / Closest brightness: looks at the clicked block and places the "
                     + "closest match from your inventory. Closeness is measured as perceived "
                     + "colour (Oklab) - the Color match button in Settings switches back to the "
                     + "classic RGB maths.",
-                "Blocks marked with an X in the list are never placed, even on an exact match."))),
+                "Excluded (red) blocks are never placed, even on an exact match."))),
 
-        t("Gradient paint", "Blend from one block to another - along markers or free-hand.",
+        t("Palettes", "Named, saved block ramps - one palette drives gradient AND noise painting.",
+            List.of(
+                "The Palette tab lists every palette you've saved: its name on the left, its "
+                    + "segment sprites on the right (a crosshatch tile is an Automatic segment). "
+                    + "Click a row to select and expand it - the summary shows every setting and "
+                    + "any missing blocks. Use makes it the active palette (shown on the HUD; "
+                    + "{palette} cycles through them in-game); Edit opens the editor; Delete asks "
+                    + "first.",
+                "A red border means the palette needs blocks that aren't in your "
+                    + "hotbar/inventory right now. By default painting refuses while blocks are "
+                    + "missing; the \"Missing blocks\" toggle in Settings can skip the missing "
+                    + "segments instead.",
+                "Saving a palette also makes it active. Everything on a palette persists "
+                    + "between sessions - only your inventory can differ later."),
+            t("The editor", "Previews on top; settings left, blocks middle, strip right.", List.of(
+                "The two previews at the top render the palette as a gradient cylinder and a "
+                    + "noise cube side by side - each has its own expand button. The name box "
+                    + "and Save/Cancel sit under them; an empty name saves as Untitled, and "
+                    + "names must be unique. The whole page scrolls when it doesn't fit.",
+                "Middle column: the blocks from the chosen Source, sorted by colour, plus the "
+                    + "two pinned Auto rows. Double-click anything to append it to the strip, "
+                    + "or drag it onto the strip to insert it exactly where you drop it (the "
+                    + "same block can appear more than once). Right-click a block to ban it "
+                    + "from Automatic segments (red = banned, saved with the palette).",
+                "Left column: Variation, Chaos, Step length, the Sizing mode, and the noise "
+                    + "settings (type, scale, seed - used only when noise painting), grouped "
+                    + "under small headings. The circled-? icons show each control's help; "
+                    + "hovering a control for a second does too.")),
+            t("The segment strip", "The palette itself - order, sizes, and stops.", List.of(
+                "Each segment is drawn with its block (crosshatch for Automatic), its name in "
+                    + "the gutter to its right; names too long to fit scroll, and when segments "
+                    + "get too short the labels pack together in order, never leaving the "
+                    + "strip. A red outline means that block is missing from your inventory.",
+                "Drag the pointed handles left of the strip to resize segments - the Curve "
+                    + "flips to Custom and placement uses exactly the shares you drew. Cycling "
+                    + "the Curve button (Linear, Ease In/Out, Step...) snaps back to an "
+                    + "automatic shape; it needs at least 3 segments.",
+                "Reorder by dragging a segment up or down - it swaps with its neighbours as it "
+                    + "crosses them, and only the two swapping segments change place. Or click a "
+                    + "segment (white outline) and use the arrow keys. Any manual reorder sets "
+                    + "the Order toggle to Custom; the Order button re-sorts by colour or "
+                    + "brightness, ascending or descending (needs 2 blocks; Automatics sort as "
+                    + "a middle grey). Delete/Backspace removes the selected segment - or drag "
+                    + "a segment sideways out of the strip and let go.")),
+            t("Automatic segments", "Wildcards resolved when you paint.", List.of(
+                "An Auto segment picks ONE real block from your inventory at paint time - "
+                    + "Auto colour matches by perceived colour, Auto brightness by lightness. "
+                    + "The choice is deterministic (closest match to the segment's spot in the "
+                    + "ramp), so a strip of nothing but Auto segments still gives a stable, "
+                    + "hand-shaped distribution.",
+                "At the start of the strip it resolves against the block you started painting "
+                    + "on. At the end it scans ahead for an end marker, or the first solid "
+                    + "block - and if there is nothing to find, it picks the OPPOSITE of your "
+                    + "start from the inventory (lightest vs darkest for brightness, the "
+                    + "furthest colour for colour), so the ramp still spans. In the middle it "
+                    + "blends between its neighbouring segments.",
+                "Ramps are honest: running out of one of the ramp's blocks mid-paint stops with "
+                    + "an 'out of X' message instead of quietly substituting another block.",
+                "3D fills must know their whole range up front, so a 3D paint needs the strip "
+                    + "to end in a real block (Automatic at the start is fine - it reads the "
+                    + "clicked block). A palette that's all Automatic with nothing to anchor to "
+                    + "shows an error instead of placing.")),
+            t("Sizing", "How long a placed gradient runs.", List.of(
+                "Min blocks: the shortest run that realises the segment ratios - it never "
+                    + "stretches toward an end block.",
+                "Fill space: expands to fill from the placed block to the end marker, or the "
+                    + "first solid block when there's no marker.",
+                "Set steps: stretches or shrinks the gradient to a fixed number of blocks "
+                    + "(the Steps slider appears under the toggle).")),
+            t("Sliders", "Variation, Chaos, Step length.", List.of(
+                "Variation: lets blocks similar to a segment randomly stand in for it - bands "
+                    + "get visual variety without gaining or losing segments. At 0% every "
+                    + "segment is exactly its own block.",
+                "Chaos: chance a placement repeats the previous step or skips ahead one - adds "
+                    + "dither across band boundaries.",
+                "Step length: chance each step runs randomly longer or shorter (its neighbour "
+                    + "compensates, so the gradient still starts and ends on time)."))),
+
+        t("Gradient paint", "Blend along the active palette - between markers or free-hand.",
             List.of(
                 "Between markers: mark a start and an end block, then click the face the line "
-                    + "runs out of and hold. The gradient stretches start-to-end; the marker "
-                    + "blocks themselves count as its first and last blocks.",
-                "Outside markers: the gradient comes from the picker list ([S] to [E]), one "
-                    + "block per step, growing out of whatever face you click. When the last "
-                    + "step is placed the column simply stops.",
-                "The helper text always says where the endpoints come from: \"Selected from "
-                    + "markers\", \"Selected from picker\", or a split pair when one marker "
-                    + "floats in air (its side falls back to the picker block)."),
+                    + "runs out of and hold. The palette stretches start-to-end across the line; "
+                    + "Automatic segments anchor to the real marker blocks.",
+                "Outside markers: the gradient grows out of whatever face you click, sized by "
+                    + "the palette's Sizing mode; the block you start on anchors an Automatic "
+                    + "start.",
+                "The helper text always says what the next click would anchor to - markers, or "
+                    + "the palette alone."),
             t("Gradient memory", "How free-hand gradients keep their place.", List.of(
                 "Painting outside markers remembers which step each placed block was, so "
                     + "clicking the face of a half-finished gradient continues it instead of "
                     + "restarting.",
-                "The memory clears when you change the gradient in the picker, or after the "
+                "The memory clears when you switch or edit the active palette, or after the "
                     + "\"Gradient memory\" idle time in Settings (default 1 minute) - stop for "
-                    + "longer than that and the next click starts a fresh gradient.",
+                    + "longer than that and the next click starts a fresh gradient. Clicking a "
+                    + "FINISHED gradient starts a new one on top rather than doing nothing.",
                 "3D fills remember their centre: click a block that belongs to one and it keeps "
                     + "growing the same sphere from the original middle; click elsewhere to start "
-                    + "a new one.")),
-            t("The block list", "Reads top to bottom as the gradient you'll get.", List.of(
-                "White rows are the gradient's steps in placement order, tagged [S] and [E] at "
-                    + "the ends. The small icons on a row are that step's swappable stand-ins "
-                    + "(see the Variation slider).",
-                "Blue rows are blocks in your inventory that the gradient doesn't currently use. "
-                    + "Green rows are must-use (the checkmark button forces them in). Red rows are "
-                    + "excluded (the X button - never used).",
-                "Shortcuts: double-click a row to toggle must-use, middle-click to exclude.")),
-            t("Preview vs. placed gradient", "Why what you place can differ from the list.", List.of(
-                "The list previews a gradient between the [S] and [E] blocks chosen on this "
-                    + "screen. The actual fill, though, depends on the \"From:\" button:",
-                "From: Markers - the endpoints are the real blocks sitting at your start and end "
-                    + "markers in the world. If those aren't the same blocks as [S]/[E], the "
-                    + "placed gradient is computed between them instead and can differ from the "
-                    + "preview.",
-                "From: Block list - the fill places exactly the preview's steps, no matter what "
-                    + "blocks the markers are made of.",
-                "Painting where there is no marker line always uses the picker - the mode adapts "
-                    + "by itself, and the helper text tells you which one is in effect.")),
-            t("Gradient modes (Order)", "How blocks are measured and sorted into a gradient.", List.of(
-                "Color: sorts by average texture colour.",
-                "Brightness: sorts by average texture brightness, light to dark.",
-                "Top % Dark / Top % Light (and their Color variants): measures only the darkest "
-                    + "or lightest slice of each texture's pixels - the Pixel % slider sets the "
-                    + "slice size. Useful when a texture's accents matter more than its average.",
-                "B&W Diff / Color Diff: sorts by how different each texture is from the start "
-                    + "block - a gradient of \"increasingly unlike the start\".",
-                "Pick: manual ordering. Click a row to raise its number, right-click to lower it "
-                    + "(0 removes it). Lowest number places first, highest last; blocks sharing a "
-                    + "number share a step.",
-                "Colour and brightness are measured as the eye sees them (Oklab) - the Color "
-                    + "match button in Settings switches every tool back to the classic "
-                    + "luma/RGB maths.")),
-            t("Curve", "Where the gradient changes fastest.", List.of(
-                "The curve button sits in the thin middle column, drawn as its own shape. "
-                    + "Linear: even change all the way. Ease In: holds the start colour longer. "
-                    + "Ease Out: reaches the end colour sooner. Ease In/Out: lingers at both ends. "
-                    + "Step: hard quantised bands instead of a smooth blend.",
-                "A C on the button means Custom - you dragged the strip below into your own "
-                    + "shape (see The curve strip).")),
-            t("The curve strip", "Each step's share of the fill - drag to reshape.", List.of(
-                "The strip under the curve button stacks every step top to bottom, drawn with "
-                    + "its block; each band's height is how much of the fill that step covers "
-                    + "under the current curve.",
-                "Drag the small handles beside the strip to move a boundary: the band below "
-                    + "grows, the one above shrinks, and the curve flips to C (custom). Real "
-                    + "placement then uses exactly the shares you drew.",
-                "Cycling the curve button snaps the strip back to that curve's automatic "
-                    + "shape. Custom shapes are kept per tool; if the step count changes they "
-                    + "fall back to even steps.")),
-            t("Sliders", "Variation, Chaos, Step length, Max steps, Pixel %.", List.of(
-                "Variation: lets blocks similar to a step randomly stand in for it - bands get "
-                    + "visual variety without gaining or losing steps. At 0% every step is exactly "
-                    + "its own block and the fill is fully even.",
-                "Chaos: chance a placement repeats the previous step or skips ahead one - adds "
-                    + "dither across band boundaries.",
-                "Step length: chance each step runs randomly longer or shorter (its neighbour "
-                    + "compensates, so the gradient still starts and ends on time).",
-                "Max steps: caps how many distinct blocks the gradient uses.",
-                "Pixel %: how much of each texture the Top % modes measure.")),
-            t("Preview", "A cylinder placed with the real pipeline.", List.of(
-                "The open-topped cylinder under the sliders shows the gradient as it would "
-                    + "place: the top rim is the start, the bottom rim the end, and every column "
-                    + "rolls its own Chaos, Step length, and Variation - the spread you see "
-                    + "between columns is the spread a real build gets.",
-                "It re-rolls whenever a setting changes. The expand button opens it full "
-                    + "screen; X or Esc closes it."))),
+                    + "a new one."))),
 
         t("Noise paint", "Natural, blotchy 3D patterns - regions, surfaces, or free-hand.",
             List.of(
                 "Every block is chosen by a 3D noise field sampled at its position, so blocks "
-                    + "clump into organic patches instead of stripes. The order always comes from "
-                    + "the picker list ([S] = valleys, [E] = peaks).",
+                    + "clump into organic patches instead of stripes. The order is the active "
+                    + "palette's strip - top of the strip in the valleys, bottom on the peaks - "
+                    + "and the noise type, scale, and seed come from the palette too.",
                 "Classic region fill: mark a region (start markers on one side, end markers "
                     + "opposite, rows of air between pairs), switch to 3D Fill, aim into the air "
                     + "and right-click - the whole region fills at once.",
@@ -407,32 +427,17 @@ public final class HelpPanel {
                     + "bounded by end markers like every other paint type."),
             t("Noise fields", "Smooth randomness over space.", List.of(
                 "A noise field gives every position in the world a value, and nearby positions "
-                    + "get similar values - that's why the pattern forms patches. Your block list "
-                    + "is stretched over the field: low values place blocks from the [S] end, "
-                    + "high values from the [E] end.",
+                    + "get similar values - that's why the pattern forms patches. Your palette is "
+                    + "stretched over the field: low values place segments from the top of the "
+                    + "strip, high values from the bottom.",
                 "Smooth: soft, rounded blobs. Perlin: natural, ridged shapes. Fractal: several "
                     + "layers of detail on top of each other.")),
-            t("Seed and Scale", "Reroll or resize the pattern.", List.of(
+            t("Seed and Scale", "Reroll or resize the pattern (saved on the palette).", List.of(
                 "Seed: any text or number - the same seed always gives the same pattern. Change "
                     + "it to reroll.",
                 "Scale: the feature size in blocks, per axis. With Lock XYZ on, one slider drives "
                     + "all three axes; unlock it to stretch the pattern (tall streaks, flat "
-                    + "layers).")),
-            t("Ordering and sliders", "Shared ideas with the gradient tool.", List.of(
-                "Order, Curve (with the drag-to-reshape strip), Pixel %, Variation, Chaos, and "
-                    + "Max steps work exactly like the gradient tool's (see Gradient paint), but "
-                    + "keep their own separate values for the noise tool.",
-                "The curve shapes how the noise value maps onto your block order: an eased or "
-                    + "custom curve makes some steps cover more of the pattern than others.")),
-            t("Preview", "A live cube of the field, sampled where you stand.", List.of(
-                "The cube at the bottom right shows the noise built from your current blocks and "
-                    + "settings, sampled at real world coordinates starting at your feet - the "
-                    + "right face runs East, the left face South, the top face up. What you see "
-                    + "is what painting that region would place.",
-                "Drag a face to pan along it - the drag locks to the face you press. The top "
-                    + "face pans across the ground, the side faces also pan up and down. The "
-                    + "coordinates under the cube follow along.",
-                "The expand button opens the preview full screen; X or Esc closes it."))),
+                    + "layers)."))),
 
         t("Finder", "Every block in the game, ranked by colour or brightness.",
             List.of(

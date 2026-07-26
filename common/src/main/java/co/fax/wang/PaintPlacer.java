@@ -73,16 +73,18 @@ public final class PaintPlacer {
     private static PlacementMode mode;
     private static Direction dir;             // face normal of the initial click
     private static Block solidChosen;         // Solid: block resolved from the match mode at press
-    private static List<List<Block>> noiseOrder = List.of();
-    private static Block pickerStart, pickerEnd; // Gradient: resolved picker endpoints
-    private static int outsideSteps;             // Gradient: picker ramp step count
+    private static PaletteChoice.Prepared prepared; // Gradient/Noise: press-wide palette state
+    private static PaletteChoice.Ramp noiseRamp;    // Noise: the one ramp resolved for this press
+    private static PaletteChoice.Ramp ramp3d;       // Gradient 3D: the fill's resolved ramp
     private static GradientCaches.Fill3D activeFill; // Gradient 3D: the cache entry being extended
 
     // Column state (Single + Face): each column advances its own front.
     private static final class Column {
         final BlockPos base;
         int next;      // offset of the column's front (first air) from base
-        int progress;  // outside-marker gradient: next step index to place
+        int progress;  // outside-marker gradient: next cell index to place
+        PaletteChoice.Ramp ramp; // outside-marker gradient: this column's resolved ramp
+        int cells;               // outside-marker gradient: column length per the sizing mode
 
         Column(BlockPos base, int next, int progress) {
             this.base = base;
@@ -104,8 +106,11 @@ public final class PaintPlacer {
     private static boolean startedInSpace;    // whether the fill began inside the marker space
     private static final Set<BlockPos> visited = new HashSet<>(); // cells accepted by the fill
 
-    /** Gradient context of a queued cell (null for Solid/Noise). segS/segE null → picker endpoint. */
-    private record GradCtx(double t, Object wobbleKey, BlockPos segS, BlockPos segE, int step) {}
+    /** Gradient context of a queued cell (null for Solid/Noise): its ramp + fill fraction. */
+    private record GradCtx(double t, Object wobbleKey, PaletteChoice.Ramp ramp, int step) {}
+
+    /** Per-press ramps for marker segments (a null value = resolved to "can't", stays failed). */
+    private static final java.util.Map<List<BlockPos>, PaletteChoice.Ramp> segRamps = new java.util.HashMap<>();
 
     private record Pending(BlockPos cell, GradCtx g, int tries) {}
 
@@ -194,30 +199,67 @@ public final class PaintPlacer {
                 }
             }
             case NOISE -> {
-                noiseOrder = NoisePlacer.computeOrder(player);
-                if (noiseOrder.isEmpty()) {
-                    overlay(mc, "Noise: no placeable blocks in source");
+                // Noise needs its whole colour range up front (cells are picked by noise value,
+                // not progression): resolve one ramp per press. Automatic-at-end scans along the
+                // clicked column; 3D requires a static end (enforced by prepare).
+                prepared = PaletteChoice.prepare(player, "Noise", mode == PlacementMode.FILL3D);
+                if (prepared.error != null) {
+                    overlay(mc, prepared.error);
+                    return false;
+                }
+                Block startAnchor = anchorAt(mc, clicked);
+                Block endAnchor = null;
+                if (mode != PlacementMode.FILL3D) {
+                    int first = firstAirOffset(mc, clicked, dir);
+                    if (first > 0) endAnchor = scanEnd(mc, clicked, dir, first).colour();
+                }
+                noiseRamp = PaletteChoice.resolveRamp(prepared, startAnchor, endAnchor);
+                if (noiseRamp == null) {
+                    overlay(mc, cantResolveMessage());
                     return false;
                 }
             }
             case GRADIENT -> {
-                GradientChoice.Endpoints eps = GradientChoice.pickerEndpoints(player);
-                if (eps == null) {
-                    overlay(mc, "Gradient: no placeable blocks in source");
+                prepared = PaletteChoice.prepare(player, "Gradient", mode == PlacementMode.FILL3D);
+                if (prepared.error != null) {
+                    overlay(mc, prepared.error);
                     return false;
                 }
-                pickerStart = eps.start();
-                pickerEnd = eps.end();
-                outsideSteps = GradientChoice.stepCount(player, eps);
-                if (outsideSteps <= 0) {
-                    overlay(mc, ConfigManager.get().gradientMode.isPick()
-                            ? "Gradient: number some blocks (Pick mode)"
-                            : "Gradient: no usable gradient steps");
-                    return false;
-                }
+                // Ramps resolve per column / marker segment / fill — anchors differ per context.
             }
         }
         return true;
+    }
+
+    private static String cantResolveMessage() {
+        String name = prepared != null && prepared.palette != null ? prepared.palette.name : "palette";
+        return "'" + name + "': can't resolve colours — add a block to the palette";
+    }
+
+    /** The block at {@code pos} as a colour anchor, or null when it's air. */
+    private static Block anchorAt(Minecraft mc, BlockPos pos) {
+        var state = mc.level.getBlockState(pos);
+        return state.isAir() ? null : state.getBlock();
+    }
+
+    /**
+     * End scan out from a column front: the bounding cell (end marker — even in air — or first
+     * non-air block) and the end colour (the first real block met; a marker floating in air keeps
+     * scanning past itself for the colour).
+     */
+    private record EndScan(int boundary, Block colour) {}
+
+    private static EndScan scanEnd(Minecraft mc, BlockPos base, Direction dir, int firstAir) {
+        int boundary = -1;
+        for (int k = firstAir; k <= SCAN_LIMIT; k++) {
+            BlockPos p = base.relative(dir, k);
+            var state = mc.level.getBlockState(p);
+            if (boundary < 0 && (MarkerManager.endMarkers.contains(p) || !state.isAir())) {
+                boundary = k;
+            }
+            if (!state.isAir()) return new EndScan(boundary, state.getBlock());
+        }
+        return new EndScan(boundary, null);
     }
 
     // ---- columns (Single + Face) --------------------------------------------------------------------
@@ -237,16 +279,32 @@ public final class PaintPlacer {
             bases = List.of(clicked);
         }
         layerCooldown = HOLD_DELAY; // a beat after layer one, so a tap can stay one layer
+        boolean unresolved = false;
         for (BlockPos base : bases) {
             int first = firstAirOffset(mc, base, dir);
             if (first <= 0) continue;
-            int progress = 0;
+            Column col = new Column(base, first, 0);
             if (type == PaintType.GRADIENT) {
-                progress = GradientCaches.columnProgress(mode, base.relative(dir, first - 1), dir);
+                col.progress = GradientCaches.columnProgress(mode, base.relative(dir, first - 1), dir);
+                // Resolve this column's ramp: start anchor = the block the column grows from,
+                // end anchor = the end-scan colour (marker / first non-air), when there is one.
+                Block startAnchor = anchorAt(mc, base.relative(dir, first - 1));
+                EndScan scan = scanEnd(mc, base, dir, first);
+                col.ramp = PaletteChoice.resolveRamp(prepared, startAnchor, scan.colour());
+                if (col.ramp == null) {
+                    unresolved = true;
+                    continue;
+                }
+                col.cells = PaletteChoice.columnCells(prepared, col.ramp,
+                        scan.boundary() > 0 ? scan.boundary() - first : -1);
+                // A finished gradient stays finished in the cache — but a fresh click on it
+                // should start a NEW gradient on top, not be blocked by the old one's progress.
+                if (col.progress >= col.cells) col.progress = 0;
             }
-            columns.add(new Column(base, first, progress));
+            columns.add(col);
         }
         active = !columns.isEmpty();
+        if (!active && unresolved) overlay(mc, cantResolveMessage());
         if (active) enqueueLayer(mc);
     }
 
@@ -288,8 +346,8 @@ public final class PaintPlacer {
             }
             GradCtx g = null;
             if (type == PaintType.GRADIENT) {
-                g = gradCtxFor(cell, c);
-                if (g == null) { // this column's gradient is complete
+                g = gradCtxFor(mc, cell, c);
+                if (g == null) { // this column's gradient is complete (or unresolvable here)
                     it.remove();
                     continue;
                 }
@@ -299,23 +357,32 @@ public final class PaintPlacer {
         }
     }
 
-    /** Gradient context for a column cell: marker segment t, or picker progress via the cache. */
-    private static GradCtx gradCtxFor(BlockPos cell, Column c) {
-        GradientConfig cfg = ConfigManager.get();
+    /** Gradient context for a column cell: marker-segment t, or the column's own sized ramp. */
+    private static GradCtx gradCtxFor(Minecraft mc, BlockPos cell, Column c) {
         Seg seg = segmentForCell(cell);
         if (seg != null) {
-            // Between markers: stretch start→end. Endpoints resolve at placement time (per side:
-            // the marker's real block, or the picker block when the marker is air / From: Block list).
-            boolean fromMarkers = cfg.gradientFromMarkers;
+            // Between markers: stretch start→end across the segment. Automatic segments resolve
+            // against the real blocks at the marker cells (air marker → that side stays open).
+            PaletteChoice.Ramp ramp = segmentRamp(mc, seg);
+            if (ramp == null) return null;
             double t = (double) seg.index() / seg.length();
-            Object key = List.of(seg.s(), seg.e());
-            return new GradCtx(t, key, fromMarkers ? seg.s() : null, fromMarkers ? seg.e() : null, -1);
+            return new GradCtx(t, List.of(seg.s(), seg.e()), ramp, -1);
         }
-        if (c.progress >= outsideSteps) return null;
-        double t = outsideSteps <= 1 ? 0.0 : (double) c.progress / (outsideSteps - 1);
-        GradCtx g = new GradCtx(t, new ColKey(c.base, dir), null, null, c.progress);
+        if (c.ramp == null || c.progress >= c.cells) return null;
+        double t = c.cells <= 1 ? 0.0 : (double) c.progress / (c.cells - 1);
+        GradCtx g = new GradCtx(t, new ColKey(c.base, dir), c.ramp, c.progress);
         c.progress++;
         return g;
+    }
+
+    /** Resolve (and per-press cache) the ramp for a marker segment's start/end anchor blocks. */
+    private static PaletteChoice.Ramp segmentRamp(Minecraft mc, Seg seg) {
+        List<BlockPos> key = List.of(seg.s(), seg.e());
+        if (segRamps.containsKey(key)) return segRamps.get(key);
+        PaletteChoice.Ramp ramp =
+                PaletteChoice.resolveRamp(prepared, anchorAt(mc, seg.s()), anchorAt(mc, seg.e()));
+        segRamps.put(key, ramp);
+        return ramp;
     }
 
     /**
@@ -369,7 +436,17 @@ public final class PaintPlacer {
             if (f != null) center = f.center;
             else f = GradientCaches.newFill(seed);
             activeFill = f;
-            maxRadius = Math.max(1, Math.min(16, outsideSteps));
+            // 3D knows its whole range up front: start anchor = the clicked block; the end is
+            // static (prepare enforces it), so no end anchor is needed.
+            ramp3d = PaletteChoice.resolveRamp(prepared, anchorAt(mc, clicked), null);
+            if (ramp3d == null) {
+                overlay(mc, cantResolveMessage());
+                return;
+            }
+            maxRadius = switch (prepared.palette.sizing) {
+                case FILL_SPACE -> MAX_RADIUS; // grow until walls/markers stop it
+                default -> Math.max(1, Math.min(16, PaletteChoice.columnCells(prepared, ramp3d, -1)));
+            };
         }
         if (!mc.level.getBlockState(seed).isAir()) {
             overlay(mc, type.label() + ": no space to fill there");
@@ -429,7 +506,7 @@ public final class PaintPlacer {
     private static GradCtx gradCtx3d(BlockPos cell) {
         if (type != PaintType.GRADIENT) return null;
         double t = Math.min(1.0, Math.sqrt(cell.distSqr(center)) / Math.max(1, maxRadius));
-        return new GradCtx(t, center, null, null, -1);
+        return new GradCtx(t, center, ramp3d, -1);
     }
 
     /**
@@ -464,10 +541,18 @@ public final class PaintPlacer {
         int[][] seed = NoisePlacer.raycastSeed(mc, region, air);
         if (seed == null) return false; // not aimed into a region — fall through to the blob fill
 
-        noiseOrder = NoisePlacer.computeOrder(mc.player);
-        if (noiseOrder.isEmpty()) {
-            overlay(mc, "Noise: no placeable blocks in source");
+        // Region fills are 3D: the palette must have a static end. The start anchor is the
+        // support block the seed cell rests on.
+        prepared = PaletteChoice.prepare(mc.player, "Noise", true);
+        if (prepared.error != null) {
+            overlay(mc, prepared.error);
             return true; // handled (with a message) — don't fall through
+        }
+        noiseRamp = PaletteChoice.resolveRamp(prepared,
+                anchorAt(mc, new BlockPos(seed[1][0], seed[1][1], seed[1][2])), null);
+        if (noiseRamp == null) {
+            overlay(mc, cantResolveMessage());
+            return true;
         }
         List<FloodFill.Cell> cells = FloodFill.compute(seed[0], seed[1], air, region, MAX_FILL);
         for (FloodFill.Cell c : cells) {
@@ -496,6 +581,7 @@ public final class PaintPlacer {
                 continue;
             }
             int slot;
+            boolean ranOut = false;
             switch (type) {
                 case SOLID -> {
                     slot = slotOf(player, solidChosen);
@@ -506,10 +592,31 @@ public final class PaintPlacer {
                         return;
                     }
                 }
-                case NOISE -> slot = NoisePlacer.slotForCell(player, noiseOrder,
-                        p.cell().getX(), p.cell().getY(), p.cell().getZ());
-                case GRADIENT -> slot = gradientSlot(mc, player, cfg, p.g());
+                case NOISE -> {
+                    slot = PaletteChoice.noiseSlot(player, prepared, noiseRamp,
+                            p.cell().getX(), p.cell().getY(), p.cell().getZ());
+                    ranOut = slot < 0;
+                }
+                case GRADIENT -> {
+                    if (p.g() == null || p.g().ramp() == null) {
+                        slot = -1;
+                    } else {
+                        slot = PaletteChoice.pickSlot(player, prepared, p.g().ramp(), p.g().t(), p.g().wobbleKey());
+                        ranOut = slot < 0;
+                    }
+                }
                 default -> slot = -1;
+            }
+            if (ranOut) {
+                // The ramp is known (and cached) — running out of one of its blocks stops the
+                // paint with an error rather than quietly substituting something else.
+                Block missing = PaletteChoice.lastMissingBlock();
+                String name = missing == null ? "a block"
+                        : new ItemStack(missing.asItem()).getHoverName().getString();
+                String pal = prepared != null && prepared.palette != null ? prepared.palette.name : "palette";
+                overlay(mc, "'" + pal + "': out of " + name);
+                reset();
+                return;
             }
             if (slot < 0) continue;
             Direction face = Direction.getNearest(
@@ -522,27 +629,6 @@ public final class PaintPlacer {
                 else if (activeFill != null) GradientCaches.recordFill(activeFill, p.cell());
             }
         }
-    }
-
-    /** Resolve the gradient block for a queued cell (endpoints per side: marker block or picker). */
-    private static int gradientSlot(Minecraft mc, LocalPlayer player, GradientConfig cfg, GradCtx g) {
-        if (g == null) return -1;
-        Block startB = endpointBlock(mc, g.segS(), pickerStart);
-        Block endB = endpointBlock(mc, g.segE(), pickerEnd);
-        if (startB == null || endB == null) return -1;
-        List<GradientChoice.Palette> palette = GradientChoice.sourcePalette(player, startB);
-        if (palette.isEmpty()) return -1;
-        int startRgb = GradientChoice.rgbOf(startB, startB);
-        int endRgb = GradientChoice.rgbOf(endB, startB);
-        GradientChoice.Palette pal = GradientChoice.pick(palette, cfg, startRgb, endRgb, g.t(), g.wobbleKey());
-        return pal == null ? -1 : pal.slot();
-    }
-
-    /** The real block at a marker cell, or the picker fallback when it's air (or no marker side). */
-    private static Block endpointBlock(Minecraft mc, BlockPos markerPos, Block picker) {
-        if (markerPos == null) return picker;
-        var state = mc.level.getBlockState(markerPos);
-        return state.isAir() ? picker : state.getBlock();
     }
 
     // ---- marker segments ------------------------------------------------------------------------
@@ -601,9 +687,9 @@ public final class PaintPlacer {
         previewPos.clear();
         previewDir.clear();
         List<String> src = new ArrayList<>();
-        boolean pickerAlways = cfg.activePaintType == PaintType.NOISE
+        boolean paletteAlways = cfg.activePaintType == PaintType.NOISE
                 || (cfg.activePaintType == PaintType.GRADIENT && pm == PlacementMode.FILL3D);
-        if (pickerAlways) src.add("Selected from picker");
+        if (paletteAlways) src.add("Selected from palette");
 
         // Paint stays at normal block reach (the crosshair hit) — only markers target further.
         BlockHitResult hit = (mc.hitResult instanceof BlockHitResult bhr
@@ -634,7 +720,7 @@ public final class PaintPlacer {
             }
         } else if (cfg.activePaintType == PaintType.GRADIENT
                 && (pm == PlacementMode.SINGLE || pm == PlacementMode.FACE)) {
-            src.add("Selected from picker");
+            src.add("Selected from palette");
         }
         sourcing = src;
     }
@@ -647,20 +733,19 @@ public final class PaintPlacer {
         previewDir.add(d);
     }
 
-    /** What the aimed column's gradient endpoints would be — the truth behind the HUD lines. */
+    /** What the aimed column's gradient anchors would be — the truth behind the HUD lines. */
     private static List<String> gradientSourcingAt(Minecraft mc, GradientConfig cfg, BlockPos b, Direction d) {
-        if (!cfg.gradientFromMarkers) return List.of("Selected from picker");
         int first = firstAirOffset(mc, b, d);
         BlockPos cell = b.relative(d, Math.max(1, first));
         Seg seg = segmentForCell(cell);
-        if (seg == null) return List.of("Selected from picker");
+        if (seg == null) return List.of("Selected from palette");
         boolean sAir = mc.level.getBlockState(seg.s()).isAir();
         boolean eAir = mc.level.getBlockState(seg.e()).isAir();
-        if (!sAir && !eAir) return List.of("Selected from markers");
-        if (sAir && eAir) return List.of("Selected from picker");
+        if (!sAir && !eAir) return List.of("Anchored to markers");
+        if (sAir && eAir) return List.of("Selected from palette");
         return sAir
-                ? List.of("Start selected from picker", "End selected from marker")
-                : List.of("Start selected from marker", "End selected from picker");
+                ? List.of("Start from palette", "End anchored to marker")
+                : List.of("Start anchored to marker", "End from palette");
     }
 
     /** Submit the green face tint + direction arrows (each loader's level-render submit hook). */
@@ -848,10 +933,10 @@ public final class PaintPlacer {
         active = false;
         regionFill = false;
         solidChosen = null;
-        noiseOrder = List.of();
-        pickerStart = null;
-        pickerEnd = null;
-        outsideSteps = 0;
+        prepared = null;
+        noiseRamp = null;
+        ramp3d = null;
+        segRamps.clear();
         activeFill = null;
         dir = null;
         columns.clear();

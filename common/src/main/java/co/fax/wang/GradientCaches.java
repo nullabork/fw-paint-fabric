@@ -94,12 +94,13 @@ public final class GradientCaches {
         lastPlaceMs = System.currentTimeMillis();
     }
 
-    /** Everything that changes what the picker gradient IS — any change invalidates the caches. */
+    /**
+     * Everything that changes what gets placed — any change invalidates the caches. Keyed off the
+     * active palette's full content (which includes its id, so switching palettes always clears)
+     * plus the global missing-block policy.
+     */
     private static String fingerprintOf(GradientConfig cfg) {
-        return cfg.orderStartBlock + '|' + cfg.orderEndBlock + '|' + cfg.gradientMode + '|'
-                + cfg.curve + '|' + cfg.maxSteps + '|' + cfg.deviationBudget + '|' + cfg.chaos + '|'
-                + cfg.stepWobble + '|' + cfg.pixelPercent + '|' + cfg.source + '|'
-                + cfg.pickNumbers.hashCode() + '|' + cfg.excludedBlocks.hashCode() + '|'
-                + cfg.requiredBlocks.hashCode();
+        co.fax.wang.palette.Palette active = co.fax.wang.palette.PaletteStore.active();
+        return (active == null ? "<none>" : active.contentKey()) + '|' + cfg.missingBlockPolicy;
     }
 }

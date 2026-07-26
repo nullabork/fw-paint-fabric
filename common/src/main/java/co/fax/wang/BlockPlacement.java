@@ -1,23 +1,14 @@
 package co.fax.wang;
 
-import co.fax.wang.config.ConfigManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.NonNullList;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.Identifier;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.ContainerInput;
-import net.minecraft.world.item.BlockItem;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
-
-import java.util.List;
 
 /**
  * Shared client-side, multiplayer-safe block placement (the Litematica approach): select/swap the
@@ -64,24 +55,4 @@ public final class BlockPlacement {
         }
     }
 
-    /** Inventory slot of a placeable, non-excluded {@code block} within the configured source, or -1. */
-    public static int findSlot(LocalPlayer player, Block block) {
-        NonNullList<ItemStack> items = player.getInventory().getNonEquipmentItems();
-        List<String> excluded = ConfigManager.get().excludedBlocks;
-        int from, to;
-        switch (ConfigManager.get().source) {
-            case HOTBAR -> { from = 0; to = 9; }
-            case INVENTORY -> { from = 9; to = 36; }
-            default -> { from = 0; to = 36; }
-        }
-        to = Math.min(to, items.size());
-        for (int slot = from; slot < to; slot++) {
-            ItemStack st = items.get(slot);
-            if (!(st.getItem() instanceof BlockItem bi) || bi.getBlock() != block) continue;
-            Identifier id = BuiltInRegistries.ITEM.getKey(st.getItem());
-            if (id != null && excluded.contains(id.toString())) continue;
-            return slot;
-        }
-        return -1;
-    }
 }

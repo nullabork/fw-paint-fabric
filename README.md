@@ -68,8 +68,9 @@ are normal). Each loader keeps its own world/config under `fabric/run/` and `neo
 
 Unit tests live in `common/` and cover the pure, Minecraft-free maths: gradient
 ordering/deviation (`GradientRampTest`), texture pixel analysis (`TextureStatsTest`), noise
-(`NoiseTest`), flood fill (`FloodFillTest`), noise placement ordering (`NoisePlacerTest`), and
-pick numbering (`PicksTest`). Anything touching Minecraft classes is exercised via `runClient`,
+(`NoiseTest`), flood fill (`FloodFillTest`), marker-segment geometry (`NoisePlacerTest`), palette
+band maths (`PaletteMathTest`), and the palette model/store (`PaletteTest`,
+`PaletteStoreNamingTest`). Anything touching Minecraft classes is exercised via `runClient`,
 not tests.
 
 ## Install the jar into a real instance
@@ -95,16 +96,20 @@ The mod is client-side only; servers need nothing.
 ```
 common/src/main/java/co/fax/wang/
   Gradient.java          loader-free core: keybinds, tick driving, shared state
-  GradientScreen.java    the K screen (Solid / Gradient / Noise Paint / Settings / Help tabs)
-  BlockPickerPanel.java  reusable scrollable block list      HelpPanel.java  in-game manual
-  HudOverlay.java        helper-text rendering    HudPlacementScreen.java  move-the-text screen
+  GradientScreen.java    the K screen (Solid / Palette / Finder / Settings / Help tabs)
+  PaletteEditScreen.java the palette editor       PaletteListPanel.java  the Palette tab's rows
+  PaletteChoice.java     resolves the active palette into placeable ramps (Automatic segments etc.)
+  HelpPanel.java         in-game manual           UiIcons.java  shared pixel-art glyphs
+  HudOverlay.java        helper-text + palette-row HUD   HudPlacementScreen.java  move-the-text screen
   MarkerManager.java     marker modes/persistence + in-world rendering
   PaintPlacer.java       unified Single/Face/3D placement for all paint types
-  GradientChoice.java    gradient palette/pick maths          GradientCaches.java  session memory
-  NoisePlacer.java       noise ordering + region helpers      BlockPlacement.java  multiplayer-safe placing
+  GradientCaches.java    session memory           NoisePlacer.java  marked-region geometry
   GradientRamp.java      gradient-order maths     BlockTextures.java / TextureStats.java  texture analysis
-  Noise.java / NoiseType.java / FloodFill.java / Picks.java / CurveFunction.java / FaceOverlay.java
+  BlockPlacement.java    multiplayer-safe placing
+  Noise.java / NoiseType.java / FloodFill.java / CurveFunction.java / FaceOverlay.java
   PlacementMode.java / PaintType.java / SolidMatch.java / GradientMode.java / GradientSource.java
+  palette/               the v2 model: Palette, PaletteSegment, PaletteStore (fw-paint-palettes.json),
+                         PaletteMath, AutoMode, PaletteOrder, SizingMode, MissingBlockPolicy
   config/GradientConfig.java + config/ConfigManager.java   Gson config -> config/gradient.json
 common/src/test/java/co/fax/wang/   unit tests (pure maths only)
 fabric/src/main/java/co/fax/wang/fabric/GradientFabric.java       Fabric entrypoint

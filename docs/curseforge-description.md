@@ -2,31 +2,70 @@
 
 Open source (MIT) — [github.com/nullabork/fw-paint-fabric](https://github.com/nullabork/fw-paint-fabric)
 
+![One palette, two paints: a gradient wall and its noise counterpart](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/gradient-vs-noise-same-palette-walls-v2.0.0-beta.1.jpg)
+
 **Paint with blocks.** A client-side mod (Fabric **and** NeoForge) with three paints — **Solid**
 (one block: walls, columns, volumes), **Gradient** (smooth colour/brightness blends), **Noise**
-(natural, blotchy 3D patterns) — all using the blocks already in your inventory, plus a **Finder**
-tab that ranks every block in the game by colour. Any paint works through any placement mode, with
-or without markers. Placement is the legit, multiplayer-safe way (normal block-place interactions
-the server validates), so it works on servers.
+(natural, blotchy 3D patterns) — all driven by **Palettes**: named, saved block ramps you build
+once and reuse everywhere. A **Finder** tab ranks every block in the game by colour. Any paint
+works through any placement mode, with or without markers. Placement is the legit,
+multiplayer-safe way (normal block-place interactions the server validates), so it works on
+servers.
+
+> **v2 beta.** Palettes replace v1's per-tool block picker. v1 gradient settings are not
+> migrated — build your first palette on the Palette tab and you're going again in a minute.
 
 ## Quick start
 
 1. Press **K** → **Settings** → **Paint tool**: pick any item (e.g. a stick). The mod is active
    only while you hold it.
-2. **V** switches paint type, **G** cycles placement mode — the helper text (top-left) shows both.
-3. Right-click a block face to paint: a tap places one layer, holding keeps going. The green face
+2. On the **Palette** tab press **+ New**: double-click (or drag) blocks — or the **Auto**
+   wildcards — into the strip, then **Save**. Saving makes it the active palette.
+3. **K** lands on the **Paint** tab: buttons for paint type, placement mode, and the active
+   palette (in-game: **V**, **G**, and **B**).
+4. Right-click a block face to paint: a tap places one layer, holding keeps going. The green face
    tint + arrows preview exactly what the click will grow, and which way.
-4. Markers are optional: they bound what you paint and give gradients their endpoints.
-5. Lost? The **Help** tab is a drill-down in-game manual, always showing your current keybinds.
+5. Markers are optional: they bound what you paint and anchor Automatic segments.
+6. Lost? The **Help** tab is a drill-down in-game manual, always showing your current keybinds.
 
 ## Keybinds
 
-- **K** — open / close the FW Paint screen
-- **V** — switch paint type (or the **Use** button on each tool tab)
+- **K** — open / close the FW Paint screen (lands on the Paint quick-controls tab)
+- **V** — switch paint type · **B** — cycle the active palette
 - **G** — cycle placement mode: Marker → Marker corners → Marker draw → Single → Face → 3D Fill →
   Disabled
 - **L-Ctrl** (hold + click) — a marker-removing click clears the whole connected plane
 - All rebindable under Options → Controls → Key Binds → MISC.
+
+## Palettes
+
+One palette drives **both gradient and noise painting**. The Palette tab lists every palette
+you've saved — name, its segment sprites, an expandable summary, and a red border when its blocks
+aren't in your inventory (by default painting refuses then; a Settings toggle can skip the
+missing segments instead). **Use / Edit / Delete** above the list; the HUD shows the active
+palette and **B** cycles them in-game.
+
+**The editor**: two live previews on top (a gradient cylinder and a noise cube, each expandable),
+your colour-sorted inventory blocks in the middle, and the **segment strip** on the right:
+
+- **Double-click or drag** blocks into the strip; drag a segment up/down to reorder, sideways out
+  to remove; drag the pointed **stop handles** to resize segments — placement uses exactly the
+  shares you drew (the Curve turns **C**ustom).
+- **Order** and **Curve** icon-buttons above the strip: sort by colour or brightness
+  (asc/desc), pick an easing (Linear / Ease In / Ease Out / Ease In-Out / Step) — or shape your
+  own by hand.
+- **Auto segments** — the crosshatched wildcards: *Auto colour* and *Auto brightness* resolve to
+  a real inventory block **when you paint**, deterministically: at the strip's start they read
+  the block you started on; at the end they scan to an end marker or the first solid block — and
+  if there's nothing to find, they pick the *opposite* of your start (lightest↔darkest for
+  brightness, the furthest colour for colour) so you still get a full ramp. A strip of nothing
+  but Autos is a reusable "gradient from whatever I'm standing on".
+  Right-click a block in the list to ban it from Auto picks.
+- **Sizing**: **Min blocks** (shortest run that fits the ratios), **Fill space** (out to the end
+  marker / first block), or **Set steps** (fixed length).
+- **Variation** (similar blocks stand in), **Chaos** (repeat/skip dither), **Step length**
+  (steps randomly run longer/shorter) — plus the palette's own noise type / scale / seed.
+- Hover any control (or click its circled-?) for help describing what it's currently set to.
 
 ## Placement modes
 
@@ -59,50 +98,38 @@ dimension; **Clear Markers** (Settings) wipes them.
 - **Auto end marker** (Settings) — each start scans out from the clicked face and marks the first
   non-air block (all air → max distance), with a blue face + arrow preview.
 
-## Solid tool
+## Gradient painting
 
-One kind of block through any mode; the **Match** button picks which: **Selected block** (the ✓
-block in your list), **Exact block** (copies the clicked block), **Closest colour / brightness**
-(nearest inventory match to the clicked block, measured as the eye sees it — Oklab). Blocks marked
-**✗** are never placed, even on an exact match.
+The active palette blended along your build — between markers or free-hand.
 
-## Gradient tool
+- **Between markers**: mark a start and end, click the face the line runs out of and hold — the
+  palette stretches start→end, Automatic segments anchoring to the real marker blocks.
+- **Anywhere else**: the gradient grows out of the clicked face, sized by the palette's Sizing
+  mode. **Gradient memory** continues a half-finished gradient when re-clicked (cleared when you
+  switch or edit palettes, or after the Settings idle timer); a *finished* gradient starts a
+  fresh one on top.
+- **3D gradients**: sphere-ish blends from the centre out; each fill remembers its centre. 3D
+  needs the strip to end in a real block (Auto at the start is fine).
+- Honest ramps: running out of a palette block stops the paint with an "out of X" message — no
+  silent substitutions.
 
-A smooth blend from one block to another — along markers or free-hand.
+## Noise painting
 
-- **Between markers**: mark a start and end block, click the face the line runs out of and hold —
-  the gradient stretches start→end, marker blocks included as its first and last steps.
-- **Anywhere else**: the picker list's [S]→[E] steps grow out of the clicked face, one block per
-  step. **Gradient memory** continues a half-finished gradient when re-clicked (cleared when the
-  picker changes or after the Settings idle timer).
-- **3D gradients**: sphere-ish blends from the centre out; each fill remembers its centre.
-- The helper text always says where the endpoints come from (markers, picker, or a split pair).
-- **Order modes**: Color, Brightness, Top % Dark/Light (tuned by **Pixel %**), B&W/Colour Diff, or
-  **Pick** (fully manual numbering). Perceptual colour (Oklab) by default — **Color match** in
-  Settings switches to the classic maths.
-- **Shaping**: **Curve** (drawn as its shape on the button: Linear / Ease In / Ease Out /
-  Ease In-Out / Step), **Variation** (similar blocks stand in for a step), **Chaos** (repeat/skip
-  dither), **Step length** (steps randomly run longer/shorter), **Max steps**.
-- **The curve strip**: the thin middle column stacks every step as a band of its block — band
-  height = that step's share of the fill. **Drag the side handles** to reshape the shares: the
-  curve flips to **C** (custom) and placement uses exactly what you drew. Cycling the curve snaps
-  back to a preset shape.
-- **Live preview**: an open-topped cylinder placed with the real pipeline — top rim = start,
-  bottom = end, every column rolling its own Chaos / Step length / Variation. **⛶** expands it
-  full screen (✗ or Esc closes).
-
-## Noise tool
-
-A seedable 3D noise field: valleys get one end of your block order, peaks the other. Always
-ordered from the picker list.
+A seedable 3D noise field: valleys get the top of your palette's strip, peaks the bottom — with
+the palette's noise type (Smooth / Perlin / Fractal), per-axis Scale, and Seed.
 
 - **Region fill**: bound a region with start/end marker pairs, switch to 3D Fill, right-click an
   empty spot inside — the whole region floods at once. Or paint anywhere: Single / Face / 3D.
-- **Settings**: type (Smooth / Perlin / Fractal), **Seed**, per-axis **Scale** with Lock XYZ, plus
-  its own Order / **Curve + strip** / Variation / Chaos / Max steps.
-- **Live preview**: an isometric cube sampled at real world coordinates starting at your feet —
-  exactly what painting that spot would place. Drag a face to pan along it (side faces pan up and
-  down too); **⛶** expands it full screen (✗ or Esc closes).
+- The editor's noise cube previews it at real world coordinates starting at your feet — exactly
+  what painting that spot would place. Drag a face to pan.
+
+## Solid tool
+
+One kind of block through any mode. **Left-click** a block in the list to select it (again to
+clear), **right-click** to exclude it from the closest-match modes; the big preview shows your
+pick (or a **?** when the mode decides at click time). **Match**: **Selected block**, **Exact
+block** (copies the clicked block), **Closest colour / brightness** (nearest inventory match,
+measured as the eye sees it — Oklab).
 
 ## Finder tab
 
@@ -114,20 +141,12 @@ Every placeable block in the game ranked by colour — discover blocks beyond yo
   target button re-centres after scrolling.
 - Colours come from each block's actual textures — resource packs included.
 
-## The block list (all tabs)
-
-- **White** = placement sequence, **blue** = eligible but unused, **green** = must-use / ✓,
-  **red** = excluded; [S]/[E] tag the endpoints. A yellow key under the list explains the buttons.
-- Buttons: **[S]** / **[E]** set endpoints, **✓** must-use, **✗** exclude. **Double-click**
-  toggles ✓, **middle-click** toggles exclusion; mouse wheel scrolls.
-- **Source** (above each list): Hotbar / Inventory / both.
-
 ## Settings
 
 - **Placement**, **Marker dist**, **Auto end marker**, **Fill voids first**, **Gradient memory**
-  — see above. **Color match**: Perceptual (Oklab) or Classic.
-- **Move helper text…** repositions the HUD lines with a live preview. Each tool tab has a
-  **Use** button; the screen opens on the active paint's tab.
+  — see above. **Missing blocks**: refuse to paint or skip absent segments. **Color match**:
+  Perceptual (Oklab) or Classic.
+- **Move helper text…** repositions the HUD lines with a live preview.
 
 ## Requirements
 

@@ -19,6 +19,12 @@ dependencies {
     implementation project(':common')
 }
 
+// Common's assets must be part of THIS module's resources: Loom only registers the fabric
+// module's own source set with the dev runtime's resource loader, so a plain project dependency
+// leaves common's assets (lang, gui sprites) invisible in-dev even though the shipped jar had
+// them. Adding the directory here makes dev and the jar see the same files.
+sourceSets.main.resources.srcDir project(':common').file('src/main/resources')
+
 processResources {
     inputs.property "version", project.version
     filesMatching("fabric.mod.json") {
@@ -27,6 +33,7 @@ processResources {
 }
 
 jar {
-    // One self-contained jar: the loader shell plus all of common's classes + assets.
-    from project(':common').sourceSets.main.output
+    // One self-contained jar: the loader shell plus common's classes (assets already come in
+    // through processResources via the shared resources srcDir above).
+    from project(':common').sourceSets.main.output.classesDirs
 }

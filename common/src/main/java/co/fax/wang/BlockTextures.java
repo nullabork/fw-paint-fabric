@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.InputStream;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,34 +26,21 @@ public final class BlockTextures {
     private BlockTextures() {}
 
     private static final Logger LOG = LoggerFactory.getLogger("gradient/textures");
-    private static final int SIGNATURE_GRID = 8;
 
     private record Tex(int[] argb, int w, int h) {}
     private static final Tex EMPTY = new Tex(new int[0], 0, 0);
 
     private static final Map<Block, Tex> TEX_CACHE = new HashMap<>();
-    private static final Map<Block, int[]> SIG_CACHE = new HashMap<>();
 
     /**
-     * The 0xRRGGBB value a block contributes to the gradient. For most modes this is a texture
-     * colour; for the diff modes it's a grey encoding of how different the block's texture is from
-     * {@code startBlock} (so the gradient sorts by similarity to the start).
+     * The 0xRRGGBB value a block contributes to the gradient: its average texture colour (with the
+     * block's static tint applied). {@code startBlock} and {@code pixelFraction} are legacy v1
+     * parameters kept for signature stability; the surviving COLOR/BRIGHTNESS modes both key off
+     * the same average colour (BRIGHTNESS orders by its lightness downstream).
      */
     public static int gradientValue(Block block, Block startBlock, GradientMode mode, double pixelFraction) {
-        if (mode.isStartRelative() && startBlock != null) {
-            int[] sig = signature(block), start = signature(startBlock);
-            double d = (mode == GradientMode.COLOR_DIFF)
-                    ? TextureStats.colorDiff(sig, start)
-                    : TextureStats.bwDiff(sig, start);
-            int grey = Math.max(0, Math.min(255, (int) Math.round(d)));
-            return (grey << 16) | (grey << 8) | grey; // luminance == the diff
-        }
-
         int[] px = tex(block).argb();
         if (px.length > 0) {
-            if (mode.usesPixelPercent()) {
-                return applyTint(block, TextureStats.topColor(px, pixelFraction, mode.selectsLightest()));
-            }
             return applyTint(block, TextureStats.averageColor(px));
         }
         var mapColor = block.defaultMapColor(); // fallback when no texture is available
@@ -69,19 +55,6 @@ public final class BlockTextures {
     /** Drop caches — call on a resource reload so re-read textures aren't stale. */
     public static void clearCache() {
         TEX_CACHE.clear();
-        SIG_CACHE.clear();
-    }
-
-    private static int[] signature(Block block) {
-        return SIG_CACHE.computeIfAbsent(block, b -> {
-            Tex t = tex(b);
-            if (t.argb().length == 0) {
-                int[] empty = new int[SIGNATURE_GRID * SIGNATURE_GRID];
-                Arrays.fill(empty, -1);
-                return empty;
-            }
-            return TextureStats.downsample(t.argb(), t.w(), t.h(), SIGNATURE_GRID);
-        });
     }
 
     private static Tex tex(Block block) {

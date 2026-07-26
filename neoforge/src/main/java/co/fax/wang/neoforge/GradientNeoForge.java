@@ -38,6 +38,7 @@ public class GradientNeoForge {
         event.register(Gradient.openKey);
         event.register(Gradient.cycleKey);
         event.register(Gradient.paintTypeKey);
+        event.register(Gradient.cyclePaletteKey);
         event.register(Gradient.clearConnectedKey);
     }
 
