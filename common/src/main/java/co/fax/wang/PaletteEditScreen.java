@@ -510,7 +510,7 @@ public class PaletteEditScreen extends Screen {
         }
         if (!anyStatic) {
             for (int i = 0; i < n; i++) {
-                double hue = n <= 1 ? 0 : 0.85 * i / (n - 1); // rainbow, stable by position
+                double hue = n <= 1 ? 0 : 300.0 * i / (n - 1); // rainbow (degrees), stable by position
                 out[i] = ColorOrder.hsvToRgb(hue, 0.65, 0.95);
             }
         } else {

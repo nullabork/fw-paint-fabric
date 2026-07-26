@@ -256,39 +256,29 @@ public final class PaletteListPanel {
         g.fill(x + w - 1, y, x + w, y + h, color);
     }
 
-    /** The 16×16 crosshatch texture — the visual for an Automatic segment. */
+    /** The 16×16 crosshatch (a gui-atlas sprite: textures/gui/sprites/crosshatch.png). */
     private static final net.minecraft.resources.Identifier CROSSHATCH =
-            net.minecraft.resources.Identifier.fromNamespaceAndPath("gradient", "textures/gui/crosshatch.png");
+            net.minecraft.resources.Identifier.fromNamespaceAndPath("gradient", "crosshatch");
 
     /** The neutral grey tint — the untinted crosshatch look. */
     private static final int PLAIN_TINT = 0xFF8A8A8A;
 
     /**
-     * A 45° crosshatch tile. A static texture asset drawn with one blit — the old per-pixel fill
-     * version issued ~128 quads per tile and dragged the whole UI down once Automatic segments
-     * covered any real area (strip, previews, HUD).
+     * A 45° thin-diagonal crosshatch tile. A static sprite drawn with one blit — the old
+     * per-pixel fill version issued ~128 quads per tile and dragged the whole UI down once
+     * Automatic segments covered any real area (strip, previews, HUD).
      */
     public static void drawCrosshatch(GuiGraphicsExtractor g, int x, int y, int size) {
         drawCrosshatch(g, x, y, size, 0);
     }
 
     /**
-     * Tinted variant: the texture's lines are white, so {@code tint} (ARGB; 0 = neutral grey)
+     * Tinted variant: the sprite's lines are white, so {@code tint} (ARGB; 0 = neutral grey)
      * colours them fully — used for the editor's representative Automatic-segment colours.
      */
     public static void drawCrosshatch(GuiGraphicsExtractor g, int x, int y, int size, int tint) {
-        int color = tint == 0 ? PLAIN_TINT : tint;
-        if (size == 16) {
-            g.blit(net.minecraft.client.renderer.RenderPipelines.GUI_TEXTURED, CROSSHATCH,
-                    x, y, 0f, 0f, 16, 16, 16, 16, color);
-        } else {
-            g.pose().pushMatrix();
-            g.pose().translate(x, y);
-            g.pose().scale(size / 16f, size / 16f);
-            g.blit(net.minecraft.client.renderer.RenderPipelines.GUI_TEXTURED, CROSSHATCH,
-                    0, 0, 0f, 0f, 16, 16, 16, 16, color);
-            g.pose().popMatrix();
-        }
+        g.blitSprite(net.minecraft.client.renderer.RenderPipelines.GUI_TEXTURED, CROSSHATCH,
+                x, y, size, size, tint == 0 ? PLAIN_TINT : tint);
     }
 
     /** Both PaletteSegment shapes rendered the same way everywhere: sprite or crosshatch. */
