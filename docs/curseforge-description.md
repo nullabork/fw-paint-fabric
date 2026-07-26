@@ -2,7 +2,7 @@
 
 Open source (MIT) — [github.com/nullabork/fw-paint-fabric](https://github.com/nullabork/fw-paint-fabric)
 
-![One palette, two paints: a gradient wall and its noise counterpart](images/gradient-vs-noise-same-palette-walls-v2.0.0-beta.1.jpg)
+![One palette, two paints: a gradient wall and its noise counterpart](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/gradient-vs-noise-same-palette-walls-v2.0.0-beta.1.jpg)
 
 **Paint with blocks.** A client-side mod (Fabric **and** NeoForge) with three paints — **Solid**
 (one block: walls, columns, volumes), **Gradient** (smooth colour/brightness blends), **Noise**
