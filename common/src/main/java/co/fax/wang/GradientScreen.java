@@ -60,17 +60,16 @@ public class GradientScreen extends Screen {
 
     /** Title-bar order, left to right (right-aligned as a group). */
     private static final Tab[] BAR_ORDER = {Tab.SOLID, Tab.PALETTE, Tab.FINDER, Tab.SETTINGS, Tab.HELP};
-    private enum SolidAssign { NONE, TICK, CROSS }
 
     private static final int TOOL_BTN_Y = 30;
     private static final int TOOL_BTN_H = 20;
     private static final int TOOL_FILTER_Y = 54;
 
-    // Solid-tab left column layout.
+    // Solid-tab layout.
     private static final int PICK_SRC_Y = 30;
-    private static final int PICK_BTN_Y = 54;
-    private static final int PICK_LIST_Y = 78;
-    private static final int LEGEND_H = 26; // two key lines under the list
+    private static final int SOLID_LIST_Y = 54;
+    private static final int SOLID_PREVIEW_H = 80;   // big selected-block preview above the settings
+    private static final int SOLID_ROW_H = 18;
     private static final int PRESSED_OVERLAY = 0x80000000; // darkens a vanilla button to show "on"
 
     private record SourceBlock(String id, ItemStack stack, Block block) {}
@@ -78,25 +77,19 @@ public class GradientScreen extends Screen {
 
     private static Tab tab = Tab.SOLID; // set on open to the active paint type's tab
 
-    // Solid tab state.
-    private BlockPickerPanel picker;
+    // Solid tab state: left-click toggles the selection, right-click toggles exclusion.
+    private record SolidRow(SourceBlock sb, int color, String tag, boolean strike) {}
     private List<SourceBlock> sourceBlocks = new ArrayList<>();
-    private SolidAssign solidAssign = SolidAssign.NONE;
-    private int solidMatchDescY;
-    private int legendY; // y of the yellow button key under the block list
+    private final List<SolidRow> solidRows = new ArrayList<>();
+    private int solidScroll;
+    private int solidListH;
 
-    // Manual double-click tracking for list rows (the vanilla flag only fires on real widgets).
-    private String lastRowClickId;
-    private long lastRowClickMs;
-
-    /** True when this left-click is the second click on the same row within the double-click window. */
-    private boolean isRowDoubleClick(String id) {
-        long now = System.currentTimeMillis();
-        boolean dbl = id.equals(lastRowClickId) && now - lastRowClickMs < 400;
-        lastRowClickId = dbl ? null : id; // reset after a double so a triple doesn't chain
-        lastRowClickMs = now;
-        return dbl;
-    }
+    // Circled-? help spots (Solid + Settings tabs): hover a control (or click its icon) for a
+    // popup describing what it's CURRENTLY doing; moving away dismisses it.
+    private record HelpSpot(int x, int y, int w, int h, java.util.function.Supplier<String> text) {}
+    private final List<HelpSpot> helpSpots = new ArrayList<>();
+    private HelpSpot hoverSpot, clickedSpot;
+    private long hoverSince;
 
     // Help tab state — static so the manual keeps its expansion + scroll across reopening (like tab).
     private static HelpPanel help;
@@ -121,7 +114,6 @@ public class GradientScreen extends Screen {
 
     // Settings tab state.
     private EditBox filterBox;
-    private int autoEndDescY, fillVoidsDescY, memoryDescY;
     private final List<ToolRow> matches = new ArrayList<>();
     private String filter = "";
     private int toolRowHeight = 12;
@@ -198,6 +190,7 @@ public class GradientScreen extends Screen {
     @Override
     protected void init() {
         toolRowHeight = this.font.lineHeight + 3;
+        helpSpots.clear();
         if (tab == Tab.PALETTE) initPaletteTab();
         else if (tab == Tab.SOLID) initSolidTab();
         else if (tab == Tab.FINDER) initFinderTab();
@@ -445,84 +438,70 @@ public class GradientScreen extends Screen {
 
     private void initSolidTab() {
         sourceBlocks = gatherSourceBlocks();
-        picker = new BlockPickerPanel(this.font);
         int cx = contentX(), w = leftW();
 
         addRenderableWidget(Button.builder(sourceLabel(), b -> {
             GradientConfig c = ConfigManager.get(); c.source = c.source.next(); ConfigManager.save();
             sourceBlocks = gatherSourceBlocks(); rebuildSolidRows(); b.setMessage(sourceLabel());
         }).bounds(cx, PICK_SRC_Y, w, 20).build());
+        helpSpots.add(new HelpSpot(cx, PICK_SRC_Y, w, 20,
+                () -> "Candidate blocks come from " + ConfigManager.get().source.displayName()));
 
-        // ✓ arms a one-shot single selection; ✗ stays armed until clicked again.
-        int bw2 = w / 2;
-        addRenderableWidget(Button.builder(Component.literal("✓"),
-                b -> solidAssign = solidAssign == SolidAssign.TICK ? SolidAssign.NONE : SolidAssign.TICK)
-                .bounds(cx, PICK_BTN_Y, bw2, 20).build());
-        addRenderableWidget(Button.builder(Component.literal("✗"),
-                b -> solidAssign = solidAssign == SolidAssign.CROSS ? SolidAssign.NONE : SolidAssign.CROSS)
-                .bounds(cx + bw2, PICK_BTN_Y, w - bw2, 20).build());
-
-        int availH = (this.height - 30) - PICK_LIST_Y;
-        int listH = Math.max(BlockPickerPanel.ROW_H, Math.min(BlockPickerPanel.MAX_H, availH - LEGEND_H));
-        picker.setBounds(cx, PICK_LIST_Y, w, listH);
-        legendY = PICK_LIST_Y + listH + 4;
+        int availH = (this.height - 34) - SOLID_LIST_Y - 26; // room for the grey hint lines
+        solidListH = Math.max(SOLID_ROW_H, Math.min(SOLID_ROW_H * 11, availH));
         rebuildSolidRows();
 
-        // Right column: how the placed block is chosen.
+        // Right column: the big selected-block preview renders above; Match button under it.
         int rx = rightX(), rw = rightW();
-        int y = 30;
-        cycleButton(rx, y, rw, this::matchLabel, () -> {
+        int matchY = 30 + SOLID_PREVIEW_H + 8;
+        cycleButton(rx, matchY, rw - 14, this::matchLabel, () -> {
             GradientConfig c = ConfigManager.get(); c.solidMatch = c.solidMatch.next();
-            rebuildSolidRows(); // the ✓ row gains/loses its strikethrough with the mode
+            rebuildSolidRows(); // the selected row gains/loses its strikethrough with the mode
         });
-        y += 24; solidMatchDescY = y;
+        helpSpots.add(new HelpSpot(rx, matchY, rw - 14, 20, this::matchDescription));
     }
 
-    /** Rows: ✓ block green (at most one), excluded red at the bottom, the rest white. The ✓ row is
-     *  struck through when the match mode isn't "Selected block" (the selection is inactive). */
+    /** Rows: the selected block green (struck through when the mode ignores it), excluded red at
+     *  the bottom, the rest white. */
     private void rebuildSolidRows() {
-        if (picker == null) return;
+        solidRows.clear();
         GradientConfig cfg = ConfigManager.get();
         Set<String> excluded = new HashSet<>(cfg.solidExcludedBlocks);
         boolean selectionActive = cfg.solidMatch == SolidMatch.SELECTED;
-        List<BlockPickerPanel.Row> rows = new ArrayList<>();
         for (SourceBlock sb : sourceBlocks) {
             if (excluded.contains(sb.id())) continue;
             boolean sel = sb.id().equals(cfg.solidBlock);
-            String prefix = (sel && !selectionActive) ? "§m" : "";
-            rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), sel ? GREEN : WHITE, sel ? " ✓" : "", prefix));
+            solidRows.add(new SolidRow(sb, sel ? GREEN : WHITE, sel ? " ✓" : "", sel && !selectionActive));
         }
         for (SourceBlock sb : sourceBlocks) {
-            if (excluded.contains(sb.id())) rows.add(new BlockPickerPanel.Row(sb.stack(), sb.id(), RED, "", ""));
+            if (excluded.contains(sb.id())) solidRows.add(new SolidRow(sb, RED, "", false));
         }
-        picker.setRows(rows);
+        solidScroll = Math.max(0, Math.min(solidScroll, maxSolidScroll()));
     }
 
-    /**
-     * Solid-list clicks. Armed ✓ = one-shot single select; armed ✗ = toggle exclusion (stays armed).
-     * Shortcuts: double-click un-excludes / toggles the ✓; middle-click un-ticks / toggles exclusion.
-     */
-    private boolean handleSolidRowClick(String id, int button, boolean doubled) {
+    private int maxSolidScroll() {
+        return Math.max(0, solidRows.size() - solidListH / SOLID_ROW_H);
+    }
+
+    /** Row id under the mouse in the solid list, or null. */
+    private String solidRowIdAt(double mx, double my) {
+        int cx = contentX(), w = leftW();
+        if (mx < cx || mx > cx + w || my < SOLID_LIST_Y || my >= SOLID_LIST_Y + solidListH) return null;
+        int idx = solidScroll + (int) ((my - SOLID_LIST_Y) / SOLID_ROW_H);
+        return (idx >= 0 && idx < solidRows.size()) ? solidRows.get(idx).sb().id() : null;
+    }
+
+    /** Left-click toggles the selection; right-click toggles exclusion (closest-match modes). */
+    private boolean handleSolidRowClick(String id, int button) {
         GradientConfig cfg = ConfigManager.get();
-        if (button == 2) { // middle: ✓ → neutral, neutral ↔ excluded
-            if (id.equals(cfg.solidBlock)) cfg.solidBlock = "";
-            else if (!cfg.solidExcludedBlocks.remove(id)) cfg.solidExcludedBlocks.add(id);
-        } else if (doubled && button == 0 && solidAssign == SolidAssign.NONE) {
-            // double: excluded → neutral, ✓ → neutral, neutral → ✓
-            if (cfg.solidExcludedBlocks.contains(id)) cfg.solidExcludedBlocks.remove(id);
-            else if (id.equals(cfg.solidBlock)) cfg.solidBlock = "";
-            else cfg.solidBlock = id;
-        } else if (button == 0 && solidAssign == SolidAssign.TICK) {
-            cfg.solidBlock = id; // single selection — replaces any previous ✓
-            cfg.solidExcludedBlocks.remove(id);
-            solidAssign = SolidAssign.NONE; // ✓ toggles itself off after one pick
-            lastRowClickId = null; // armed action — don't let a follow-up click read as a double
-        } else if (button == 0 && solidAssign == SolidAssign.CROSS) {
+        if (button == 0) {
+            cfg.solidExcludedBlocks.remove(id); // selecting an excluded block un-excludes it
+            cfg.solidBlock = id.equals(cfg.solidBlock) ? "" : id;
+        } else if (button == 1) {
             if (!cfg.solidExcludedBlocks.remove(id)) {
                 cfg.solidExcludedBlocks.add(id);
                 if (id.equals(cfg.solidBlock)) cfg.solidBlock = "";
             }
-            lastRowClickId = null;
         } else {
             return false;
         }
@@ -537,56 +516,186 @@ public class GradientScreen extends Screen {
 
     private String matchDescription() {
         return switch (ConfigManager.get().solidMatch) {
-            case SELECTED -> "Places the ✓ block from the list";
+            case SELECTED -> "Places the selected block from the list";
             case EXACT -> "Places exactly the block you click";
-            case CLOSEST_COLOR -> "Closest colour to the clicked block";
-            case CLOSEST_BRIGHTNESS -> "Closest brightness to the clicked";
+            case CLOSEST_COLOR -> "Places your closest colour match to the clicked block";
+            case CLOSEST_BRIGHTNESS -> "Places your closest brightness match to the clicked block";
         };
     }
 
     private void renderSolidTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
-        if (picker != null) picker.render(g, mouseX, mouseY);
-        int cx = contentX(), bw2 = leftW() / 2;
-        if (solidAssign == SolidAssign.TICK) g.fill(cx, PICK_BTN_Y, cx + bw2, PICK_BTN_Y + 20, PRESSED_OVERLAY);
-        if (solidAssign == SolidAssign.CROSS) g.fill(cx + bw2, PICK_BTN_Y, cx + leftW(), PICK_BTN_Y + 20, PRESSED_OVERLAY);
-        renderPickerLegend(g);
+        int cx = contentX(), w = leftW();
+        int ly = SOLID_LIST_Y, lh = solidListH;
+
+        // Editor-style list box: dark translucent background, white outline.
+        g.fill(cx, ly, cx + w, ly + lh, 0x90000000);
+        UiIcons.outline(g, cx, ly, w, lh, 0xA0FFFFFF);
+        g.enableScissor(cx, ly, cx + w, ly + lh);
+        for (int i = solidScroll; i < solidRows.size(); i++) {
+            int ry = ly + (i - solidScroll) * SOLID_ROW_H;
+            if (ry >= ly + lh) break;
+            SolidRow row = solidRows.get(i);
+            boolean hover = mouseX >= cx && mouseX <= cx + w && mouseY >= ry && mouseY < ry + SOLID_ROW_H;
+            if (hover) g.fill(cx + 1, ry, cx + w - 1, ry + SOLID_ROW_H, HOVER_BG);
+            g.item(row.sb().stack(), cx + 2, ry + 1);
+            String name = (row.strike() ? "§m" : "") + row.sb().stack().getHoverName().getString();
+            String label = this.font.plainSubstrByWidth(name, w - 26 - this.font.width(row.tag())) + row.tag();
+            g.text(this.font, label, cx + 21, ry + 5, row.color());
+        }
+        g.disableScissor();
+        if (maxSolidScroll() > 0) {
+            int trackX = cx + w - 3;
+            int visible = lh / SOLID_ROW_H;
+            int thumbH = Math.max(8, lh * visible / solidRows.size());
+            int thumbY = ly + (int) ((lh - thumbH) * (double) solidScroll / maxSolidScroll());
+            g.fill(trackX, ly + 1, trackX + 2, ly + lh - 1, 0x30FFFFFF);
+            g.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, 0x90FFFFFF);
+        }
+        int hintY = ly + lh + 4;
+        g.text(this.font, this.font.plainSubstrByWidth("Left-click: select · again to clear", w), cx, hintY, GREY);
+        g.text(this.font, this.font.plainSubstrByWidth("Right-click: exclude from closest match", w), cx, hintY + 11, GREY);
+
+        renderSolidPreview(g);
+    }
+
+    /** The big selected-block preview above the Match settings; a large ? when the mode picks
+     *  the block at click time (or nothing is selected yet). */
+    private void renderSolidPreview(GuiGraphicsExtractor g) {
         GradientConfig cfg = ConfigManager.get();
         int rx = rightX(), rw = rightW();
-        g.text(this.font, this.font.plainSubstrByWidth(matchDescription(), rw), rx, solidMatchDescY, YELLOW);
-        if (cfg.solidMatch == SolidMatch.SELECTED) {
-            String name = cfg.solidBlock.isEmpty() ? "(none)" : Gradient.toolDisplayName(cfg.solidBlock);
-            g.text(this.font, this.font.plainSubstrByWidth("Block: " + name, rw), rx, solidMatchDescY + 12, YELLOW);
+        int py = 30;
+        ItemStack st = stackOfId(cfg.solidBlock);
+        int scale = 4; // 64px sprite
+        int bx = rx + (rw - 16 * scale) / 2;
+        if (!st.isEmpty()) {
+            g.pose().pushMatrix();
+            g.pose().translate(bx, py);
+            g.pose().scale(scale, scale);
+            g.item(st, 0, 0);
+            g.pose().popMatrix();
         }
+        boolean unknown = cfg.solidMatch != SolidMatch.SELECTED;
+        if (unknown || st.isEmpty()) {
+            String q = "?";
+            g.pose().pushMatrix();
+            g.pose().translate(rx + rw / 2f - 2.5f * this.font.width(q),
+                    py + 32 - 2.5f * this.font.lineHeight);
+            g.pose().scale(5f, 5f);
+            g.text(this.font, q, 0, 0, WHITE);
+            g.pose().popMatrix();
+        }
+        if (!unknown) {
+            String caption = st.isEmpty() ? "Click a block to select"
+                    : st.getHoverName().getString();
+            caption = this.font.plainSubstrByWidth(caption, rw);
+            g.text(this.font, caption, rx + (rw - this.font.width(caption)) / 2, py + 66,
+                    st.isEmpty() ? GREY : WHITE);
+        }
+    }
+
+    // ---- circled-? help system (Solid + Settings) -----------------------------------------------
+
+    private void renderHelpSystem(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        for (HelpSpot h : helpSpots) {
+            UiIcons.drawHelpIcon(g, h.x() + h.w() + 3, h.y() + 5);
+        }
+        HelpSpot over = null;
+        for (HelpSpot h : helpSpots) {
+            if (mouseX >= h.x() && mouseX <= h.x() + h.w() + 13
+                    && mouseY >= h.y() && mouseY <= h.y() + h.h()) {
+                over = h;
+                break;
+            }
+        }
+        if (over != hoverSpot) {
+            hoverSpot = over;
+            hoverSince = System.currentTimeMillis();
+        }
+        if (clickedSpot != null && over != clickedSpot) clickedSpot = null;
+        if (over == null) return;
+        if (over != clickedSpot && System.currentTimeMillis() - hoverSince < 1000) return;
+        List<String> lines = wrapText(over.text().get(), 150);
+        int w = 0;
+        for (String l : lines) w = Math.max(w, this.font.width(l));
+        int h = lines.size() * 10 + 8;
+        int x = Math.min(mouseX + 10, this.width - w - 14);
+        int y = Math.min(mouseY + 8, this.height - h - 4);
+        g.nextStratum();
+        g.fill(x, y, x + w + 8, y + h, 0xF0101010);
+        UiIcons.outline(g, x, y, w + 8, h, 0x80FFE34D);
+        for (int i = 0; i < lines.size(); i++) {
+            g.text(this.font, lines.get(i), x + 4, y + 4 + i * 10, YELLOW);
+        }
+    }
+
+    private boolean handleHelpIconClick(double mx, double my) {
+        for (HelpSpot h : helpSpots) {
+            if (mx >= h.x() + h.w() + 2 && mx <= h.x() + h.w() + 13
+                    && my >= h.y() + 4 && my <= h.y() + 15) {
+                clickedSpot = h;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<String> wrapText(String text, int width) {
+        List<String> out = new ArrayList<>();
+        StringBuilder line = new StringBuilder();
+        for (String word : text.split(" ")) {
+            String candidate = line.isEmpty() ? word : line + " " + word;
+            if (this.font.width(candidate) > width && !line.isEmpty()) {
+                out.add(line.toString());
+                line = new StringBuilder(word);
+            } else {
+                line = new StringBuilder(candidate);
+            }
+        }
+        if (!line.isEmpty()) out.add(line.toString());
+        return out;
     }
 
     // ---- Settings tab ---------------------------------------------------------------------------
 
     private void initSettingsTab() {
         int rx = rightX(), rw = rightW();
+        int cw = rw - 14; // controls with a help icon leave room for it
         GradientConfig cfg = ConfigManager.get();
         int y = 30;
 
         // One global placement mode (Marker/Single/Face/3D Fill/Disabled), shared by every paint type.
-        cycleButton(rx, y, rw, () -> Component.literal("Placement: " + ConfigManager.get().placementMode.shortName()),
+        cycleButton(rx, y, cw, () -> Component.literal("Placement: " + ConfigManager.get().placementMode.shortName()),
                 () -> { GradientConfig c = ConfigManager.get(); c.placementMode = c.placementMode.next(); });
+        helpSpots.add(new HelpSpot(rx, y, cw, 20,
+                () -> "Where blocks go: " + ConfigManager.get().placementMode.displayName()));
         y += 24;
 
-        addRenderableWidget(new ConfigSlider(rx, y, rw, distToSlider(cfg.maxMarkerDistance),
+        addRenderableWidget(new ConfigSlider(rx, y, cw, distToSlider(cfg.maxMarkerDistance),
                 v -> "Marker dist: " + sliderToDist(v),
                 v -> ConfigManager.get().maxMarkerDistance = sliderToDist(v)));
+        helpSpots.add(new HelpSpot(rx, y, cw, 20,
+                () -> "Max distance between a start marker and its end marker"));
         y += 24;
-        cycleButton(rx, y, rw, () -> Component.literal("Auto end marker: " + (ConfigManager.get().autoPlaceEnd ? "On" : "Off")),
+        cycleButton(rx, y, cw, () -> Component.literal("Auto end marker: " + (ConfigManager.get().autoPlaceEnd ? "On" : "Off")),
                 () -> ConfigManager.get().autoPlaceEnd = !ConfigManager.get().autoPlaceEnd);
-        y += 24; autoEndDescY = y; y += 12;
+        helpSpots.add(new HelpSpot(rx, y, cw, 20, () -> ConfigManager.get().autoPlaceEnd
+                ? "On: each start marker scans out from its face and drops the end on the first block"
+                : "Off: place end markers yourself"));
+        y += 24;
 
-        cycleButton(rx, y, rw, () -> Component.literal("Fill voids first: " + (ConfigManager.get().faceFillVoids ? "On" : "Off")),
+        cycleButton(rx, y, cw, () -> Component.literal("Fill voids first: " + (ConfigManager.get().faceFillVoids ? "On" : "Off")),
                 () -> ConfigManager.get().faceFillVoids = !ConfigManager.get().faceFillVoids);
-        y += 24; fillVoidsDescY = y; y += 12;
+        helpSpots.add(new HelpSpot(rx, y, cw, 20, () -> ConfigManager.get().faceFillVoids
+                ? "On: in-marker face fills level the lowest columns first, then stack together"
+                : "Off: every column advances at once"));
+        y += 24;
 
-        addRenderableWidget(new ConfigSlider(rx, y, rw, secsToSlider(cfg.gradientCacheSeconds),
+        addRenderableWidget(new ConfigSlider(rx, y, cw, secsToSlider(cfg.gradientCacheSeconds),
                 v -> "Gradient memory: " + secsLabel(sliderToSecs(v)),
                 v -> ConfigManager.get().gradientCacheSeconds = sliderToSecs(v)));
-        y += 24; memoryDescY = y; y += 12;
+        helpSpots.add(new HelpSpot(rx, y, cw, 20,
+                () -> "Idle gap before a free-hand gradient forgets its progress"));
+        y += 24;
 
         addRenderableWidget(Button.builder(clearMarkersLabel(), b -> {
             MarkerManager.clearAll(); b.setMessage(clearMarkersLabel());
@@ -600,16 +709,19 @@ public class GradientScreen extends Screen {
                 () -> Component.literal("Debug: " + (ConfigManager.get().debug ? "On" : "Off")),
                 () -> ConfigManager.get().debug = !ConfigManager.get().debug);
         y += 24;
-        cycleButton(rx, y, rw,
+        cycleButton(rx, y, cw,
                 () -> Component.literal("Color match: " + (ConfigManager.get().perceptualColor ? "Perceptual" : "Classic")),
                 () -> {
                     GradientConfig c = ConfigManager.get();
                     c.perceptualColor = !c.perceptualColor;
                     GradientRamp.perceptual = c.perceptualColor;
                 });
+        helpSpots.add(new HelpSpot(rx, y, cw, 20, () -> ConfigManager.get().perceptualColor
+                ? "Perceptual: colours compared as the eye sees them (Oklab)"
+                : "Classic: raw RGB / luma maths (pre-1.3 behaviour)"));
         y += 24;
         // What happens when a palette's blocks aren't all in the inventory at paint time.
-        cycleButton(rx, y, rw,
+        cycleButton(rx, y, cw,
                 () -> Component.literal("Missing blocks: " + ConfigManager.get().missingBlockPolicy.label()),
                 () -> {
                     GradientConfig c = ConfigManager.get();
@@ -617,6 +729,10 @@ public class GradientScreen extends Screen {
                             ? MissingBlockPolicy.SKIP_MISSING
                             : MissingBlockPolicy.DONT_PAINT;
                 });
+        helpSpots.add(new HelpSpot(rx, y, cw, 20,
+                () -> ConfigManager.get().missingBlockPolicy == MissingBlockPolicy.DONT_PAINT
+                        ? "Don't paint: painting refuses while a palette's blocks are missing"
+                        : "Skip missing: absent segments are dropped and the rest still paint"));
 
         // Left column: the paint-tool assign button (overlay shows it's armed) + filter + list.
         int cx = contentX(), w = leftW();
@@ -795,15 +911,17 @@ public class GradientScreen extends Screen {
             }
         }
         if (super.mouseClicked(event, doubled)) return true;
+        if ((tab == Tab.SOLID || tab == Tab.SETTINGS) && event.button() == 0
+                && handleHelpIconClick(event.x(), event.y())) {
+            return true;
+        }
         if (tab == Tab.HELP && event.button() == 0 && help != null
                 && help.mouseClicked(event.x(), event.y())) {
             return true;
         }
-        if (tab == Tab.SOLID && picker != null && event.button() >= 0 && event.button() <= 2) {
-            String id = picker.rowIdAt(event.x(), event.y());
-            if (id == null) return false;
-            boolean dbl = event.button() == 0 && (doubled || isRowDoubleClick(id));
-            return handleSolidRowClick(id, event.button(), dbl);
+        if (tab == Tab.SOLID && (event.button() == 0 || event.button() == 1)) {
+            String id = solidRowIdAt(event.x(), event.y());
+            if (id != null) return handleSolidRowClick(id, event.button());
         }
         if (tab == Tab.PALETTE && event.button() == 0 && paletteList != null
                 && paletteList.click(event.x(), event.y())) {
@@ -834,7 +952,10 @@ public class GradientScreen extends Screen {
                 && paletteList.mouseScrolled(mouseX, mouseY, scrollY)) {
             return true;
         }
-        if (tab == Tab.SOLID && picker != null && picker.mouseScrolled(mouseX, mouseY, scrollY)) {
+        if (tab == Tab.SOLID && mouseX >= contentX() && mouseX <= contentX() + leftW()
+                && mouseY >= SOLID_LIST_Y && mouseY <= SOLID_LIST_Y + solidListH) {
+            solidScroll = Math.max(0, Math.min(maxSolidScroll(),
+                    solidScroll - (int) Math.signum(scrollY)));
             return true;
         }
         if (tab == Tab.HELP && help != null && help.mouseScrolled(mouseX, mouseY, scrollY)) {
@@ -905,6 +1026,7 @@ public class GradientScreen extends Screen {
         else if (tab == Tab.FINDER) renderFinderTab(g, mouseX, mouseY);
         else if (tab == Tab.HELP) { if (help != null) help.render(g, mouseX, mouseY); }
         else renderSettingsTab(g, mouseX, mouseY);
+        if (tab == Tab.SOLID || tab == Tab.SETTINGS) renderHelpSystem(g, mouseX, mouseY);
     }
 
     private void renderTitleBar(GuiGraphicsExtractor g) {
@@ -919,25 +1041,9 @@ public class GradientScreen extends Screen {
         }
     }
 
-    /** Yellow key under the block list explaining the Solid picker buttons. */
-    private void renderPickerLegend(GuiGraphicsExtractor g) {
-        int cx = contentX(), w = leftW();
-        String[] lines = {"✓ block to place · ✗ exclude", "Dbl-click: ✓ · middle-click: ✗"};
-        for (int i = 0; i < lines.length; i++) {
-            g.text(this.font, this.font.plainSubstrByWidth(lines[i], w), cx, legendY + i * 11, YELLOW);
-        }
-    }
-
     private void renderSettingsTab(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         GradientConfig cfg = ConfigManager.get();
         int cx = contentX(), w = leftW();
-
-        g.text(this.font, this.font.plainSubstrByWidth("Start click scans its face to a block", rightW()),
-                rightX(), autoEndDescY, YELLOW);
-        g.text(this.font, this.font.plainSubstrByWidth("Face mode in markers: level, then stack", rightW()),
-                rightX(), fillVoidsDescY, YELLOW);
-        g.text(this.font, this.font.plainSubstrByWidth("Idle gap before a new gradient starts", rightW()),
-                rightX(), memoryDescY, YELLOW);
 
         // Darken the tool button while it's armed (drawn over the vanilla button).
         if (assigningTool) g.fill(cx, TOOL_BTN_Y, cx + w, TOOL_BTN_Y + TOOL_BTN_H, PRESSED_OVERLAY);

@@ -300,16 +300,18 @@ public final class HelpPanel {
         t("Solid paint", "One block: walls, columns, and volumes fast.",
             List.of(
                 "Solid places one kind of block through any placement mode - Single columns, "
-                    + "whole Faces, or 3D blobs. Which block it places comes from the Match "
-                    + "button."),
+                    + "whole Faces, or 3D blobs. Left-click a block in the list to select it "
+                    + "(click again to clear); right-click excludes it from the closest-match "
+                    + "modes. The big preview shows the selected block - or a ? when the mode "
+                    + "picks the block at click time."),
             t("Match modes", "How Solid picks the block it places.", List.of(
-                "Selected block: places the block you ticked in the list on the left.",
+                "Selected block: places the block you selected in the list.",
                 "Exact block: copies exactly the block you clicked.",
                 "Closest color / Closest brightness: looks at the clicked block and places the "
                     + "closest match from your inventory. Closeness is measured as perceived "
                     + "colour (Oklab) - the Color match button in Settings switches back to the "
                     + "classic RGB maths.",
-                "Blocks marked with an X in the list are never placed, even on an exact match."))),
+                "Excluded (red) blocks are never placed, even on an exact match."))),
 
         t("Palettes", "Named, saved block ramps - one palette drives gradient AND noise painting.",
             List.of(

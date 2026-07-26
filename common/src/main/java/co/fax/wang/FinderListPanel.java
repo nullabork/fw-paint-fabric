@@ -8,7 +8,7 @@ import java.util.List;
 /**
  * Scrollable list of {@link ColorIndex.Entry} rows for the Finder tab. Each row shows the item
  * icon on a contrasting backdrop, an optional solid swatch of the block's computed colour, and the
- * name. Unlike {@link BlockPickerPanel} it supports a selection highlight, a coloured insertion
+ * name. It supports a selection highlight, a coloured insertion
  * marker (where a pure colour would fall in the ordering), centering the view on a row, and a
  * clickable/draggable scrollbar — the whole game's block list is ~1100 rows.
  */

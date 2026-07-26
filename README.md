@@ -99,7 +99,7 @@ common/src/main/java/co/fax/wang/
   GradientScreen.java    the K screen (Solid / Palette / Finder / Settings / Help tabs)
   PaletteEditScreen.java the palette editor       PaletteListPanel.java  the Palette tab's rows
   PaletteChoice.java     resolves the active palette into placeable ramps (Automatic segments etc.)
-  BlockPickerPanel.java  reusable scrollable block list      HelpPanel.java  in-game manual
+  HelpPanel.java         in-game manual           UiIcons.java  shared pixel-art glyphs
   HudOverlay.java        helper-text + palette-row HUD   HudPlacementScreen.java  move-the-text screen
   MarkerManager.java     marker modes/persistence + in-world rendering
   PaintPlacer.java       unified Single/Face/3D placement for all paint types
