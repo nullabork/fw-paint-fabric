@@ -28,7 +28,8 @@ public final class PaletteStore {
     /** On-disk shape of the palettes file. */
     private static final class Data {
         int version = 2;
-        String activePalette = "";
+        String activePalette = "";  // the active GRADIENT item
+        String activePattern = ""; // the active PATTERN item (kinds keep separate selections)
         List<Palette> palettes = new ArrayList<>();
     }
 
@@ -70,9 +71,18 @@ public final class PaletteStore {
         }
     }
 
-    /** The live palette list, in stored (cycle) order. */
+    /** The live palette list (both kinds), in stored (cycle) order. */
     public static List<Palette> all() {
         return get().palettes;
+    }
+
+    /** The items of one kind, in stored (cycle) order. */
+    public static List<Palette> allOf(PaletteKind kind) {
+        List<Palette> out = new ArrayList<>();
+        for (Palette p : get().palettes) {
+            if (p.kind == kind) out.add(p);
+        }
+        return out;
     }
 
     public static Palette byId(String id) {
@@ -87,13 +97,29 @@ public final class PaletteStore {
         return get().activePalette;
     }
 
-    /** The active palette, or null when none is set / it was deleted. */
+    /** The active GRADIENT palette, or null when none is set / it was deleted. */
     public static Palette active() {
-        return byId(get().activePalette);
+        Palette p = byId(get().activePalette);
+        return p != null && p.kind == PaletteKind.GRADIENT ? p : null;
     }
 
+    /** The active PATTERN, or null when none is set / it was deleted. */
+    public static Palette activePattern() {
+        Palette p = byId(get().activePattern);
+        return p != null && p.kind == PaletteKind.PATTERN ? p : null;
+    }
+
+    /** The active item of a kind (see {@link #active()} / {@link #activePattern()}). */
+    public static Palette activeOf(PaletteKind kind) {
+        return kind == PaletteKind.PATTERN ? activePattern() : active();
+    }
+
+    /** Make {@code id} its kind's active item (each kind keeps its own selection). */
     public static void setActive(String id) {
-        get().activePalette = id == null ? "" : id;
+        Palette p = byId(id);
+        if (p == null) return;
+        if (p.kind == PaletteKind.PATTERN) get().activePattern = p.id;
+        else get().activePalette = p.id;
         save();
     }
 
@@ -112,41 +138,46 @@ public final class PaletteStore {
     }
 
     /**
-     * Delete by id. If it was active, the next palette in the list becomes active (previous
-     * when the last was deleted; none when the list empties).
+     * Delete by id. If it was its kind's active, the next item of that kind becomes active
+     * (none when that kind empties).
      */
     public static void delete(String id) {
         List<Palette> list = get().palettes;
-        int idx = -1;
-        for (int i = 0; i < list.size(); i++) {
-            if (list.get(i).id.equals(id)) {
-                idx = i;
-                break;
-            }
-        }
-        if (idx < 0) return;
-        list.remove(idx);
-        if (get().activePalette.equals(id)) {
-            get().activePalette = list.isEmpty() ? "" : list.get(Math.min(idx, list.size() - 1)).id;
+        Palette victim = byId(id);
+        if (victim == null) return;
+        List<Palette> sameKind = allOf(victim.kind);
+        int kindIdx = sameKind.indexOf(victim);
+        list.remove(victim);
+        boolean wasActive = victim.kind == PaletteKind.PATTERN
+                ? get().activePattern.equals(id) : get().activePalette.equals(id);
+        if (wasActive) {
+            sameKind.remove(victim);
+            String next = sameKind.isEmpty() ? ""
+                    : sameKind.get(Math.min(kindIdx, sameKind.size() - 1)).id;
+            if (victim.kind == PaletteKind.PATTERN) get().activePattern = next;
+            else get().activePalette = next;
         }
         save();
     }
 
     /**
-     * Step the active palette forward/backward through the list (the cycle keybind). No-op when
-     * empty; starts at the first palette when none is active. Returns the new active palette.
+     * Step a kind's active item forward/backward through that kind's list (the cycle keybind —
+     * filtered by the current paint type). No-op when the kind has no items; starts at its
+     * first item when none is active. Returns the new active item.
      */
-    public static Palette cycleActive(int dir) {
-        List<Palette> list = get().palettes;
+    public static Palette cycleActive(int dir, PaletteKind kind) {
+        List<Palette> list = allOf(kind);
         if (list.isEmpty()) return null;
         int idx = 0;
-        Palette current = active();
+        Palette current = activeOf(kind);
         if (current != null) {
             idx = Math.floorMod(list.indexOf(current) + dir, list.size());
         }
-        get().activePalette = list.get(idx).id;
+        Palette next = list.get(idx);
+        if (kind == PaletteKind.PATTERN) get().activePattern = next.id;
+        else get().activePalette = next.id;
         save();
-        return list.get(idx);
+        return next;
     }
 
     // ---- pure naming helpers (unit-tested) ------------------------------------------------------

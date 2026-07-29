@@ -24,6 +24,9 @@ public final class Palette {
     /** Display name — unique across the store. */
     public String name = "";
 
+    /** What this item is. Absent in pre-2.1 saves — Gson leaves the GRADIENT default. */
+    public PaletteKind kind = PaletteKind.GRADIENT;
+
     /** Where placement (and Automatic resolution / variation swaps) draws blocks from. */
     public GradientSource source = GradientSource.HOTBAR_AND_INVENTORY;
 
@@ -69,11 +72,46 @@ public final class Palette {
     public boolean noiseLock = true;
     public String noiseSeed = "";
 
+    // ---- pattern fields (kind == PATTERN only) --------------------------------------------------
+
+    /** Grid size in cells, 1..32 each. */
+    public int width = 8;
+    public int height = 8;
+
+    /**
+     * Row-major cells, start row first, {@code width * height} entries; each an item id or ""
+     * for a hole (placement skips holes).
+     */
+    public List<String> cells = new ArrayList<>();
+
+    /** How the pattern repeats past its edges. */
+    public PatternTiling tiling = PatternTiling.NONE;
+
+    /**
+     * Experimental pattern variation (§5.0 of the v2.1 spec): 0 = off; 1–3 = a placed cell may
+     * swap to a uniformly-random block within this many positions of its block in the
+     * Oklab-ordered source list.
+     */
+    public int patternVariation = 0;
+
+    /** The cell at (u, v) or "" — no tiling applied; callers wrap/clamp first. */
+    public String cellAt(int u, int v) {
+        if (u < 0 || u >= width || v < 0 || v >= height) return "";
+        int idx = v * width + u;
+        return idx < cells.size() ? cells.get(idx) : "";
+    }
+
     /** Deep copy — the editor works on a copy so Cancel keeps the saved version intact. */
     public Palette copy() {
         Palette p = new Palette();
         p.id = id;
         p.name = name;
+        p.kind = kind;
+        p.width = width;
+        p.height = height;
+        p.cells = new ArrayList<>(cells);
+        p.tiling = tiling;
+        p.patternVariation = patternVariation;
         p.source = source;
         p.order = order;
         p.curve = curve;
@@ -100,8 +138,13 @@ public final class Palette {
      * placed changes this key. Includes the id so switching palettes always invalidates.
      */
     public String contentKey() {
-        StringBuilder sb = new StringBuilder(id).append('|').append(source).append('|')
-                .append(order).append('|').append(curve).append('|');
+        StringBuilder sb = new StringBuilder(id).append('|').append(kind).append('|')
+                .append(source).append('|').append(order).append('|').append(curve).append('|');
+        if (kind == PaletteKind.PATTERN) {
+            sb.append(width).append('x').append(height).append('|').append(tiling).append('|')
+                    .append(patternVariation).append('|');
+            for (String c : cells) sb.append(c).append(',');
+        }
         for (double d : stops) sb.append(d).append(',');
         sb.append('|');
         for (PaletteSegment s : segments) sb.append(s.token()).append(',');
@@ -128,14 +171,20 @@ public final class Palette {
     }
 
     /**
-     * Distinct explicitly-defined block ids not present in {@code availableIds}, in strip order.
-     * Automatic segments never count as missing.
+     * Distinct explicitly-defined block ids not present in {@code availableIds} — strip order
+     * for gradients, cell order for patterns. Automatic segments and holes never count.
      */
     public List<String> missingBlocks(Set<String> availableIds) {
         Set<String> missing = new LinkedHashSet<>();
-        for (PaletteSegment s : segments) {
-            if (!s.isAutomatic() && !s.block.isEmpty() && !availableIds.contains(s.block)) {
-                missing.add(s.block);
+        if (kind == PaletteKind.PATTERN) {
+            for (String c : cells) {
+                if (c != null && !c.isEmpty() && !availableIds.contains(c)) missing.add(c);
+            }
+        } else {
+            for (PaletteSegment s : segments) {
+                if (!s.isAutomatic() && !s.block.isEmpty() && !availableIds.contains(s.block)) {
+                    missing.add(s.block);
+                }
             }
         }
         return new ArrayList<>(missing);

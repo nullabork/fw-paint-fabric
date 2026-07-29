@@ -134,7 +134,8 @@ public final class Gradient {
             overlay(mc, "FW Paint: hold your paint tool to cycle palettes");
             return;
         }
-        co.fax.wang.palette.Palette next = co.fax.wang.palette.PaletteStore.cycleActive(1);
+        co.fax.wang.palette.Palette next = co.fax.wang.palette.PaletteStore.cycleActive(1,
+                co.fax.wang.palette.PaletteKind.GRADIENT);
         overlay(mc, next == null
                 ? "FW Paint: no palettes — press " + boundKey("open") + " to set one up"
                 : "FW Paint — Palette: " + next.name);

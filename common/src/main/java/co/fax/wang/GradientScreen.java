@@ -280,7 +280,7 @@ public class GradientScreen extends Screen {
         y += 24;
         // The palette row: content is drawn over the button each frame (renderPaintTab).
         paletteCycleBtn = addRenderableWidget(Button.builder(Component.empty(), b -> {
-            co.fax.wang.palette.PaletteStore.cycleActive(1);
+            co.fax.wang.palette.PaletteStore.cycleActive(1, co.fax.wang.palette.PaletteKind.GRADIENT);
             paletteList = null; // stale-proof: the Palette tab rebuilds on next visit anyway
         }).bounds(x, y, w, 20).build());
     }
