@@ -2,6 +2,7 @@ package co.fax.wang;
 
 import co.fax.wang.config.ConfigManager;
 import co.fax.wang.config.GradientConfig;
+import co.fax.wang.palette.PatternMath;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -77,6 +78,8 @@ public final class PaintPlacer {
     private static PaletteChoice.Ramp noiseRamp;    // Noise: the one ramp resolved for this press
     private static PaletteChoice.Ramp ramp3d;       // Gradient 3D: the fill's resolved ramp
     private static GradientCaches.Fill3D activeFill; // Gradient 3D: the cache entry being extended
+    private static PatternChoice.Prepared patternPrep;              // Pattern: press-wide state
+    private static GradientCaches.PatternPlacement patternPlace;    // Pattern: the plane in use
 
     // Column state (Single + Face): each column advances its own front.
     private static final class Column {
@@ -227,8 +230,60 @@ public final class PaintPlacer {
                 }
                 // Ramps resolve per column / marker segment / fill — anchors differ per context.
             }
+            case PATTERN -> {
+                patternPrep = PatternChoice.prepare(player);
+                if (patternPrep.error != null) {
+                    overlay(mc, patternPrep.error);
+                    return false;
+                }
+                resolvePatternPlane(mc, player, clicked, ConfigManager.get());
+            }
         }
         return true;
+    }
+
+    /**
+     * Fix the pattern plane for this press: continue a cached placement the click touches
+     * (so adjacent strokes line up), or anchor a new plane at the clicked column's front —
+     * width axis from the player's facing snapped to the configured increment. A completed
+     * no-wrap pattern under the click re-anchors a fresh plane on top (like a finished
+     * gradient restarting).
+     */
+    private static void resolvePatternPlane(Minecraft mc, LocalPlayer player,
+                                            BlockPos clicked, GradientConfig cfg) {
+        int first = mode == PlacementMode.FILL3D ? 1
+                : Math.max(1, firstAirOffset(mc, clicked, dir));
+        BlockPos front = clicked.relative(dir, first);
+        GradientCaches.PatternPlacement near = GradientCaches.patternNear(clicked);
+        if (near == null) near = GradientCaches.patternNear(front);
+        if (near != null) {
+            // Completed (no start/end wrap) pattern right here → fresh pattern stacked on top.
+            int[] d = {front.getX() - near.origin.getX(), front.getY() - near.origin.getY(),
+                    front.getZ() - near.origin.getZ()};
+            int v = PatternMath.vOf(d, new int[]{near.extrusion.getStepX(),
+                    near.extrusion.getStepY(), near.extrusion.getStepZ()});
+            boolean done = !patternPrep.pattern.tiling.wrapsStartEnd()
+                    && near.extrusion == dir && v >= patternPrep.pattern.height;
+            if (!done) {
+                patternPlace = near;
+                return;
+            }
+        }
+        int[] facing = PatternMath.snappedFacingStep(player.getYRot(), cfg.perpSnapDegrees);
+        int[] wstep = PatternMath.widthStep(facing,
+                new int[]{dir.getStepX(), dir.getStepY(), dir.getStepZ()});
+        patternPlace = GradientCaches.newPattern(front, wstep, dir);
+    }
+
+    /** The pattern cell id for a world position (see {@link PatternMath#cellFor}). */
+    private static String patternCell(BlockPos cell) {
+        int[] d = {cell.getX() - patternPlace.origin.getX(),
+                cell.getY() - patternPlace.origin.getY(),
+                cell.getZ() - patternPlace.origin.getZ()};
+        int u = PatternMath.uOf(d, patternPlace.widthStep);
+        int v = PatternMath.vOf(d, new int[]{patternPlace.extrusion.getStepX(),
+                patternPlace.extrusion.getStepY(), patternPlace.extrusion.getStepZ()});
+        return PatternMath.cellFor(patternPrep.pattern, u, v);
     }
 
     private static String cantResolveMessage() {
@@ -349,6 +404,17 @@ public final class PaintPlacer {
                 g = gradCtxFor(mc, cell, c);
                 if (g == null) { // this column's gradient is complete (or unresolvable here)
                     it.remove();
+                    continue;
+                }
+            }
+            if (type == PaintType.PATTERN) {
+                String cellId = patternCell(cell);
+                if (cellId == PatternMath.COLUMN_DONE) { // pattern complete, no wrap
+                    it.remove();
+                    continue;
+                }
+                if (PatternChoice.cellIsHole(patternPrep, cellId)) {
+                    c.next++; // a hole: advance the front without placing anything
                     continue;
                 }
             }
@@ -605,15 +671,29 @@ public final class PaintPlacer {
                         ranOut = slot < 0;
                     }
                 }
+                case PATTERN -> {
+                    String cellId = patternCell(p.cell());
+                    if (cellId == PatternMath.COLUMN_DONE
+                            || PatternChoice.cellIsHole(patternPrep, cellId)) {
+                        slot = -1; // outside the pattern / a hole — nothing to place here
+                    } else {
+                        Block b = PatternChoice.varied(patternPrep, cellId);
+                        slot = b == null ? -1 : PatternChoice.slotFor(player, patternPrep, b);
+                        ranOut = b != null && slot < 0;
+                    }
+                }
                 default -> slot = -1;
             }
             if (ranOut) {
-                // The ramp is known (and cached) — running out of one of its blocks stops the
-                // paint with an error rather than quietly substituting something else.
-                Block missing = PaletteChoice.lastMissingBlock();
+                // The ramp/pattern is known (and cached) — running out of one of its blocks
+                // stops the paint with an error rather than quietly substituting.
+                Block missing = type == PaintType.PATTERN
+                        ? PatternChoice.lastMissingBlock() : PaletteChoice.lastMissingBlock();
                 String name = missing == null ? "a block"
                         : new ItemStack(missing.asItem()).getHoverName().getString();
-                String pal = prepared != null && prepared.palette != null ? prepared.palette.name : "palette";
+                String pal = type == PaintType.PATTERN
+                        ? (patternPrep != null && patternPrep.pattern != null ? patternPrep.pattern.name : "pattern")
+                        : (prepared != null && prepared.palette != null ? prepared.palette.name : "palette");
                 overlay(mc, "'" + pal + "': out of " + name);
                 reset();
                 return;
@@ -627,6 +707,9 @@ public final class PaintPlacer {
             if (type == PaintType.GRADIENT && p.g() != null) {
                 if (p.g().step() >= 0) GradientCaches.recordColumn(mode, p.cell(), p.g().step(), dir);
                 else if (activeFill != null) GradientCaches.recordFill(activeFill, p.cell());
+            }
+            if (type == PaintType.PATTERN && patternPlace != null) {
+                GradientCaches.recordPattern(patternPlace, p.cell());
             }
         }
     }
@@ -690,6 +773,10 @@ public final class PaintPlacer {
         boolean paletteAlways = cfg.activePaintType == PaintType.NOISE
                 || (cfg.activePaintType == PaintType.GRADIENT && pm == PlacementMode.FILL3D);
         if (paletteAlways) src.add("Selected from palette");
+        if (cfg.activePaintType == PaintType.PATTERN) {
+            co.fax.wang.palette.Palette pat = co.fax.wang.palette.PaletteStore.activePattern();
+            src.add(pat == null ? "No pattern selected" : "Pattern: " + pat.name);
+        }
 
         // Paint stays at normal block reach (the crosshair hit) — only markers target further.
         BlockHitResult hit = (mc.hitResult instanceof BlockHitResult bhr
@@ -938,6 +1025,8 @@ public final class PaintPlacer {
         ramp3d = null;
         segRamps.clear();
         activeFill = null;
+        patternPrep = null;
+        patternPlace = null;
         dir = null;
         columns.clear();
         markerDriven = false;

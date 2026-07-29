@@ -44,8 +44,27 @@ public final class GradientCaches {
         }
     }
 
+    /**
+     * One pattern placement: the plane it was painted into (origin cell + width-axis step +
+     * extrusion axis) and the cells placed for it. A later press adjacent to any placed cell
+     * continues this plane so the drawing lines up.
+     */
+    public static final class PatternPlacement {
+        public final BlockPos origin;
+        public final int[] widthStep;   // {dx, dy, dz}, dy always 0
+        public final Direction extrusion;
+        final Set<BlockPos> placed = new HashSet<>();
+
+        PatternPlacement(BlockPos origin, int[] widthStep, Direction extrusion) {
+            this.origin = origin;
+            this.widthStep = widthStep;
+            this.extrusion = extrusion;
+        }
+    }
+
     private static final Map<PlacementMode, Map<BlockPos, ColEntry>> columns = new EnumMap<>(PlacementMode.class);
     private static final List<Fill3D> fills = new ArrayList<>();
+    private static final List<PatternPlacement> patterns = new ArrayList<>();
     private static String fingerprint = "";
     private static long lastPlaceMs;
 
@@ -62,6 +81,33 @@ public final class GradientCaches {
     public static void clear() {
         columns.clear();
         fills.clear();
+        patterns.clear();
+    }
+
+    /** The pattern placement with a placed cell adjacent to {@code pos} (26-neighbourhood), or null. */
+    public static PatternPlacement patternNear(BlockPos pos) {
+        for (PatternPlacement pl : patterns) {
+            if (pl.placed.contains(pos)) return pl;
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        if (pl.placed.contains(pos.offset(dx, dy, dz))) return pl;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    public static PatternPlacement newPattern(BlockPos origin, int[] widthStep, Direction extrusion) {
+        PatternPlacement pl = new PatternPlacement(origin.immutable(), widthStep, extrusion);
+        patterns.add(pl);
+        return pl;
+    }
+
+    public static void recordPattern(PatternPlacement pl, BlockPos cell) {
+        pl.placed.add(cell.immutable());
+        lastPlaceMs = System.currentTimeMillis();
     }
 
     /** Step the column starting after {@code prev} should place next (0 = fresh gradient). */
@@ -101,6 +147,9 @@ public final class GradientCaches {
      */
     private static String fingerprintOf(GradientConfig cfg) {
         co.fax.wang.palette.Palette active = co.fax.wang.palette.PaletteStore.active();
-        return (active == null ? "<none>" : active.contentKey()) + '|' + cfg.missingBlockPolicy;
+        co.fax.wang.palette.Palette pattern = co.fax.wang.palette.PaletteStore.activePattern();
+        return (active == null ? "<none>" : active.contentKey()) + '|'
+                + (pattern == null ? "<none>" : pattern.contentKey()) + '|'
+                + cfg.missingBlockPolicy + '|' + cfg.perpSnapDegrees;
     }
 }

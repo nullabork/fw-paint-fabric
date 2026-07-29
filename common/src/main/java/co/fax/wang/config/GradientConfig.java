@@ -100,6 +100,14 @@ public class GradientConfig {
     /** Item ids excluded from Solid placement (never placed, even on exact match). */
     public List<String> solidExcludedBlocks = new ArrayList<>();
 
+    // ---- perpendicular snapping -----------------------------------------------------------------
+
+    /**
+     * Angular snapping (degrees, 45 or 90) applied wherever a direction is derived from the
+     * player's facing: the pattern plane's width axis and the Face Perpendicular run.
+     */
+    public int perpSnapDegrees = 45;
+
     // ---- palettes -------------------------------------------------------------------------------
 
     /**
