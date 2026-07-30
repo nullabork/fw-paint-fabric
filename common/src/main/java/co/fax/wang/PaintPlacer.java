@@ -36,7 +36,10 @@ import java.util.Set;
  * <p><b>Single</b>: one column out of the clicked face, resuming from its first air gap.
  * <b>Face</b>: the clicked face plus every interconnected, reachable block face on the same plane
  * (or, with a start marker behind the clicked column, the connected coplanar marker group) —
- * all columns extrude together. <b>3D Fill</b>: a connected blob growing out of the clicked face.
+ * all columns extrude together. <b>Face perp</b>: a 1-block-wide run through the clicked block
+ * along the player's look snapped to the configured increment (45° = stair-stepped diagonals);
+ * inside markers only the marked blocks on the run are selected.
+ * <b>3D Fill</b>: a connected blob growing out of the clicked face.
  * Everywhere, end markers stop a column/fill even when they sit in air, and marker space
  * constrains 3D fills (start inside → stay inside; start outside → stay outside).
  *
@@ -330,6 +333,17 @@ public final class PaintPlacer {
             } else {
                 bases = floodFaces(mc, clicked, dir);
             }
+        } else if (mode == PlacementMode.FACE_PERP) {
+            BlockPos seed = findMarkerBehind(clicked, dir);
+            if (seed != null) {
+                bases = perpRun(mc, seed, dir, p -> MarkerManager.startMarkers.contains(p));
+                markerDriven = true;
+            } else {
+                bases = perpRun(mc, clicked, dir, p -> !mc.level.getBlockState(p).isAir()
+                        && mc.level.getBlockState(p.relative(dir)).isAir()
+                        && !MarkerManager.endMarkers.contains(p.relative(dir))
+                        && !outOfReach(mc, p.relative(dir)));
+            }
         } else {
             bases = List.of(clicked);
         }
@@ -449,6 +463,55 @@ public final class PaintPlacer {
                 PaletteChoice.resolveRamp(prepared, anchorAt(mc, seg.s()), anchorAt(mc, seg.e()));
         segRamps.put(key, ramp);
         return ramp;
+    }
+
+    /**
+     * Face Perpendicular: the 1-block-wide run through {@code seed} in the clicked plane, along
+     * the player's look direction projected into that plane and snapped to the configured
+     * increment (45° gives stair-stepped diagonal runs). Extends both ways from the seed while
+     * {@code valid} accepts each step; the seed itself must pass too.
+     */
+    private static List<BlockPos> perpRun(Minecraft mc, BlockPos seed, Direction dir,
+                                          java.util.function.Predicate<BlockPos> valid) {
+        int[] step = perpStep(mc, dir);
+        List<BlockPos> out = new ArrayList<>();
+        if (valid.test(seed)) out.add(seed);
+        for (int sgn = -1; sgn <= 1; sgn += 2) {
+            for (int k = 1; k <= MAX_FACES / 2; k++) {
+                BlockPos p = seed.offset(step[0] * k * sgn, step[1] * k * sgn, step[2] * k * sgn);
+                if (!valid.test(p)) break;
+                out.add(p);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The in-plane step vector for the perpendicular run: the player's look vector projected
+     * into the plane perpendicular to {@code dir}, its angle snapped to the configured
+     * increment in that plane's 2D basis. Components are −1/0/+1, so 45° snapping yields
+     * diagonal (corner-connected) steps.
+     */
+    private static int[] perpStep(Minecraft mc, Direction dir) {
+        // Plane basis (two axes perpendicular to the face normal).
+        int[] e1, e2;
+        switch (dir.getAxis()) {
+            case Y -> { e1 = new int[]{1, 0, 0}; e2 = new int[]{0, 0, 1}; }
+            case X -> { e1 = new int[]{0, 0, 1}; e2 = new int[]{0, 1, 0}; }
+            default -> { e1 = new int[]{1, 0, 0}; e2 = new int[]{0, 1, 0}; }
+        }
+        Vec3 look = mc.player.getViewVector(1.0f);
+        double a = look.x * e1[0] + look.y * e1[1] + look.z * e1[2];
+        double b = look.x * e2[0] + look.y * e2[1] + look.z * e2[2];
+        if (Math.abs(a) < 1e-4 && Math.abs(b) < 1e-4) {
+            a = 1; // looking dead-on along the normal — arbitrary in-plane direction
+        }
+        int snap = ConfigManager.get().perpSnapDegrees == 90 ? 90 : 45;
+        double ang = Math.toDegrees(Math.atan2(b, a));
+        double snapped = Math.toRadians(Math.round(ang / snap) * (double) snap);
+        int c1 = (int) Math.round(Math.cos(snapped));
+        int c2 = (int) Math.round(Math.sin(snapped));
+        return new int[]{c1 * e1[0] + c2 * e2[0], c1 * e1[1] + c2 * e2[1], c1 * e1[2] + c2 * e2[2]};
     }
 
     /**
@@ -791,6 +854,16 @@ public final class PaintPlacer {
                     List<BlockPos> bases = (seed != null) ? planeMarkers(seed, d) : floodFaces(mc, b, d);
                     for (BlockPos base : bases) addFrontPreview(mc, base, d);
                 }
+                case FACE_PERP -> {
+                    BlockPos seed = findMarkerBehind(b, d);
+                    List<BlockPos> bases = (seed != null)
+                            ? perpRun(mc, seed, d, p -> MarkerManager.startMarkers.contains(p))
+                            : perpRun(mc, b, d, p -> !mc.level.getBlockState(p).isAir()
+                                    && mc.level.getBlockState(p.relative(d)).isAir()
+                                    && !MarkerManager.endMarkers.contains(p.relative(d))
+                                    && !outOfReach(mc, p.relative(d)));
+                    for (BlockPos base : bases) addFrontPreview(mc, base, d);
+                }
                 case FILL3D -> {
                     for (Direction dd : Direction.values()) {
                         if (mc.level.getBlockState(b.relative(dd)).isAir()) {
@@ -802,11 +875,11 @@ public final class PaintPlacer {
                 default -> { }
             }
             if (cfg.activePaintType == PaintType.GRADIENT
-                    && (pm == PlacementMode.SINGLE || pm == PlacementMode.FACE)) {
+                    && (pm == PlacementMode.SINGLE || pm == PlacementMode.FACE || pm == PlacementMode.FACE_PERP)) {
                 src.addAll(gradientSourcingAt(mc, cfg, b, d));
             }
         } else if (cfg.activePaintType == PaintType.GRADIENT
-                && (pm == PlacementMode.SINGLE || pm == PlacementMode.FACE)) {
+                && (pm == PlacementMode.SINGLE || pm == PlacementMode.FACE || pm == PlacementMode.FACE_PERP)) {
             src.add("Selected from palette");
         }
         sourcing = src;

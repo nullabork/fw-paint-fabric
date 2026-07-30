@@ -827,6 +827,18 @@ public class GradientScreen extends Screen {
                 () -> ConfigManager.get().missingBlockPolicy == MissingBlockPolicy.DONT_PAINT
                         ? "Don't paint: painting refuses while a palette's blocks are missing"
                         : "Skip missing: absent segments are dropped and the rest still paint"));
+        y += 24;
+        // Angular snapping for facing-derived directions (Face perp runs, pattern planes).
+        cycleButton(rx, y, cw,
+                () -> Component.literal("Perp snap: " + ConfigManager.get().perpSnapDegrees + "°"),
+                () -> {
+                    GradientConfig c = ConfigManager.get();
+                    c.perpSnapDegrees = c.perpSnapDegrees == 45 ? 90 : 45;
+                });
+        helpSpots.add(new HelpSpot(rx, y, cw, 20,
+                () -> ConfigManager.get().perpSnapDegrees == 45
+                        ? "45°: Face perp runs and pattern planes can go diagonal"
+                        : "90°: Face perp runs and pattern planes snap to the block axes"));
 
         // Left column: the paint-tool assign button (overlay shows it's armed) + filter + list.
         int cx = contentX(), w = leftW();
