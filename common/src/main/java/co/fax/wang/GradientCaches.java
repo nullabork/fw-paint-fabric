@@ -148,8 +148,9 @@ public final class GradientCaches {
     private static String fingerprintOf(GradientConfig cfg) {
         co.fax.wang.palette.Palette active = co.fax.wang.palette.PaletteStore.active();
         co.fax.wang.palette.Palette pattern = co.fax.wang.palette.PaletteStore.activePattern();
-        return (active == null ? "<none>" : active.contentKey()) + '|'
-                + (pattern == null ? "<none>" : pattern.contentKey()) + '|'
+        // cacheKey (not contentKey): pattern-variation tweaks keep an in-progress pattern.
+        return (active == null ? "<none>" : active.cacheKey()) + '|'
+                + (pattern == null ? "<none>" : pattern.cacheKey()) + '|'
                 + cfg.missingBlockPolicy + '|' + cfg.perpSnapDegrees;
     }
 }

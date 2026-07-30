@@ -77,11 +77,11 @@ public class GradientConfig {
     public boolean faceFillVoids = true;
 
     /**
-     * Idle seconds before an outside-marker gradient forgets its progress (the session cache is
-     * dropped and the next click starts a fresh gradient). Also cleared whenever the picker
-     * gradient changes.
+     * "Paint memory": idle seconds before free-hand paint progress is forgotten — gradient
+     * columns, 3D fills, AND pattern placements all share this timer (the session caches drop
+     * and the next click starts fresh). Also cleared when the active palette/pattern changes.
      */
-    public int gradientCacheSeconds = 60;
+    public int gradientCacheSeconds = 600;
 
     // ---- shared block source --------------------------------------------------------------------
 

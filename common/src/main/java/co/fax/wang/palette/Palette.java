@@ -154,16 +154,31 @@ public final class Palette {
     }
 
     /**
-     * Canonical content string for cache invalidation: any edit that could change what gets
-     * placed changes this key. Includes the id so switching palettes always invalidates.
+     * Canonical content string: any edit that could change what gets placed changes this key.
+     * Includes the id so switching palettes always changes it.
      */
     public String contentKey() {
+        return contentKey(true);
+    }
+
+    /**
+     * The placement-cache key: like {@link #contentKey()} but EXCLUDING the pattern-variation
+     * settings — tweaking variance mid-build must not restart an in-progress pattern (the
+     * repeating drawing keeps its plane; only newly placed cells roll the new variance).
+     */
+    public String cacheKey() {
+        return contentKey(false);
+    }
+
+    private String contentKey(boolean withVariation) {
         StringBuilder sb = new StringBuilder(id).append('|').append(kind).append('|')
                 .append(source).append('|').append(order).append('|').append(curve).append('|');
         if (kind == PaletteKind.PATTERN) {
-            sb.append(width).append('x').append(height).append('|').append(tiling).append('|')
-                    .append(patternVariation).append('@').append(patternVariationChance).append('|')
-                    .append(startU).append(',').append(startV).append('|')
+            sb.append(width).append('x').append(height).append('|').append(tiling).append('|');
+            if (withVariation) {
+                sb.append(patternVariation).append('@').append(patternVariationChance).append('|');
+            }
+            sb.append(startU).append(',').append(startV).append('|')
                     .append(startAtBottom).append('|');
             for (String c : cells) sb.append(c).append(',');
         }

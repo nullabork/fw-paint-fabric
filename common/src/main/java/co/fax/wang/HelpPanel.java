@@ -447,14 +447,16 @@ public final class HelpPanel {
                     + "start.",
                 "The helper text always says what the next click would anchor to - markers, or "
                     + "the palette alone."),
-            t("Gradient memory", "How free-hand gradients keep their place.", List.of(
+            t("Paint memory", "How free-hand paint keeps its place.", List.of(
                 "Painting outside markers remembers which step each placed block was, so "
                     + "clicking the face of a half-finished gradient continues it instead of "
-                    + "restarting.",
-                "The memory clears when you switch or edit the active palette, or after the "
-                    + "\"Gradient memory\" idle time in Settings (default 1 minute) - stop for "
-                    + "longer than that and the next click starts a fresh gradient. Clicking a "
-                    + "FINISHED gradient starts a new one on top rather than doing nothing.",
+                    + "restarting. Pattern placements remember their plane the same way.",
+                "The memory clears when you switch or edit the active palette or pattern, or "
+                    + "after the \"Paint memory\" idle time in Settings (default 10 minutes, up "
+                    + "to 30) - stop for longer than that and the next click starts fresh. "
+                    + "Clicking a FINISHED gradient starts a new one on top rather than doing "
+                    + "nothing. Changing a pattern's variance does NOT reset an in-progress "
+                    + "pattern - only new cells roll the new variance.",
                 "3D fills remember their centre: click a block that belongs to one and it keeps "
                     + "growing the same sphere from the original middle; click elsewhere to start "
                     + "a new one."))),

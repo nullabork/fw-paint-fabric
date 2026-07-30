@@ -121,7 +121,7 @@ The active palette blended along your build — between markers or free-hand.
 - **Between markers**: mark a start and end, click the face the line runs out of and hold — the
   palette stretches start→end, Automatic segments anchoring to the real marker blocks.
 - **Anywhere else**: the gradient grows out of the clicked face, sized by the palette's Sizing
-  mode. **Gradient memory** continues a half-finished gradient when re-clicked (cleared when you
+  mode. **Paint memory** continues a half-finished gradient when re-clicked (cleared when you
   switch or edit palettes, or after the Settings idle timer); a *finished* gradient starts a
   fresh one on top.
 - **3D gradients**: sphere-ish blends from the centre out; each fill remembers its centre. 3D
@@ -159,7 +159,7 @@ Every placeable block in the game ranked by colour — discover blocks beyond yo
 
 ## Settings
 
-- **Placement**, **Marker dist**, **Auto end marker**, **Fill voids first**, **Gradient memory**
+- **Placement**, **Marker dist**, **Auto end marker**, **Fill voids first**, **Paint memory**
   — see above. **Missing blocks**: refuse to paint or skip absent segments. **Color match**:
   Perceptual (Oklab) or Classic.
 - **Move helper text…** repositions the HUD lines with a live preview.

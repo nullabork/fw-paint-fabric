@@ -785,10 +785,11 @@ public class GradientScreen extends Screen {
         y += 24;
 
         addRenderableWidget(new ConfigSlider(rx, y, cw, secsToSlider(cfg.gradientCacheSeconds),
-                v -> "Gradient memory: " + secsLabel(sliderToSecs(v)),
+                v -> "Paint memory: " + secsLabel(sliderToSecs(v)),
                 v -> ConfigManager.get().gradientCacheSeconds = sliderToSecs(v)));
         helpSpots.add(new HelpSpot(rx, y, cw, 20,
-                () -> "Idle gap before a free-hand gradient forgets its progress"));
+                () -> "Idle gap before free-hand paint (gradients, 3D fills, patterns) forgets "
+                        + "its progress"));
         y += 24;
 
         addRenderableWidget(Button.builder(clearMarkersLabel(), b -> {
@@ -1113,9 +1114,9 @@ public class GradientScreen extends Screen {
 
     private static int sliderToDist(double v) { return Math.max(1, Math.min(128, 1 + (int) Math.round(v * 127))); }
     private static double distToSlider(int d) { return (Math.max(1, Math.min(128, d)) - 1) / 127.0; }
-    // Gradient memory: 10 s – 5 min.
-    private static int sliderToSecs(double v) { return Math.max(10, Math.min(300, 10 + (int) Math.round(v * 290))); }
-    private static double secsToSlider(int s) { return (Math.max(10, Math.min(300, s)) - 10) / 290.0; }
+    // Paint memory: 10 s – 30 min.
+    private static int sliderToSecs(double v) { return Math.max(10, Math.min(1800, 10 + (int) Math.round(v * 1790))); }
+    private static double secsToSlider(int s) { return (Math.max(10, Math.min(1800, s)) - 10) / 1790.0; }
     private static String secsLabel(int s) {
         if (s < 60) return s + "s";
         return s % 60 == 0 ? (s / 60) + "m" : (s / 60) + "m " + (s % 60) + "s";
