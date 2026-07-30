@@ -101,6 +101,12 @@ public final class Palette {
     public int startU = -1;
     public int startV = -1;
 
+    /**
+     * When true the pattern's START edge is its bottom row — placement advances through the
+     * drawing bottom-up, so painting off the ground doesn't come out upside-down.
+     */
+    public boolean startAtBottom = false;
+
     /** The cell at (u, v) or "" — no tiling applied; callers wrap/clamp first. */
     public String cellAt(int u, int v) {
         if (u < 0 || u >= width || v < 0 || v >= height) return "";
@@ -121,6 +127,7 @@ public final class Palette {
         p.patternVariation = patternVariation;
         p.startU = startU;
         p.startV = startV;
+        p.startAtBottom = startAtBottom;
         p.source = source;
         p.order = order;
         p.curve = curve;
@@ -152,7 +159,8 @@ public final class Palette {
         if (kind == PaletteKind.PATTERN) {
             sb.append(width).append('x').append(height).append('|').append(tiling).append('|')
                     .append(patternVariation).append('|')
-                    .append(startU).append(',').append(startV).append('|');
+                    .append(startU).append(',').append(startV).append('|')
+                    .append(startAtBottom).append('|');
             for (String c : cells) sb.append(c).append(',');
         }
         for (double d : stops) sb.append(d).append(',');

@@ -46,19 +46,36 @@ final class PatternThumb {
 
     /**
      * Draw the pattern scaled into a {@code size}×{@code size} box at (x, y), start row at the
-     * top, centred, each cell a flat colour square (at least 1px).
+     * top, centred — NEVER larger than the box. Grids up to the box size get whole-pixel cells;
+     * larger grids downsample (one screen pixel samples its nearest cell), so a 32×32 pattern
+     * fits the same 16px slot the HUD text leaves for it.
      */
     static void draw(GuiGraphicsExtractor g, Palette pat, int x, int y, int size) {
         int[] colors = colorsFor(pat);
-        int px = Math.max(1, size / Math.max(pat.width, pat.height));
-        int tw = px * pat.width, th = px * pat.height;
+        int max = Math.max(pat.width, pat.height);
+        if (max <= size) {
+            int px = Math.max(1, size / max);
+            int tw = px * pat.width, th = px * pat.height;
+            int ox = x + (size - tw) / 2, oy = y + (size - th) / 2;
+            g.fill(ox - 1, oy - 1, ox + tw + 1, oy + th + 1, 0x60000000);
+            for (int v = 0; v < pat.height; v++) {
+                for (int u = 0; u < pat.width; u++) {
+                    int c = colors[v * pat.width + u];
+                    int cx = ox + u * px, cy = oy + v * px;
+                    g.fill(cx, cy, cx + px, cy + px, c == 0 ? HOLE : c);
+                }
+            }
+            return;
+        }
+        int tw = Math.max(1, size * pat.width / max), th = Math.max(1, size * pat.height / max);
         int ox = x + (size - tw) / 2, oy = y + (size - th) / 2;
         g.fill(ox - 1, oy - 1, ox + tw + 1, oy + th + 1, 0x60000000);
-        for (int v = 0; v < pat.height; v++) {
-            for (int u = 0; u < pat.width; u++) {
+        for (int py = 0; py < th; py++) {
+            int v = Math.min(pat.height - 1, py * pat.height / th);
+            for (int pxx = 0; pxx < tw; pxx++) {
+                int u = Math.min(pat.width - 1, pxx * pat.width / tw);
                 int c = colors[v * pat.width + u];
-                int cx = ox + u * px, cy = oy + v * px;
-                g.fill(cx, cy, cx + px, cy + px, c == 0 ? HOLE : c);
+                g.fill(ox + pxx, oy + py, ox + pxx + 1, oy + py + 1, c == 0 ? HOLE : c);
             }
         }
     }

@@ -54,7 +54,7 @@ public class PatternEditScreen extends Screen {
     private static final int NAME_LABEL_Y = PREVIEW_Y + PREVIEW_H + 6;
     private static final int NAME_Y = NAME_LABEL_Y + 10;
     private static final int SEP_Y = NAME_Y + 20 + 8;
-    private static final int COL_TOP = SEP_Y + 1 + 8;
+    private static final int COL_TOP = SEP_Y + 1 + 20; // room for the W/H captions under the line
     private static final int LIST_H = 204;
     private static final int CANVAS_TARGET = 320;  // the canvas roughly fits this square
     private static final int CANVAS_TOP = COL_TOP + 24 + 12; // inputs row + "start" label
@@ -148,7 +148,7 @@ public class PatternEditScreen extends Screen {
     private int canvasY() { return CANVAS_TOP - scroll; }
 
     private int contentHeight() {
-        int paneBottom = COL_TOP + 24 + LIST_H + 26 + 48;   // list + hints + toggles below
+        int paneBottom = COL_TOP + 24 + LIST_H + 26 + 72;   // list + hints + three toggles below
         int canvasBottom = CANVAS_TOP + canvasH() + 14 + 24; // "end" label + interaction hints
         return Math.max(paneBottom, canvasBottom) + 8;
     }
@@ -216,6 +216,16 @@ public class PatternEditScreen extends Screen {
                         ? "Off: cells place exactly the block you drew"
                         : "±" + editing.patternVariation + ": a cell may swap to a block within "
                                 + editing.patternVariation + " position(s) of it in the colour ordering"));
+        addScrolled(Button.builder(Component.literal("Start: " + (editing.startAtBottom ? "Bottom" : "Top")), b -> {
+            editing.startAtBottom = !editing.startAtBottom;
+            dirty = true;
+            b.setMessage(Component.literal("Start: " + (editing.startAtBottom ? "Bottom" : "Top")));
+        }).bounds(cx, togY + 48, paneW() - 14, 20).build());
+        helpSpots.add(new HelpSpot(cx, togY + 48, paneW() - 14, 20,
+                () -> editing.startAtBottom
+                        ? "Placement begins at the drawing's BOTTOM row — painting up from the "
+                                + "ground keeps the drawing upright"
+                        : "Placement begins at the drawing's TOP row"));
 
         // Right column: [Clear] [Width] [Height], each a third of the canvas width.
         int rx = rightX();
@@ -367,7 +377,8 @@ public class PatternEditScreen extends Screen {
         // middle = toggle the start-cell marker.
         int[] c = cellAt(mx, my);
         if (c != null) {
-            if (event.button() == 0 && (eraserSelected || !selectedId.isEmpty())) {
+            if (event.button() == 0 && !event.hasControlDown()
+                    && (eraserSelected || !selectedId.isEmpty())) {
                 erasing = eraserSelected || selectedId.equals(cell(c[0], c[1]));
                 drawing = true;
                 applyCell(c[0], c[1]);
@@ -377,15 +388,42 @@ public class PatternEditScreen extends Screen {
                 floodFill(c[0], c[1]);
                 return true;
             }
-            if (event.button() == 2) {
+            // Ctrl+click: toggle the placement-origin plus (one per grid).
+            if (event.button() == 0 && event.hasControlDown()) {
                 if (editing.startU == c[0] && editing.startV == c[1]) {
                     editing.startU = -1;
                     editing.startV = -1;
-                } else { // only ever one plus on the grid
+                } else {
                     editing.startU = c[0];
                     editing.startV = c[1];
                 }
                 dirty = true;
+                return true;
+            }
+            // Middle-click: eyedropper — pick the cell's block (empty cell picks the eraser)
+            // and show it selected in the left list, scrolled into view.
+            if (event.button() == 2) {
+                String id = cell(c[0], c[1]);
+                if (id == null) {
+                    eraserSelected = true;
+                    selectedId = "";
+                    selectedStack = ItemStack.EMPTY;
+                    leftScroll = 0;
+                } else {
+                    for (int i = 0; i < leftRows.size(); i++) {
+                        if (leftRows.get(i).id().equals(id)) {
+                            eraserSelected = false;
+                            selectedId = id;
+                            selectedStack = leftRows.get(i).stack();
+                            int visible = LIST_H / 18;
+                            int row = i + 1; // +1: the pinned eraser row
+                            leftScroll = Math.max(0, Math.min(
+                                    Math.max(0, leftRows.size() + 1 - visible),
+                                    row - visible / 2));
+                            break;
+                        }
+                    }
+                }
                 return true;
             }
         }
@@ -730,7 +768,7 @@ public class PatternEditScreen extends Screen {
         int w = canvasW(), h = canvasH();
         if (cys + h < BAR_H || cys > viewBottom()) return;
 
-        String start = "start";
+        String start = editing.startAtBottom ? "end" : "start";
         g.text(this.font, start, cxs + (w - this.font.width(start)) / 2, cys - 10, GREY);
         g.fill(cxs - 1, cys - 1, cxs + w + 1, cys + h + 1, 0x90000000);
         UiIcons.outline(g, cxs - 1, cys - 1, w + 2, h + 2, 0xA0FFFFFF);
@@ -770,13 +808,13 @@ public class PatternEditScreen extends Screen {
             int x0 = cxs + c[0] * px, y0 = cys + c[1] * px;
             UiIcons.outline(g, x0, y0, px, px, 0xC0FFFFFF);
         }
-        String end = "end";
+        String end = editing.startAtBottom ? "start" : "end";
         g.text(this.font, end, cxs + (w - this.font.width(end)) / 2, cys + h + 4, GREY);
         // Interaction key (grey, like the other editors' hints).
         int hy = cys + h + 16;
         g.text(this.font, "Left-drag: draw · same-block press erases · Right-click: flood fill",
                 cxs, hy, LIGHT);
-        g.text(this.font, "Middle-click: set the start cell (placement begins there)",
+        g.text(this.font, "Middle-click: pick a cell's block · Ctrl-click: set the placement origin",
                 cxs, hy + 11, LIGHT);
     }
 

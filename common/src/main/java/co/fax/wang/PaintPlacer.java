@@ -265,7 +265,7 @@ public final class PaintPlacer {
                     front.getZ() - near.origin.getZ()};
             int v = PatternMath.vOf(d, new int[]{near.extrusion.getStepX(),
                     near.extrusion.getStepY(), near.extrusion.getStepZ()});
-            int sv = patternPrep.pattern.startV >= 0 ? patternPrep.pattern.startV : 0;
+            int sv = patternStartSv(patternPrep.pattern);
             boolean done = !patternPrep.pattern.tiling.wrapsStartEnd()
                     && near.extrusion == dir && v + sv >= patternPrep.pattern.height;
             if (!done) {
@@ -293,8 +293,16 @@ public final class PaintPlacer {
                 patternPlace.extrusion.getStepY(), patternPlace.extrusion.getStepZ()});
         var pat = patternPrep.pattern;
         int su = pat.startU >= 0 && pat.startU < pat.width ? pat.startU : 0;
-        int sv = pat.startV >= 0 && pat.startV < pat.height ? pat.startV : 0;
-        return PatternMath.cellFor(pat, u + su, v + sv);
+        return PatternMath.cellFor(pat, u + su, v + patternStartSv(pat));
+    }
+
+    /**
+     * The start-cell marker's row offset in PLACEMENT space (v counts steps from the start
+     * edge; with start-at-bottom that edge is the drawing's bottom, so the drawn row flips).
+     */
+    private static int patternStartSv(co.fax.wang.palette.Palette pat) {
+        if (pat.startV < 0 || pat.startV >= pat.height) return 0;
+        return pat.startAtBottom ? pat.height - 1 - pat.startV : pat.startV;
     }
 
     private static String cantResolveMessage() {
