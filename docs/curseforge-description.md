@@ -71,15 +71,18 @@ your colour-sorted inventory blocks in the middle, and the **segment strip** on 
 
 ## Patterns
 
+![A patterned wall painted stroke by stroke, variance shimmer included](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/pattern-wall-placed-variation-v2.1.0-beta.1.jpg)
+
 Draw a block grid by hand (up to **32×32**) and paint it as a plane. **+ Pattern** on the
 Palette tab opens the editor: left-click a block (its sprite rides your cursor), hold and scrub
-to draw; press a cell holding your block to erase that block only; empty cells are holes.
-Painting starts at the pattern's **start** edge and advances out of the clicked face, its width
-crossing a plane snapped from your facing (45°/90°) — adjacent strokes **continue the drawing**
-instead of restarting, so you can build a patterned wall column by column. Tiling: none / sides
-/ start–end / both. Experimental **variation** (±1–±3) shimmers cells to colour-neighbouring
-inventory blocks. Patterns are their own paint type — **B** cycles your patterns while it's
-active.
+to draw — press a same-block cell to erase, **Shift-drag** for straight/45° lines,
+**right-click** to flood fill, **middle-click** to eyedrop, **Ctrl-click** to set where
+placement starts (empty cells are holes). A live iso preview (expandable) shows the wall,
+variance included; **Start: Top/Bottom** keeps ground-up painting upright. Painting advances
+out of the clicked face, the width crossing a plane snapped from your facing (45°/90°) —
+adjacent strokes **continue the drawing** instead of restarting, so you can build a patterned
+wall column by column. Tiling: none / sides / start–end / both. Patterns are their own paint
+type — **B** cycles your patterns while it's active.
 
 ## Placement modes
 

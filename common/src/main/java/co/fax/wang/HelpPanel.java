@@ -430,14 +430,22 @@ public final class HelpPanel {
             t("The pattern editor", "Pick a block, draw on the grid.", List.of(
                 "Left-click a block in the list to make it your drawing block - its sprite "
                     + "follows the cursor. Hold left-click and scrub over the canvas to draw "
-                    + "it into cells (over empty cells and other blocks alike).",
+                    + "it into cells (over empty cells and other blocks alike). The pinned "
+                    + "Eraser row clears any cell instead.",
                 "Press on a cell that already holds your selected block and the drag becomes "
                     + "an eraser for that block only - other blocks and empty cells are left "
                     + "alone. A drag never toggles cell by cell.",
+                "Shift-drag draws a straight or 45-degree line, previewed live and locked in "
+                    + "on release. Right-click flood fills the clicked cell's connected "
+                    + "same-content region (other blocks bound it). Middle-click picks a "
+                    + "cell's block; Ctrl-click sets the placement-origin plus (one per grid) "
+                    + "so a fresh stroke can start anywhere in the drawing.",
                 "Width/Height (1-32) resize the canvas; shrinking keeps the cropped cells "
-                    + "until you save, so growing back restores them. 'start' is the edge "
-                    + "placed first, advancing toward 'end'. The iso preview up top shows the "
-                    + "pattern as a wall, shrinking its blocks as the grid grows."))),
+                    + "until you save, so growing back restores them; Clear (with a confirm) "
+                    + "empties the grid. 'start' is the edge placed first - the Start: "
+                    + "Top/Bottom button flips it so painting up from the ground keeps the "
+                    + "drawing upright. The iso preview up top shows the wall with variance "
+                    + "applied; its expand button opens it full screen."))),
 
         t("Gradient paint", "Blend along the active palette - between markers or free-hand.",
             List.of(
