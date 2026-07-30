@@ -278,9 +278,13 @@ public class GradientScreen extends Screen {
                     c.placementMode = c.placementMode.next();
                 });
         y += 24;
-        // The palette row: content is drawn over the button each frame (renderPaintTab).
+        // The palette row: content is drawn over the button each frame (renderPaintTab). It
+        // cycles the kind the current paint type consumes (patterns in Pattern paint).
         paletteCycleBtn = addRenderableWidget(Button.builder(Component.empty(), b -> {
-            co.fax.wang.palette.PaletteStore.cycleActive(1, co.fax.wang.palette.PaletteKind.GRADIENT);
+            co.fax.wang.palette.PaletteKind kind =
+                    Gradient.kindFor(ConfigManager.get().activePaintType);
+            if (kind == null) return;
+            PaletteStore.cycleActive(1, kind);
             paletteList = null; // stale-proof: the Palette tab rebuilds on next visit anyway
         }).bounds(x, y, w, 20).build());
     }
@@ -291,7 +295,8 @@ public class GradientScreen extends Screen {
         g.text(this.font, title, (this.width - this.font.width(title)) / 2, 38, LIGHT);
         if (paletteCycleBtn == null) return;
         boolean solid = cfg.activePaintType == PaintType.SOLID;
-        paletteCycleBtn.active = !solid && !PaletteStore.all().isEmpty();
+        co.fax.wang.palette.PaletteKind kind = Gradient.kindFor(cfg.activePaintType);
+        paletteCycleBtn.active = !solid && kind != null && !PaletteStore.allOf(kind).isEmpty();
 
         int bx = paletteCycleBtn.getX(), by = paletteCycleBtn.getY();
         int bw = paletteCycleBtn.getWidth(), bh = paletteCycleBtn.getHeight();
@@ -312,6 +317,18 @@ public class GradientScreen extends Screen {
             } else {
                 String name = "Match: " + cfg.solidMatch.displayName();
                 g.text(this.font, name, bx + (bw - this.font.width(name)) / 2, by + 6, WHITE);
+            }
+        } else if (cfg.activePaintType == PaintType.PATTERN) {
+            Palette pat = PaletteStore.activePattern();
+            if (pat == null) {
+                String s = "No patterns — create one on the Palette tab";
+                g.text(this.font, this.font.plainSubstrByWidth(s, bw - 8), bx + 4, by + 6, GREY);
+            } else {
+                String label = pat.name + " (" + pat.width + "×" + pat.height + ")";
+                int tw = 20 + this.font.width(label);
+                int sx = bx + (bw - tw) / 2;
+                PatternThumb.draw(g, pat, sx, by + 2, 16);
+                g.text(this.font, label, sx + 20, by + 6, WHITE);
             }
         } else {
             Palette active = PaletteStore.active();
@@ -347,30 +364,42 @@ public class GradientScreen extends Screen {
 
     private void initPaletteTab() {
         int cx = contentX(), w = 2 * colW() + COL_GAP;
-        int bw = (w - 3 * 4) / 4;
+        int bw = (w - 4 * 4) / 5;
         addRenderableWidget(Button.builder(Component.literal("+ New"),
                 b -> openEditor(null)).bounds(cx, 30, bw, 20).build());
+        addRenderableWidget(Button.builder(Component.literal("+ Pattern"), b -> {
+            if (this.minecraft != null) this.minecraft.setScreenAndShow(new PatternEditScreen(null));
+        }).bounds(cx + bw + 4, 30, bw, 20).build());
         paletteUseBtn = addRenderableWidget(Button.builder(Component.literal("Use"), b -> {
             String id = paletteList.selectedId();
             if (!id.isEmpty()) {
-                PaletteStore.setActive(id);
-                paletteList.setActiveId(id);
+                PaletteStore.setActive(id); // routes to the item's kind's active pointer
+                paletteList.setActiveId(PaletteStore.activeId());
+                Palette nowActive = PaletteStore.activePattern();
+                paletteList.setActivePatternId(nowActive == null ? "" : nowActive.id);
                 paletteList.expand(id); // using a palette auto-expands its summary
                 paletteSelectedId = id;
                 paletteExpandId = id;
             }
-        }).bounds(cx + bw + 4, 30, bw, 20).build());
+        }).bounds(cx + 2 * (bw + 4), 30, bw, 20).build());
         paletteEditBtn = addRenderableWidget(Button.builder(Component.literal("Edit"), b -> {
             Palette p = PaletteStore.byId(paletteList.selectedId());
-            if (p != null) openEditor(p);
-        }).bounds(cx + 2 * (bw + 4), 30, bw, 20).build());
+            if (p == null) return;
+            if (p.kind == co.fax.wang.palette.PaletteKind.PATTERN) {
+                if (this.minecraft != null) this.minecraft.setScreenAndShow(new PatternEditScreen(p));
+            } else {
+                openEditor(p);
+            }
+        }).bounds(cx + 3 * (bw + 4), 30, bw, 20).build());
         paletteDeleteBtn = addRenderableWidget(Button.builder(Component.literal("Delete"), b -> {
             if (!paletteList.selectedId().isEmpty()) confirmDeleteId = paletteList.selectedId();
-        }).bounds(cx + 3 * (bw + 4), 30, w - 3 * (bw + 4), 20).build());
+        }).bounds(cx + 4 * (bw + 4), 30, w - 4 * (bw + 4), 20).build());
 
         paletteList = new PaletteListPanel(this.font);
         paletteList.setBounds(cx, 56, w, this.height - 56 - 34);
         paletteList.setActiveId(PaletteStore.activeId());
+        Palette ap = PaletteStore.activePattern();
+        paletteList.setActivePatternId(ap == null ? "" : ap.id);
         paletteList.select(paletteSelectedId);
         if (!paletteExpandId.isEmpty()) paletteList.expand(paletteExpandId);
         rebuildPaletteEntries();
