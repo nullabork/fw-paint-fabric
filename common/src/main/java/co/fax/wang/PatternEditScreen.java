@@ -129,10 +129,11 @@ public class PatternEditScreen extends Screen {
 
     private int paneW() { return 180; }
 
-    /** Cell px, sized so the canvas NEVER exceeds the fixed target — the layout must not shift
-     *  when W/H change (widgets are placed at init; a moving column desyncs them). */
+    /** Cell px, sized so the canvas NEVER exceeds the fixed layout envelope — dense grids get
+     *  smaller cells (32×32 → 8px) so the canvas stays compact; the layout must not shift when
+     *  W/H change (widgets are placed at init; a moving column desyncs them). */
     private int canvasCell() {
-        return Math.max(4, Math.min(20, CANVAS_TARGET / Math.max(editing.width, editing.height)));
+        return Math.max(4, Math.min(20, 256 / Math.max(editing.width, editing.height)));
     }
 
     private int canvasW() { return canvasCell() * editing.width; }
@@ -149,7 +150,7 @@ public class PatternEditScreen extends Screen {
 
     private int contentHeight() {
         int paneBottom = COL_TOP + 24 + LIST_H + 26 + 72;   // list + hints + three toggles below
-        int canvasBottom = CANVAS_TOP + canvasH() + 14 + 24; // "end" label + interaction hints
+        int canvasBottom = CANVAS_TOP + canvasH() + 14 + 60; // "end" label + 4 hint lines
         return Math.max(paneBottom, canvasBottom) + 8;
     }
 
@@ -810,12 +811,17 @@ public class PatternEditScreen extends Screen {
         }
         String end = editing.startAtBottom ? "start" : "end";
         g.text(this.font, end, cxs + (w - this.font.width(end)) / 2, cys + h + 4, GREY);
-        // Interaction key (grey, like the other editors' hints).
+        // Interaction key (grey, like the other editors' hints) — one action per line.
         int hy = cys + h + 16;
-        g.text(this.font, "Left-drag: draw · same-block press erases · Right-click: flood fill",
-                cxs, hy, LIGHT);
-        g.text(this.font, "Middle-click: pick a cell's block · Ctrl-click: set the placement origin",
-                cxs, hy + 11, LIGHT);
+        String[] key = {
+                "Left-drag: draw (pressing a same-block cell erases it)",
+                "Right-click: flood fill the matching region",
+                "Middle-click: pick a cell's block",
+                "Ctrl-click: set the placement origin",
+        };
+        for (int i = 0; i < key.length; i++) {
+            g.text(this.font, key[i], cxs, hy + i * 11, LIGHT);
+        }
     }
 
     /** A small pink eraser block icon for the pinned list row. */
