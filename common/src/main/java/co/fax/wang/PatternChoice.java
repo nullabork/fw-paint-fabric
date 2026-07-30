@@ -117,9 +117,10 @@ public final class PatternChoice {
     }
 
     /**
-     * The block a cell places, with variation applied: at N ≥ 1 a uniformly-random block within
-     * N positions of the cell's block in the Oklab ordering (the block itself included). Null
-     * when the cell's block isn't in the source (only reachable under Skip missing).
+     * The block a cell places, with variation applied: at N ≥ 1, with the pattern's variation
+     * CHANCE (percent), the cell swaps to a uniformly-random OTHER block within N positions of
+     * its block in the Oklab ordering; otherwise (or when the roll fails) the drawn block
+     * places. Null when the cell's block isn't in the source (only under Skip missing).
      */
     public static Block varied(Prepared p, String cellId) {
         Block base = Gradient.blockOfItemId(cellId);
@@ -127,9 +128,14 @@ public final class PatternChoice {
         int n = Math.max(0, Math.min(3, p.pattern.patternVariation));
         int idx = p.ordered.indexOf(base);
         if (n == 0 || idx < 0) return idx < 0 && !p.available.contains(cellId) ? null : base;
+        int chance = Math.max(1, Math.min(100, p.pattern.patternVariationChance));
+        if (RANDOM.nextInt(100) >= chance) return base;
         int lo = Math.max(0, idx - n);
         int hi = Math.min(p.ordered.size() - 1, idx + n);
-        return p.ordered.get(lo + RANDOM.nextInt(hi - lo + 1));
+        if (hi <= lo) return base;
+        int pick = lo + RANDOM.nextInt(hi - lo); // window minus the base block itself
+        if (pick >= idx) pick++;
+        return p.ordered.get(pick);
     }
 
     // The block a strict slot lookup most recently failed to find (for the "out of X" error).

@@ -207,15 +207,18 @@ public class PatternEditScreen extends Screen {
             case START_END -> "Tiles start/end: columns repeat the pattern as they run";
             case START_END_SIDES -> "Tiles both ways: wraps across the width and along the run";
         }));
-        addScrolled(Button.builder(Component.literal("Variation: " + variationLabel()), b -> {
+        int half = (paneW() - 14 - 4) / 2;
+        addScrolled(Button.builder(Component.literal("Var: " + variationLabel()), b -> {
             editing.patternVariation = (editing.patternVariation + 1) % 4;
             dirty = true;
-            b.setMessage(Component.literal("Variation: " + variationLabel()));
-        }).bounds(cx, togY + 24, paneW() - 14, 20).build());
+            b.setMessage(Component.literal("Var: " + variationLabel()));
+        }).bounds(cx, togY + 24, half, 20).build());
+        addScrolled(new ChanceSlider(cx + half + 4, togY + 24, paneW() - 14 - half - 4));
         helpSpots.add(new HelpSpot(cx, togY + 24, paneW() - 14, 20,
                 () -> editing.patternVariation == 0
                         ? "Off: cells place exactly the block you drew"
-                        : "±" + editing.patternVariation + ": a cell may swap to a block within "
+                        : "±" + editing.patternVariation + ": with a " + editing.patternVariationChance
+                                + "% chance a cell swaps to a block within "
                                 + editing.patternVariation + " position(s) of it in the colour ordering"));
         addScrolled(Button.builder(Component.literal("Start: " + (editing.startAtBottom ? "Bottom" : "Top")), b -> {
             editing.startAtBottom = !editing.startAtBottom;
@@ -255,6 +258,25 @@ public class PatternEditScreen extends Screen {
 
     private String variationLabel() {
         return editing.patternVariation == 0 ? "Off" : "±" + editing.patternVariation;
+    }
+
+    /** The swap-chance slider (1–100%, whole-percent steps) beside the Variation toggle. */
+    private final class ChanceSlider extends net.minecraft.client.gui.components.AbstractSliderButton {
+        ChanceSlider(int x, int y, int w) {
+            super(x, y, w, 20, Component.empty(), (editing.patternVariationChance - 1) / 99.0);
+            updateMessage();
+        }
+
+        @Override
+        protected void updateMessage() {
+            setMessage(Component.literal((1 + (int) Math.round(this.value * 99)) + "%"));
+        }
+
+        @Override
+        protected void applyValue() {
+            editing.patternVariationChance = 1 + (int) Math.round(this.value * 99);
+            dirty = true;
+        }
     }
 
     private EditBox sizeBox(int x, int y, int initial, java.util.function.IntConsumer apply) {

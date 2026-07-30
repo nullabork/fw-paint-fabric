@@ -94,6 +94,9 @@ public final class Palette {
      */
     public int patternVariation = 0;
 
+    /** Chance (percent, 1–100) that a cell actually swaps when variation is on. */
+    public int patternVariationChance = 100;
+
     /**
      * The cell placement starts from (the plus marker in the editor), or −1/−1 for the default
      * top-left — lets a fresh stroke begin from anywhere in the drawing (e.g. its centre).
@@ -125,6 +128,7 @@ public final class Palette {
         p.cells = new ArrayList<>(cells);
         p.tiling = tiling;
         p.patternVariation = patternVariation;
+        p.patternVariationChance = patternVariationChance;
         p.startU = startU;
         p.startV = startV;
         p.startAtBottom = startAtBottom;
@@ -158,7 +162,7 @@ public final class Palette {
                 .append(source).append('|').append(order).append('|').append(curve).append('|');
         if (kind == PaletteKind.PATTERN) {
             sb.append(width).append('x').append(height).append('|').append(tiling).append('|')
-                    .append(patternVariation).append('|')
+                    .append(patternVariation).append('@').append(patternVariationChance).append('|')
                     .append(startU).append(',').append(startV).append('|')
                     .append(startAtBottom).append('|');
             for (String c : cells) sb.append(c).append(',');
