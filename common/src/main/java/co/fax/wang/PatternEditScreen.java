@@ -89,6 +89,11 @@ public class PatternEditScreen extends Screen {
     private boolean drawing;
     private boolean erasing;
 
+    // Shift-drag line tool: anchored at press, live preview to the current cell, commit on
+    // release. The grid itself is untouched until release (the preview is an overlay).
+    private boolean lineActive;
+    private int lineU0, lineV0, lineU1, lineV1;
+
     // Clear-grid confirmation modal.
     private boolean confirmClear;
 
@@ -150,7 +155,7 @@ public class PatternEditScreen extends Screen {
 
     private int contentHeight() {
         int paneBottom = COL_TOP + 24 + LIST_H + 26 + 72;   // list + hints + three toggles below
-        int canvasBottom = CANVAS_TOP + canvasH() + 14 + 60; // "end" label + 4 hint lines
+        int canvasBottom = CANVAS_TOP + canvasH() + 14 + 71; // "end" label + 5 hint lines
         return Math.max(paneBottom, canvasBottom) + 8;
     }
 
@@ -400,6 +405,14 @@ public class PatternEditScreen extends Screen {
         // middle = toggle the start-cell marker.
         int[] c = cellAt(mx, my);
         if (c != null) {
+            // Shift+press: start a straight/45° line from this cell (committed on release).
+            if (event.button() == 0 && event.hasShiftDown() && !event.hasControlDown()
+                    && (eraserSelected || !selectedId.isEmpty())) {
+                lineActive = true;
+                lineU0 = lineU1 = c[0];
+                lineV0 = lineV1 = c[1];
+                return true;
+            }
             if (event.button() == 0 && !event.hasControlDown()
                     && (eraserSelected || !selectedId.isEmpty())) {
                 erasing = eraserSelected || selectedId.equals(cell(c[0], c[1]));
@@ -505,6 +518,12 @@ public class PatternEditScreen extends Screen {
 
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        if (event.button() == 0 && lineActive) {
+            int[] c = clampedCellAt(event.x(), event.y());
+            lineU1 = c[0];
+            lineV1 = c[1];
+            return true;
+        }
         if (event.button() == 0 && drawing) {
             int[] c = cellAt(event.x(), event.y());
             if (c != null) applyCell(c[0], c[1]);
@@ -515,12 +534,52 @@ public class PatternEditScreen extends Screen {
 
     @Override
     public boolean mouseReleased(MouseButtonEvent event) {
+        if (event.button() == 0 && lineActive) {
+            // Commit: the line overwrites whatever it crosses with the current tool.
+            for (int[] c : lineCells()) {
+                setCell(c[0], c[1], eraserSelected ? null : selectedId);
+            }
+            lineActive = false;
+            return true;
+        }
         if (event.button() == 0 && drawing) {
             drawing = false;
             erasing = false;
             return true;
         }
         return super.mouseReleased(event);
+    }
+
+    /** The cell nearest to (mx, my), clamped into the grid — line drags may leave the canvas. */
+    private int[] clampedCellAt(double mx, double my) {
+        int px = canvasCell();
+        int u = (int) Math.floor((mx - canvasX()) / px);
+        int v = (int) Math.floor((my - canvasY()) / px);
+        return new int[]{Math.max(0, Math.min(editing.width - 1, u)),
+                Math.max(0, Math.min(editing.height - 1, v))};
+    }
+
+    /**
+     * The line-tool cells: from the anchor toward the drag cell, snapped to the nearest of the
+     * 8 directions (straight or 45°), length = the drag's projection onto that ray.
+     */
+    private List<int[]> lineCells() {
+        List<int[]> out = new ArrayList<>();
+        int du = lineU1 - lineU0, dv = lineV1 - lineV0;
+        if (du == 0 && dv == 0) {
+            out.add(new int[]{lineU0, lineV0});
+            return out;
+        }
+        double snapped = Math.toRadians(Math.round(Math.toDegrees(Math.atan2(dv, du)) / 45.0) * 45.0);
+        int rx = (int) Math.round(Math.cos(snapped));
+        int ry = (int) Math.round(Math.sin(snapped));
+        int len = (int) Math.round((du * rx + dv * ry) / (double) (rx * rx + ry * ry));
+        for (int k = 0; k <= Math.max(0, len); k++) {
+            int u = lineU0 + k * rx, v = lineV0 + k * ry;
+            if (u < 0 || u >= editing.width || v < 0 || v >= editing.height) break;
+            out.add(new int[]{u, v});
+        }
+        return out;
     }
 
     @Override
@@ -825,6 +884,16 @@ public class PatternEditScreen extends Screen {
             g.fill(x0, y0 + mid, x0 + px, y0 + mid + 2, color);
             g.fill(x0 + mid, y0, x0 + mid + 2, y0 + px, color);
         }
+        // Live line-tool preview: an overlay only — the grid beneath stays untouched until
+        // release, so cells the line has passed over spring back as it moves.
+        if (lineActive) {
+            int fill = eraserSelected ? 0xC0202020 : colorOf(selectedId);
+            for (int[] lc : lineCells()) {
+                int x0 = cxs + lc[0] * px, y0 = cys + lc[1] * px;
+                g.fill(x0, y0, x0 + px, y0 + px, fill);
+                UiIcons.outline(g, x0, y0, px, px, 0xC0FFFFFF);
+            }
+        }
         // Hovered cell highlight.
         int[] c = cellAt(mouseX, mouseY);
         if (c != null) {
@@ -837,6 +906,7 @@ public class PatternEditScreen extends Screen {
         int hy = cys + h + 16;
         String[] key = {
                 "Left-drag: draw (pressing a same-block cell erases it)",
+                "Shift-drag: a straight or 45° line (locks in on release)",
                 "Right-click: flood fill the matching region",
                 "Middle-click: pick a cell's block",
                 "Ctrl-click: set the placement origin",
