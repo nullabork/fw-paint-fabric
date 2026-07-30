@@ -175,12 +175,12 @@ public final class HelpPanel {
                 + "blocks (or the Automatic rows) into the strip, then Save. Gradient and noise "
                 + "painting both use the active palette; press {palette} in-game to cycle "
                 + "through your saved ones.",
-            "3. Hold the tool. Press {paint} to switch what it paints - Solid, Gradient, or "
-                + "Noise - and {cycle} to cycle where blocks go: Marker, Marker corners, Marker "
-                + "draw, Single, Face, 3D Fill, Disabled. The Paint tab ({open} lands on it) "
-                + "has buttons for all of these too. Any paint type works with any placement "
-                + "mode, with or without markers. The helper text in the top-left always shows "
-                + "both, plus the active palette.",
+            "3. Hold the tool. Press {paint} to switch what it paints - Gradient, Noise, "
+                + "Solid, or Pattern - and {cycle} to cycle where blocks go: Marker, Marker "
+                + "corners, Marker draw, Single, Face, Face perp, 3D Fill, Disabled. The Paint "
+                + "tab ({open} lands on it) has buttons for all of these too. Any paint type "
+                + "works with any placement mode, with or without markers. The helper text in "
+                + "the top-left always shows both, plus the active palette or pattern.",
             "4. Aim at a block face and right-click to paint (hold to keep going). Markers are "
                 + "optional - they bound what you paint and anchor Automatic segments.",
             "{open} opens and closes this screen. All keys are rebindable under "
@@ -217,6 +217,18 @@ public final class HelpPanel {
                     + "together. It's about keeping things even, so only columns within your "
                     + "reach count - a void you can't reach never holds the rest up. Turn it off "
                     + "to advance every column at once.")),
+            t("Face perpendicular", "A 1-block-wide run, snapped to 45 degrees.", List.of(
+                "Like Face, but instead of the whole surface it selects a single-block-wide "
+                    + "line through the block you click, running along the direction you're "
+                    + "looking - snapped to 45 or 90 degrees (the Perp snap setting). 45 lets "
+                    + "you paint diagonal, stair-stepped runs, including up-diagonals across "
+                    + "walls.",
+                "The run extends both ways from the click while faces stay exposed and in "
+                    + "reach; end markers stop it like everything else. With a start marker "
+                    + "behind the clicked block, only the marked blocks along the run are "
+                    + "selected - never the whole marker plane.",
+                "Works with every paint type - solid lines, gradient runs, noise streaks, or "
+                    + "pattern strips.")),
             t("3D Fill", "A blob of blocks growing out of the clicked face.", List.of(
                 "Tap right-click to place the first shell, hold to grow the fill layer by layer. "
                     + "It only spreads through connected air, so walls, end markers, and "
@@ -391,6 +403,39 @@ public final class HelpPanel {
                     + "dither across band boundaries.",
                 "Step length: chance each step runs randomly longer or shorter (its neighbour "
                     + "compensates, so the gradient still starts and ends on time)."))),
+
+        t("Patterns", "Hand-drawn 2D block grids, painted as planes.",
+            List.of(
+                "A pattern is a grid you draw cell by cell (up to 32x32) in the pattern editor "
+                    + "- press + Pattern on the Palette tab. Patterns live in the same list as "
+                    + "gradient palettes and paint under the PATTERN paint type ({paint} "
+                    + "cycles to it); the cycle keybind ({palette}) then steps through your "
+                    + "patterns instead of gradients - each keeps its own selection.",
+                "Placement starts at the pattern's START edge and advances out of the face "
+                    + "you click; the pattern's width runs across a plane derived from the "
+                    + "direction you're facing, snapped to 45 or 90 degrees (Perp snap). "
+                    + "Painting a box with the same pattern gives the pattern on the faces "
+                    + "parallel to its plane and edge streaks on the perpendicular sides.",
+                "Adjacent strokes continue the same pattern instead of restarting - placed "
+                    + "cells remember their position in the drawing, so painting column by "
+                    + "column lines up. Switching or editing patterns starts fresh.",
+                "Empty cells are holes: nothing is placed there. Tiling controls repetition: "
+                    + "none, sides (wraps across the width), start/end (columns repeat), or "
+                    + "both.",
+                "Variation (experimental): at +-1 to +-3, a cell may swap to a block within "
+                    + "that many positions of it in the colour ordering of your inventory - "
+                    + "subtle texture shimmer with no chaos."),
+            t("The pattern editor", "Pick a block, draw on the grid.", List.of(
+                "Left-click a block in the list to make it your drawing block - its sprite "
+                    + "follows the cursor. Hold left-click and scrub over the canvas to draw "
+                    + "it into cells (over empty cells and other blocks alike).",
+                "Press on a cell that already holds your selected block and the drag becomes "
+                    + "an eraser for that block only - other blocks and empty cells are left "
+                    + "alone. A drag never toggles cell by cell.",
+                "Width/Height (1-32) resize the canvas; shrinking keeps the cropped cells "
+                    + "until you save, so growing back restores them. 'start' is the edge "
+                    + "placed first, advancing toward 'end'. The iso preview up top shows the "
+                    + "pattern as a wall, shrinking its blocks as the grid grows."))),
 
         t("Gradient paint", "Blend along the active palette - between markers or free-hand.",
             List.of(

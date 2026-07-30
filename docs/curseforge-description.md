@@ -4,13 +4,13 @@ Open source (MIT) — [github.com/nullabork/fw-paint-fabric](https://github.com/
 
 ![One palette, two paints: a gradient wall and its noise counterpart](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/gradient-vs-noise-same-palette-walls-v2.0.0-beta.1.jpg)
 
-**Paint with blocks.** A client-side mod (Fabric **and** NeoForge) with three paints — **Solid**
+**Paint with blocks.** A client-side mod (Fabric **and** NeoForge) with four paints — **Solid**
 (one block: walls, columns, volumes), **Gradient** (smooth colour/brightness blends), **Noise**
-(natural, blotchy 3D patterns) — all driven by **Palettes**: named, saved block ramps you build
-once and reuse everywhere. A **Finder** tab ranks every block in the game by colour. Any paint
-works through any placement mode, with or without markers. Placement is the legit,
-multiplayer-safe way (normal block-place interactions the server validates), so it works on
-servers.
+(natural, blotchy 3D patterns), and **Pattern** (hand-drawn 2D block grids painted as planes) —
+driven by **Palettes**: named, saved block ramps and patterns you build once and reuse
+everywhere. A **Finder** tab ranks every block in the game by colour. Any paint works through
+any placement mode, with or without markers. Placement is the legit, multiplayer-safe way
+(normal block-place interactions the server validates), so it works on servers.
 
 > **v2 beta.** Palettes replace v1's per-tool block picker. v1 gradient settings are not
 > migrated — build your first palette on the Palette tab and you're going again in a minute.
@@ -31,9 +31,10 @@ servers.
 ## Keybinds
 
 - **K** — open / close the FW Paint screen (lands on the Paint quick-controls tab)
-- **V** — switch paint type · **B** — cycle the active palette
-- **G** — cycle placement mode: Marker → Marker corners → Marker draw → Single → Face → 3D Fill →
-  Disabled
+- **V** — switch paint type (Gradient / Noise / Solid / Pattern) · **B** — cycle the active
+  palette or pattern (whichever the paint type uses)
+- **G** — cycle placement mode: Marker → Marker corners → Marker draw → Single → Face →
+  Face perp → 3D Fill → Disabled
 - **L-Ctrl** (hold + click) — a marker-removing click clears the whole connected plane
 - All rebindable under Options → Controls → Key Binds → MISC.
 
@@ -67,6 +68,18 @@ your colour-sorted inventory blocks in the middle, and the **segment strip** on 
   (steps randomly run longer/shorter) — plus the palette's own noise type / scale / seed.
 - Hover any control (or click its circled-?) for help describing what it's currently set to.
 
+## Patterns
+
+Draw a block grid by hand (up to **32×32**) and paint it as a plane. **+ Pattern** on the
+Palette tab opens the editor: left-click a block (its sprite rides your cursor), hold and scrub
+to draw; press a cell holding your block to erase that block only; empty cells are holes.
+Painting starts at the pattern's **start** edge and advances out of the clicked face, its width
+crossing a plane snapped from your facing (45°/90°) — adjacent strokes **continue the drawing**
+instead of restarting, so you can build a patterned wall column by column. Tiling: none / sides
+/ start–end / both. Experimental **variation** (±1–±3) shimmers cells to colour-neighbouring
+inventory blocks. Patterns are their own paint type — **B** cycles your patterns while it's
+active.
+
 ## Placement modes
 
 Where blocks go, shared by all three paints. The **green face tint + arrow** previews every face
@@ -76,6 +89,9 @@ the next click grows from, and rides the advancing fronts while you hold.
 - **Face** — the whole connected plane extrudes together: click a wall's top to raise it, its side
   to thicken it. A start marker behind the clicked column selects the connected marker group
   instead. **Fill voids first** (Settings) levels the lowest columns before stacking new layers.
+- **Face perp** — a 1-block-wide run through the clicked block along your look direction,
+  snapped to 45° or 90° (the **Perp snap** setting) — diagonal stair-stepped lines included.
+  Inside markers only the marked blocks along the run are selected.
 - **3D Fill** — a connected blob out of the clicked face; tap for the first shell, hold to grow.
   Contained by walls, end markers, and start-marker space.
 - Everywhere: an **end marker stops a column or fill even floating in air**, and a finished column
