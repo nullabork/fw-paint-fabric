@@ -128,8 +128,8 @@ public final class PatternChoice {
         int n = Math.max(0, Math.min(3, p.pattern.patternVariation));
         int idx = p.ordered.indexOf(base);
         if (n == 0 || idx < 0) return idx < 0 && !p.available.contains(cellId) ? null : base;
-        int chance = Math.max(1, Math.min(100, p.pattern.patternVariationChance));
-        if (RANDOM.nextInt(100) >= chance) return base;
+        int chance = Math.max(0, Math.min(100, p.pattern.patternVariationChance));
+        if (chance == 0 || RANDOM.nextInt(100) >= chance) return base;
         int lo = Math.max(0, idx - n);
         int hi = Math.min(p.ordered.size() - 1, idx + n);
         if (hi <= lo) return base;

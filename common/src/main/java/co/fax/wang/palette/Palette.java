@@ -94,8 +94,8 @@ public final class Palette {
      */
     public int patternVariation = 0;
 
-    /** Chance (percent, 1–100) that a cell actually swaps when variation is on. */
-    public int patternVariationChance = 100;
+    /** Chance (percent, 0–100) that a cell actually swaps when variation is on. */
+    public int patternVariationChance = 0;
 
     /**
      * The cell placement starts from (the plus marker in the editor), or −1/−1 for the default

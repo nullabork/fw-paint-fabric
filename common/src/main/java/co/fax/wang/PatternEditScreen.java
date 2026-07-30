@@ -260,21 +260,21 @@ public class PatternEditScreen extends Screen {
         return editing.patternVariation == 0 ? "Off" : "±" + editing.patternVariation;
     }
 
-    /** The swap-chance slider (1–100%, whole-percent steps) beside the Variation toggle. */
+    /** The swap-chance slider (0–100%, whole-percent steps) beside the Variation toggle. */
     private final class ChanceSlider extends net.minecraft.client.gui.components.AbstractSliderButton {
         ChanceSlider(int x, int y, int w) {
-            super(x, y, w, 20, Component.empty(), (editing.patternVariationChance - 1) / 99.0);
+            super(x, y, w, 20, Component.empty(), editing.patternVariationChance / 100.0);
             updateMessage();
         }
 
         @Override
         protected void updateMessage() {
-            setMessage(Component.literal((1 + (int) Math.round(this.value * 99)) + "%"));
+            setMessage(Component.literal(((int) Math.round(this.value * 100)) + "%"));
         }
 
         @Override
         protected void applyValue() {
-            editing.patternVariationChance = 1 + (int) Math.round(this.value * 99);
+            editing.patternVariationChance = (int) Math.round(this.value * 100);
             dirty = true;
         }
     }
