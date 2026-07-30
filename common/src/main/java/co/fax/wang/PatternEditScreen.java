@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 
 /**
@@ -96,6 +97,10 @@ public class PatternEditScreen extends Screen {
 
     // Clear-grid confirmation modal.
     private boolean confirmClear;
+
+    // Expanded (full-screen) preview overlay.
+    private boolean previewExpanded;
+    private static final int CLOSE_X_SIZE = 24;
 
     // Cell colour memo for canvas + preview (id → 0xFFrrggbb).
     private final Map<String, Integer> cellColor = new HashMap<>();
@@ -172,6 +177,11 @@ public class PatternEditScreen extends Screen {
         rebuildLeftRows();
 
         int cx = contentX();
+
+        // Expand button beside the preview (mirrors the gradient editor's ⛶).
+        int totalW = paneW() + COL_GAP + CANVAS_TARGET + 8;
+        addScrolled(Button.builder(Component.literal("⛶"), b -> previewExpanded = true)
+                .bounds(cx + totalW - 20, PREVIEW_Y, 16, 14).build());
 
         nameBox = new EditBox(this.font, cx, NAME_Y, paneW() + COL_GAP + 220 - 124 - 4, 20,
                 Component.literal("Name"));
@@ -368,6 +378,10 @@ public class PatternEditScreen extends Screen {
     public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
         double mx = event.x(), my = event.y();
         if (pendingExit != null) return handleDiscardClick(mx, my, event.button());
+        if (previewExpanded) {
+            if (event.button() == 0 && inCloseX(mx, my)) previewExpanded = false;
+            return true; // the editor beneath is covered — swallow everything
+        }
         if (confirmClear) {
             if (event.button() == 0 && inRect(confirmBtn(true), mx, my)) {
                 java.util.Arrays.fill(buffer, null);
@@ -584,7 +598,7 @@ public class PatternEditScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (pendingExit != null) return true;
+        if (pendingExit != null || previewExpanded) return true;
         int cx = contentX(), ly = COL_TOP + 24 - scroll;
         if (mouseX >= cx && mouseX <= cx + paneW() && mouseY >= ly && mouseY <= ly + LIST_H) {
             int maxLeft = Math.max(0, leftRows.size() + 1 - LIST_H / 18);
@@ -602,6 +616,10 @@ public class PatternEditScreen extends Screen {
         int key = event.key();
         if (pendingExit != null) {
             if (key == 256) pendingExit = null;
+            return true;
+        }
+        if (previewExpanded && key == 256) {
+            previewExpanded = false;
             return true;
         }
         if (confirmClear) {
@@ -733,8 +751,38 @@ public class PatternEditScreen extends Screen {
         renderTitleBar(g);
         renderHelpPopup(g, mouseX, mouseY);
         renderCursorBlock(g, mouseX, mouseY);
+        if (previewExpanded) renderExpandedOverlay(g, mouseX, mouseY);
         if (confirmClear) renderClearConfirm(g, mouseX, mouseY);
         if (pendingExit != null) renderDiscardConfirm(g, mouseX, mouseY);
+    }
+
+    /** The full-screen preview: dark backdrop, the iso wall fitted large, ✗/Esc closes. */
+    private void renderExpandedOverlay(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        g.nextStratum();
+        g.fill(0, 0, this.width, this.height, 0xD0000000);
+        if (!anyCells()) {
+            g.text(this.font, "Draw cells to preview", this.width / 2 - 60, this.height / 2, YELLOW);
+        } else {
+            float isoX = 7.0711f, isoDown = 3.5355f, isoUp = 8.6603f;
+            float wPx = editing.width * isoX + 16,
+                    hPx = editing.width * isoDown + editing.height * isoUp + 16;
+            float s = Math.min(3f, Math.min((this.width - 60) / wPx, (this.height - 70) / hPx));
+            drawIsoWall(g, (this.width - wPx * s) / 2f, (this.height - hPx * s) / 2f, s);
+        }
+        boolean hover = inCloseX(mouseX, mouseY);
+        int bx = this.width - 10 - CLOSE_X_SIZE;
+        if (hover) g.fill(bx, 10, bx + CLOSE_X_SIZE, 10 + CLOSE_X_SIZE, 0x30FFFFFF);
+        g.pose().pushMatrix();
+        g.pose().translate(bx + (CLOSE_X_SIZE - 2f * this.font.width("✗")) / 2f,
+                10 + (CLOSE_X_SIZE - 2f * this.font.lineHeight) / 2f);
+        g.pose().scale(2f, 2f);
+        g.text(this.font, "✗", 0, 0, hover ? YELLOW : WHITE);
+        g.pose().popMatrix();
+    }
+
+    private boolean inCloseX(double mx, double my) {
+        return mx >= this.width - 10 - CLOSE_X_SIZE && mx <= this.width - 10
+                && my >= 10 && my <= 10 + CLOSE_X_SIZE;
     }
 
     private void renderClearConfirm(GuiGraphicsExtractor g, int mouseX, int mouseY) {
@@ -927,14 +975,7 @@ public class PatternEditScreen extends Screen {
     private void renderIsoPreview(GuiGraphicsExtractor g) {
         int y = PREVIEW_Y - scroll;
         if (y + PREVIEW_H < BAR_H || y > viewBottom()) return;
-        boolean any = false;
-        for (String c : buffer) {
-            if (c != null) {
-                any = true;
-                break;
-            }
-        }
-        if (!any) {
+        if (!anyCells()) {
             String s = "Draw cells to preview";
             g.text(this.font, s, (this.width - this.font.width(s)) / 2, y + PREVIEW_H / 2 - 4, YELLOW);
             return;
@@ -942,16 +983,52 @@ public class PatternEditScreen extends Screen {
         float isoX = 7.0711f, isoDown = 3.5355f, isoUp = 8.6603f;
         float wPx = editing.width * isoX + 16, hPx = editing.width * isoDown + editing.height * isoUp + 16;
         float s = Math.min(1f, Math.min((PREVIEW_H - 8) / hPx, 260f / wPx));
-        float tx = (this.width - wPx * s) / 2f, ty = y + (PREVIEW_H - hPx * s) / 2f;
+        drawIsoWall(g, (this.width - wPx * s) / 2f, y + (PREVIEW_H - hPx * s) / 2f, s);
+    }
+
+    private boolean anyCells() {
+        for (String c : buffer) {
+            if (c != null) return true;
+        }
+        return false;
+    }
+
+    /**
+     * The pattern as a 1-thick iso wall, WITH the variation roll applied (stable per-cell seeds
+     * that include the var settings, so the preview updates live as they change but doesn't
+     * flicker frame to frame). Painter's order: bottom rows first, back-to-front along u.
+     */
+    private void drawIsoWall(GuiGraphicsExtractor g, float tx, float ty, float s) {
+        float isoX = 7.0711f, isoDown = 3.5355f, isoUp = 8.6603f;
+        // The Oklab ordering the variation window indexes into (leftRows is colour-sorted).
+        List<LRow> ordered = leftRows;
+        Map<String, Integer> orderIdx = new HashMap<>();
+        for (int i = 0; i < ordered.size(); i++) orderIdx.put(ordered.get(i).id(), i);
+        int n = Math.max(0, Math.min(3, editing.variationWindow));
+        int chance = Math.max(0, Math.min(100, editing.variationChance));
+
         g.pose().pushMatrix();
         g.pose().translate(tx, ty);
         g.pose().scale(s, s);
-        // Painter's order: bottom rows first (larger v), back-to-front along u — upper sprites
-        // must draw over the top faces of the blocks below them.
         for (int v = editing.height - 1; v >= 0; v--) {
             for (int u = 0; u < editing.width; u++) {
                 String id = cell(u, v);
                 if (id == null) continue;
+                if (n > 0 && chance > 0) {
+                    Integer idx = orderIdx.get(id);
+                    if (idx != null) {
+                        Random rnd = new Random(u * 73428767L ^ v * 912931L
+                                ^ (n * 131L + chance));
+                        if (rnd.nextInt(100) < chance) {
+                            int lo = Math.max(0, idx - n), hi = Math.min(ordered.size() - 1, idx + n);
+                            if (hi > lo) {
+                                int pick = lo + rnd.nextInt(hi - lo);
+                                if (pick >= idx) pick++;
+                                id = ordered.get(pick).id();
+                            }
+                        }
+                    }
+                }
                 ItemStack st = GradientScreen.stackOfId(id);
                 g.pose().pushMatrix();
                 g.pose().translate(u * isoX, u * isoDown + v * isoUp);
@@ -965,7 +1042,7 @@ public class PatternEditScreen extends Screen {
 
     /** The selected drawing block (or eraser) rides the cursor so you know what you'll paint. */
     private void renderCursorBlock(GuiGraphicsExtractor g, int mouseX, int mouseY) {
-        if (pendingExit != null || confirmClear) return;
+        if (pendingExit != null || confirmClear || previewExpanded) return;
         if (!eraserSelected && selectedId.isEmpty()) return;
         g.nextStratum();
         if (eraserSelected) {
