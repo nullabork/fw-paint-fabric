@@ -365,7 +365,7 @@ public class GradientScreen extends Screen {
     private void initPaletteTab() {
         int cx = contentX(), w = 2 * colW() + COL_GAP;
         int bw = (w - 4 * 4) / 5;
-        addRenderableWidget(Button.builder(Component.literal("+ New"),
+        addRenderableWidget(Button.builder(Component.literal("+ Gradient"),
                 b -> openEditor(null)).bounds(cx, 30, bw, 20).build());
         addRenderableWidget(Button.builder(Component.literal("+ Pattern"), b -> {
             if (this.minecraft != null) this.minecraft.setScreenAndShow(new PatternEditScreen(null));

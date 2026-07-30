@@ -171,7 +171,7 @@ public final class HelpPanel {
         t("Getting started", "Assign a tool item, build a palette, paint.", List.of(
             "1. On the Settings tab, click \"Paint tool\" and pick any item (a stick works well). "
                 + "FW Paint only does anything while you hold that item.",
-            "2. On the Palette tab, press + New and build your first palette: double-click "
+            "2. On the Palette tab, press + Gradient and build your first palette: double-click "
                 + "blocks (or the Automatic rows) into the strip, then Save. Gradient and noise "
                 + "painting both use the active palette; press {palette} in-game to cycle "
                 + "through your saved ones.",
@@ -219,7 +219,7 @@ public final class HelpPanel {
                     + "to advance every column at once.")),
             t("Face perpendicular", "A 1-block-wide run, snapped to 45 degrees.", List.of(
                 "Like Face, but instead of the whole surface it selects a single-block-wide "
-                    + "line through the block you click, running along the direction you're "
+                    + "line through the block you click, crossing your view - perpendicular to where you're "
                     + "looking - snapped to 45 or 90 degrees (the Perp snap setting). 45 lets "
                     + "you paint diagonal, stair-stepped runs, including up-diagonals across "
                     + "walls.",

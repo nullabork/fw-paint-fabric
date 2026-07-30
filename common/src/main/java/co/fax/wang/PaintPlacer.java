@@ -37,8 +37,8 @@ import java.util.Set;
  * <b>Face</b>: the clicked face plus every interconnected, reachable block face on the same plane
  * (or, with a start marker behind the clicked column, the connected coplanar marker group) —
  * all columns extrude together. <b>Face perp</b>: a 1-block-wide run through the clicked block
- * along the player's look snapped to the configured increment (45° = stair-stepped diagonals);
- * inside markers only the marked blocks on the run are selected.
+ * crossing the player's look — perpendicular to it, snapped to the configured increment
+ * (45° = stair-stepped diagonals); inside markers only the marked blocks on the run are selected.
  * <b>3D Fill</b>: a connected blob growing out of the clicked face.
  * Everywhere, end markers stop a column/fill even when they sit in air, and marker space
  * constrains 3D fills (start inside → stay inside; start outside → stay outside).
@@ -511,7 +511,10 @@ public final class PaintPlacer {
         double snapped = Math.toRadians(Math.round(ang / snap) * (double) snap);
         int c1 = (int) Math.round(Math.cos(snapped));
         int c2 = (int) Math.round(Math.sin(snapped));
-        return new int[]{c1 * e1[0] + c2 * e2[0], c1 * e1[1] + c2 * e2[1], c1 * e1[2] + c2 * e2[2]};
+        // The run crosses the view: rotate the snapped look 90° in-plane, so the selected line
+        // is PERPENDICULAR to where you're looking (like a brush stroke across your vision).
+        int r1 = -c2, r2 = c1;
+        return new int[]{r1 * e1[0] + r2 * e2[0], r1 * e1[1] + r2 * e2[1], r1 * e1[2] + r2 * e2[2]};
     }
 
     /**

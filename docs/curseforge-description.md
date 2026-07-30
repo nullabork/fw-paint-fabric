@@ -19,7 +19,7 @@ any placement mode, with or without markers. Placement is the legit, multiplayer
 
 1. Press **K** → **Settings** → **Paint tool**: pick any item (e.g. a stick). The mod is active
    only while you hold it.
-2. On the **Palette** tab press **+ New**: double-click (or drag) blocks — or the **Auto**
+2. On the **Palette** tab press **+ Gradient**: double-click (or drag) blocks — or the **Auto**
    wildcards — into the strip, then **Save**. Saving makes it the active palette.
 3. **K** lands on the **Paint** tab: buttons for paint type, placement mode, and the active
    palette (in-game: **V**, **G**, and **B**).
@@ -89,7 +89,7 @@ the next click grows from, and rides the advancing fronts while you hold.
 - **Face** — the whole connected plane extrudes together: click a wall's top to raise it, its side
   to thicken it. A start marker behind the clicked column selects the connected marker group
   instead. **Fill voids first** (Settings) levels the lowest columns before stacking new layers.
-- **Face perp** — a 1-block-wide run through the clicked block along your look direction,
+- **Face perp** — a 1-block-wide run through the clicked block crossing your view (perpendicular to your look),
   snapped to 45° or 90° (the **Perp snap** setting) — diagonal stair-stepped lines included.
   Inside markers only the marked blocks along the run are selected.
 - **3D Fill** — a connected blob out of the clicked face; tap for the first shell, hold to grow.
