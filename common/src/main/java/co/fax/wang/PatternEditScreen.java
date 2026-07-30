@@ -17,6 +17,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -79,13 +80,17 @@ public class PatternEditScreen extends Screen {
     private int leftScroll;
     private Set<String> availableIds = new HashSet<>();
 
-    // The selected drawing block (sprite follows the cursor).
+    // The selected drawing block (sprite follows the cursor); the eraser clears any cell.
     private String selectedId = "";
     private ItemStack selectedStack = ItemStack.EMPTY;
+    private boolean eraserSelected;
 
     // Canvas drag state: mode fixed at mouse-down.
     private boolean drawing;
     private boolean erasing;
+
+    // Clear-grid confirmation modal.
+    private boolean confirmClear;
 
     // Cell colour memo for canvas + preview (id → 0xFFrrggbb).
     private final Map<String, Integer> cellColor = new HashMap<>();
@@ -124,15 +129,17 @@ public class PatternEditScreen extends Screen {
 
     private int paneW() { return 180; }
 
+    /** Cell px, sized so the canvas NEVER exceeds the fixed target — the layout must not shift
+     *  when W/H change (widgets are placed at init; a moving column desyncs them). */
     private int canvasCell() {
-        return Math.max(6, Math.min(20, CANVAS_TARGET / Math.max(editing.width, editing.height)));
+        return Math.max(4, Math.min(20, CANVAS_TARGET / Math.max(editing.width, editing.height)));
     }
 
     private int canvasW() { return canvasCell() * editing.width; }
     private int canvasH() { return canvasCell() * editing.height; }
 
     private int contentX() {
-        int total = paneW() + COL_GAP + Math.max(canvasW() + 8, 220);
+        int total = paneW() + COL_GAP + CANVAS_TARGET + 8; // constant — independent of grid size
         return Math.max(LEFT_X, (this.width - total) / 2);
     }
 
@@ -141,8 +148,8 @@ public class PatternEditScreen extends Screen {
     private int canvasY() { return CANVAS_TOP - scroll; }
 
     private int contentHeight() {
-        int paneBottom = COL_TOP + 24 + LIST_H + 26 + 48; // list + hints + toggles below
-        int canvasBottom = CANVAS_TOP + canvasH() + 14;   // + "end" label
+        int paneBottom = COL_TOP + 24 + LIST_H + 26 + 48;   // list + hints + toggles below
+        int canvasBottom = CANVAS_TOP + canvasH() + 14 + 24; // "end" label + interaction hints
         return Math.max(paneBottom, canvasBottom) + 8;
     }
 
@@ -210,21 +217,26 @@ public class PatternEditScreen extends Screen {
                         : "±" + editing.patternVariation + ": a cell may swap to a block within "
                                 + editing.patternVariation + " position(s) of it in the colour ordering"));
 
-        // Right column: Width / Height inputs side by side above the canvas.
+        // Right column: [Clear] [Width] [Height], each a third of the canvas width.
         int rx = rightX();
-        widthBox = sizeBox(rx, COL_TOP, editing.width, v -> {
+        int third = (CANVAS_TARGET - 2 * 8) / 3;
+        addScrolled(Button.builder(Component.literal("Clear"), b -> confirmClear = true)
+                .bounds(rx, COL_TOP, third, 20).build());
+        widthBox = sizeBox(rx + third + 8, COL_TOP, editing.width, v -> {
             editing.width = v;
             dirty = true;
         });
-        heightBox = sizeBox(rx + 74, COL_TOP, editing.height, v -> {
+        heightBox = sizeBox(rx + 2 * (third + 8), COL_TOP, editing.height, v -> {
             editing.height = v;
             dirty = true;
         });
+        widthBox.setWidth(third);
+        heightBox.setWidth(third);
         addScrolled(widthBox);
         addScrolled(heightBox);
-        helpSpots.add(new HelpSpot(rx + 148, COL_TOP, 0, 20,
+        helpSpots.add(new HelpSpot(rx + 3 * third + 16, COL_TOP, 0, 20,
                 () -> "Pattern size in cells (1–" + MAX_DIM + " each). Shrinking keeps the "
-                        + "cropped cells until you save"));
+                        + "cropped cells until you save. Clear empties the whole grid"));
 
         scroll = Math.min(scroll, maxScroll());
         applyScroll();
@@ -318,6 +330,16 @@ public class PatternEditScreen extends Screen {
     public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
         double mx = event.x(), my = event.y();
         if (pendingExit != null) return handleDiscardClick(mx, my, event.button());
+        if (confirmClear) {
+            if (event.button() == 0 && inRect(confirmBtn(true), mx, my)) {
+                java.util.Arrays.fill(buffer, null);
+                editing.startU = -1;
+                editing.startV = -1;
+                dirty = true;
+            }
+            confirmClear = false; // confirm, cancel, and click-away all dismiss
+            return true;
+        }
 
         if (my < BAR_H && event.button() == 0) {
             int[] xs = tabXs();
@@ -341,23 +363,44 @@ public class PatternEditScreen extends Screen {
         }
         if (super.mouseClicked(event, doubled)) return true;
 
-        // Canvas: press decides draw vs erase for the whole drag.
-        if (event.button() == 0 && !selectedId.isEmpty()) {
-            int[] c = cellAt(mx, my);
-            if (c != null) {
-                erasing = selectedId.equals(cell(c[0], c[1]));
+        // Canvas: left press decides draw vs erase for the whole drag; right = flood fill;
+        // middle = toggle the start-cell marker.
+        int[] c = cellAt(mx, my);
+        if (c != null) {
+            if (event.button() == 0 && (eraserSelected || !selectedId.isEmpty())) {
+                erasing = eraserSelected || selectedId.equals(cell(c[0], c[1]));
                 drawing = true;
                 applyCell(c[0], c[1]);
                 return true;
             }
+            if (event.button() == 1 && (eraserSelected || !selectedId.isEmpty())) {
+                floodFill(c[0], c[1]);
+                return true;
+            }
+            if (event.button() == 2) {
+                if (editing.startU == c[0] && editing.startV == c[1]) {
+                    editing.startU = -1;
+                    editing.startV = -1;
+                } else { // only ever one plus on the grid
+                    editing.startU = c[0];
+                    editing.startV = c[1];
+                }
+                dirty = true;
+                return true;
+            }
         }
-        // Left list: left-click selects the drawing block.
+        // Left list: left-click selects the drawing block (row 0 = the eraser).
         int cx = contentX(), ly = COL_TOP + 24 - scroll;
         if (event.button() == 0 && mx >= cx && mx <= cx + paneW() && my >= ly && my <= ly + LIST_H) {
             int idx = leftScroll + (int) ((my - ly) / 18);
-            if (idx >= 0 && idx < leftRows.size()) {
-                selectedId = leftRows.get(idx).id();
-                selectedStack = leftRows.get(idx).stack();
+            if (idx == 0) {
+                eraserSelected = true;
+                selectedId = "";
+                selectedStack = ItemStack.EMPTY;
+            } else if (idx >= 1 && idx - 1 < leftRows.size()) {
+                eraserSelected = false;
+                selectedId = leftRows.get(idx - 1).id();
+                selectedStack = leftRows.get(idx - 1).stack();
             }
             return true;
         }
@@ -365,10 +408,37 @@ public class PatternEditScreen extends Screen {
     }
 
     private void applyCell(int u, int v) {
-        if (erasing) {
+        if (eraserSelected) {
+            if (cell(u, v) != null) setCell(u, v, null);
+        } else if (erasing) {
             if (selectedId.equals(cell(u, v))) setCell(u, v, null);
         } else {
             setCell(u, v, selectedId);
+        }
+    }
+
+    /**
+     * Right-click flood fill: repaint the 4-connected region of cells matching the clicked
+     * cell's content (one block, or the empty region) with the selected block (or clear it,
+     * with the eraser). Cells holding any OTHER block bound the fill.
+     */
+    private void floodFill(int u0, int v0) {
+        String target = cell(u0, v0);
+        String replacement = eraserSelected ? null : selectedId;
+        if (java.util.Objects.equals(target, replacement)) return;
+        ArrayDeque<int[]> queue = new ArrayDeque<>();
+        queue.add(new int[]{u0, v0});
+        Set<Long> seen = new HashSet<>();
+        seen.add(u0 * 64L + v0);
+        while (!queue.isEmpty()) {
+            int[] c = queue.poll();
+            if (!java.util.Objects.equals(cell(c[0], c[1]), target)) continue;
+            setCell(c[0], c[1], replacement);
+            int[][] next = {{c[0] + 1, c[1]}, {c[0] - 1, c[1]}, {c[0], c[1] + 1}, {c[0], c[1] - 1}};
+            for (int[] n : next) {
+                if (n[0] < 0 || n[0] >= editing.width || n[1] < 0 || n[1] >= editing.height) continue;
+                if (seen.add(n[0] * 64L + n[1])) queue.add(n);
+            }
         }
     }
 
@@ -397,7 +467,7 @@ public class PatternEditScreen extends Screen {
         if (pendingExit != null) return true;
         int cx = contentX(), ly = COL_TOP + 24 - scroll;
         if (mouseX >= cx && mouseX <= cx + paneW() && mouseY >= ly && mouseY <= ly + LIST_H) {
-            int maxLeft = Math.max(0, leftRows.size() - LIST_H / 18);
+            int maxLeft = Math.max(0, leftRows.size() + 1 - LIST_H / 18);
             leftScroll = Math.max(0, Math.min(maxLeft, leftScroll - (int) Math.signum(scrollY)));
             return true;
         }
@@ -412,6 +482,10 @@ public class PatternEditScreen extends Screen {
         int key = event.key();
         if (pendingExit != null) {
             if (key == 256) pendingExit = null;
+            return true;
+        }
+        if (confirmClear) {
+            if (key == 256) confirmClear = false;
             return true;
         }
         if (clickedSpot != null && key == 256) {
@@ -539,7 +613,26 @@ public class PatternEditScreen extends Screen {
         renderTitleBar(g);
         renderHelpPopup(g, mouseX, mouseY);
         renderCursorBlock(g, mouseX, mouseY);
+        if (confirmClear) renderClearConfirm(g, mouseX, mouseY);
         if (pendingExit != null) renderDiscardConfirm(g, mouseX, mouseY);
+    }
+
+    private void renderClearConfirm(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        g.nextStratum();
+        g.fill(0, 0, this.width, this.height, 0xB0000000);
+        int[] b = confirmBox();
+        g.fill(b[0], b[1], b[0] + b[2], b[1] + b[3], 0xF0202020);
+        UiIcons.outline(g, b[0], b[1], b[2], b[3], WHITE);
+        String msg = "Clear the whole grid?";
+        g.text(this.font, msg, b[0] + (b[2] - this.font.width(msg)) / 2, b[1] + 10, WHITE);
+        for (boolean yes : new boolean[]{true, false}) {
+            int[] r = confirmBtn(yes);
+            boolean hover = inRect(r, mouseX, mouseY);
+            g.fill(r[0], r[1], r[0] + r[2], r[1] + r[3], hover ? 0x60FFFFFF : 0x30FFFFFF);
+            String label = yes ? "Clear" : "Cancel";
+            g.text(this.font, label, r[0] + (r[2] - this.font.width(label)) / 2, r[1] + 5,
+                    yes ? RED : WHITE);
+        }
     }
 
     private void renderTitleBar(GuiGraphicsExtractor g) {
@@ -569,12 +662,13 @@ public class PatternEditScreen extends Screen {
         if (sepY >= BAR_H + 2 && sepY <= viewBottom()) {
             g.fill(cx, sepY, cx + total, sepY + 1, 0x50FFFFFF);
         }
-        // Width/Height captions over their boxes.
+        // Width/Height captions over their boxes (right of the Clear button).
         int rx = rightX();
+        int third = (CANVAS_TARGET - 2 * 8) / 3;
         int capY = COL_TOP - scroll - 10;
         if (capY >= BAR_H + 2) {
-            g.text(this.font, "Width", rx, capY, GREY);
-            g.text(this.font, "Height", rx + 74, capY, GREY);
+            g.text(this.font, "Width", rx + third + 8, capY, GREY);
+            g.text(this.font, "Height", rx + 2 * (third + 8), capY, GREY);
         }
     }
 
@@ -596,22 +690,31 @@ public class PatternEditScreen extends Screen {
         g.fill(cx, ly, cx + lw, ly + LIST_H, 0x90000000);
         UiIcons.outline(g, cx, ly, lw, LIST_H, 0xA0FFFFFF);
         g.enableScissor(cx, Math.max(BAR_H + 1, ly), cx + lw, Math.min(viewBottom(), ly + LIST_H));
-        for (int i = leftScroll; i < leftRows.size(); i++) {
+        // Row 0 is the pinned eraser; block rows follow, shifted by one.
+        for (int i = leftScroll; i < leftRows.size() + 1; i++) {
             int ry = ly + (i - leftScroll) * 18;
             if (ry >= ly + LIST_H) break;
-            LRow row = leftRows.get(i);
             boolean hover = mouseX >= cx && mouseX <= cx + lw && mouseY >= ry && mouseY < ry + 18;
-            boolean sel = row.id().equals(selectedId);
+            if (i == 0) {
+                boolean sel = eraserSelected;
+                if (hover || sel) g.fill(cx + 1, ry, cx + lw - 1, ry + 18, sel ? 0x4455FF55 : HOVER_BG);
+                drawEraserIcon(g, cx + 2, ry + 1);
+                g.text(this.font, "Eraser — clear cells", cx + 21, ry + 5,
+                        sel ? WHITE : 0xFFC8C8C8);
+                continue;
+            }
+            LRow row = leftRows.get(i - 1);
+            boolean sel = !eraserSelected && row.id().equals(selectedId);
             if (hover || sel) g.fill(cx + 1, ry, cx + lw - 1, ry + 18, sel ? 0x4455FF55 : HOVER_BG);
             g.item(row.stack(), cx + 2, ry + 1);
             g.text(this.font, this.font.plainSubstrByWidth(row.name(), lw - 26),
                     cx + 21, ry + 5, sel ? WHITE : 0xFFE0E0E0);
         }
         g.disableScissor();
-        int maxLeft = Math.max(0, leftRows.size() - LIST_H / 18);
+        int maxLeft = Math.max(0, leftRows.size() + 1 - LIST_H / 18);
         if (maxLeft > 0) {
             int trackX = cx + lw - 3;
-            int thumbH = Math.max(8, LIST_H * (LIST_H / 18) / leftRows.size());
+            int thumbH = Math.max(8, LIST_H * (LIST_H / 18) / (leftRows.size() + 1));
             int thumbY = ly + (int) ((LIST_H - thumbH) * (double) leftScroll / maxLeft);
             g.fill(trackX, ly + 1, trackX + 2, ly + LIST_H - 1, 0x30FFFFFF);
             g.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, 0x90FFFFFF);
@@ -645,6 +748,22 @@ public class PatternEditScreen extends Screen {
                 g.fill(x0, y0, x0 + 1, y0 + px, 0x28FFFFFF);
             }
         }
+        // The start-cell plus marker: full-width cross over its cell, one per grid. Bright green
+        // normally, magenta over green-dominant blocks so it always contrasts.
+        if (editing.startU >= 0 && editing.startU < editing.width
+                && editing.startV >= 0 && editing.startV < editing.height) {
+            int x0 = cxs + editing.startU * px, y0 = cys + editing.startV * px;
+            String under = cell(editing.startU, editing.startV);
+            int color = 0xFF39FF14; // bright green
+            if (under != null) {
+                int rgb = colorOf(under);
+                int r = (rgb >> 16) & 0xFF, gg = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+                if (gg >= r && gg >= b) color = 0xFFFF00FF; // greenish block → magenta plus
+            }
+            int mid = Math.max(1, px / 2 - 1);
+            g.fill(x0, y0 + mid, x0 + px, y0 + mid + 2, color);
+            g.fill(x0 + mid, y0, x0 + mid + 2, y0 + px, color);
+        }
         // Hovered cell highlight.
         int[] c = cellAt(mouseX, mouseY);
         if (c != null) {
@@ -653,6 +772,19 @@ public class PatternEditScreen extends Screen {
         }
         String end = "end";
         g.text(this.font, end, cxs + (w - this.font.width(end)) / 2, cys + h + 4, GREY);
+        // Interaction key (grey, like the other editors' hints).
+        int hy = cys + h + 16;
+        g.text(this.font, "Left-drag: draw · same-block press erases · Right-click: flood fill",
+                cxs, hy, LIGHT);
+        g.text(this.font, "Middle-click: set the start cell (placement begins there)",
+                cxs, hy + 11, LIGHT);
+    }
+
+    /** A small pink eraser block icon for the pinned list row. */
+    private static void drawEraserIcon(GuiGraphicsExtractor g, int x, int y) {
+        g.fill(x + 2, y + 5, x + 14, y + 12, 0xFFE791AF);   // body
+        g.fill(x + 2, y + 10, x + 14, y + 12, 0xFF4A6EA9);  // ferrule band
+        UiIcons.outline(g, x + 2, y + 5, 12, 7, 0xFF3A3A3A);
     }
 
     /** The isometric preview: the pattern as a 1-thick wall, start row on top, dynamic scale. */
@@ -678,8 +810,10 @@ public class PatternEditScreen extends Screen {
         g.pose().pushMatrix();
         g.pose().translate(tx, ty);
         g.pose().scale(s, s);
-        for (int u = 0; u < editing.width; u++) {
-            for (int v = 0; v < editing.height; v++) {
+        // Painter's order: bottom rows first (larger v), back-to-front along u — upper sprites
+        // must draw over the top faces of the blocks below them.
+        for (int v = editing.height - 1; v >= 0; v--) {
+            for (int u = 0; u < editing.width; u++) {
                 String id = cell(u, v);
                 if (id == null) continue;
                 ItemStack st = GradientScreen.stackOfId(id);
@@ -693,11 +827,14 @@ public class PatternEditScreen extends Screen {
         g.pose().popMatrix();
     }
 
-    /** The selected drawing block rides the cursor so you always know what you'll paint. */
+    /** The selected drawing block (or eraser) rides the cursor so you know what you'll paint. */
     private void renderCursorBlock(GuiGraphicsExtractor g, int mouseX, int mouseY) {
-        if (selectedId.isEmpty() || pendingExit != null) return;
+        if (pendingExit != null || confirmClear) return;
+        if (!eraserSelected && selectedId.isEmpty()) return;
         g.nextStratum();
-        if (selectedStack.isEmpty()) {
+        if (eraserSelected) {
+            drawEraserIcon(g, mouseX + 6, mouseY + 6);
+        } else if (selectedStack.isEmpty()) {
             g.fill(mouseX + 8, mouseY + 8, mouseX + 20, mouseY + 20, colorOf(selectedId));
         } else {
             g.item(selectedStack, mouseX + 8, mouseY + 8);

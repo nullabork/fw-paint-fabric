@@ -94,6 +94,13 @@ public final class Palette {
      */
     public int patternVariation = 0;
 
+    /**
+     * The cell placement starts from (the plus marker in the editor), or −1/−1 for the default
+     * top-left — lets a fresh stroke begin from anywhere in the drawing (e.g. its centre).
+     */
+    public int startU = -1;
+    public int startV = -1;
+
     /** The cell at (u, v) or "" — no tiling applied; callers wrap/clamp first. */
     public String cellAt(int u, int v) {
         if (u < 0 || u >= width || v < 0 || v >= height) return "";
@@ -112,6 +119,8 @@ public final class Palette {
         p.cells = new ArrayList<>(cells);
         p.tiling = tiling;
         p.patternVariation = patternVariation;
+        p.startU = startU;
+        p.startV = startV;
         p.source = source;
         p.order = order;
         p.curve = curve;
@@ -142,7 +151,8 @@ public final class Palette {
                 .append(source).append('|').append(order).append('|').append(curve).append('|');
         if (kind == PaletteKind.PATTERN) {
             sb.append(width).append('x').append(height).append('|').append(tiling).append('|')
-                    .append(patternVariation).append('|');
+                    .append(patternVariation).append('|')
+                    .append(startU).append(',').append(startV).append('|');
             for (String c : cells) sb.append(c).append(',');
         }
         for (double d : stops) sb.append(d).append(',');

@@ -265,8 +265,9 @@ public final class PaintPlacer {
                     front.getZ() - near.origin.getZ()};
             int v = PatternMath.vOf(d, new int[]{near.extrusion.getStepX(),
                     near.extrusion.getStepY(), near.extrusion.getStepZ()});
+            int sv = patternPrep.pattern.startV >= 0 ? patternPrep.pattern.startV : 0;
             boolean done = !patternPrep.pattern.tiling.wrapsStartEnd()
-                    && near.extrusion == dir && v >= patternPrep.pattern.height;
+                    && near.extrusion == dir && v + sv >= patternPrep.pattern.height;
             if (!done) {
                 patternPlace = near;
                 return;
@@ -278,7 +279,11 @@ public final class PaintPlacer {
         patternPlace = GradientCaches.newPattern(front, wstep, dir);
     }
 
-    /** The pattern cell id for a world position (see {@link PatternMath#cellFor}). */
+    /**
+     * The pattern cell id for a world position (see {@link PatternMath#cellFor}). The pattern's
+     * start-cell marker offsets the lookup so the plane origin lands on the marked cell instead
+     * of the top-left.
+     */
     private static String patternCell(BlockPos cell) {
         int[] d = {cell.getX() - patternPlace.origin.getX(),
                 cell.getY() - patternPlace.origin.getY(),
@@ -286,7 +291,10 @@ public final class PaintPlacer {
         int u = PatternMath.uOf(d, patternPlace.widthStep);
         int v = PatternMath.vOf(d, new int[]{patternPlace.extrusion.getStepX(),
                 patternPlace.extrusion.getStepY(), patternPlace.extrusion.getStepZ()});
-        return PatternMath.cellFor(patternPrep.pattern, u, v);
+        var pat = patternPrep.pattern;
+        int su = pat.startU >= 0 && pat.startU < pat.width ? pat.startU : 0;
+        int sv = pat.startV >= 0 && pat.startV < pat.height ? pat.startV : 0;
+        return PatternMath.cellFor(pat, u + su, v + sv);
     }
 
     private static String cantResolveMessage() {

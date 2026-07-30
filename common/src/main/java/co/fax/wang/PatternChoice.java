@@ -94,9 +94,14 @@ public final class PatternChoice {
         Set<String> available = new HashSet<>();
         for (Entry e : source) available.add(e.id());
         boolean skipMissing = ConfigManager.get().missingBlockPolicy == MissingBlockPolicy.SKIP_MISSING;
-        if (!skipMissing && !pattern.missingBlocks(available).isEmpty()) {
-            return Prepared.fail(pattern, "'" + pattern.name + "': missing blocks ("
-                    + pattern.missingBlocks(available).size() + ") — check the Palette tab");
+        List<String> missing = pattern.missingBlocks(available);
+        if (!skipMissing && !missing.isEmpty()) {
+            Block b = Gradient.blockOfItemId(missing.get(0));
+            String name = b == null ? missing.get(0)
+                    : new ItemStack(b.asItem()).getHoverName().getString();
+            String more = missing.size() > 1 ? " (+" + (missing.size() - 1) + " more)" : "";
+            return Prepared.fail(pattern,
+                    "'" + pattern.name + "': missing " + name + more);
         }
 
         source.sort(java.util.Comparator.comparingLong(e -> ColorOrder.colorSortKey(e.rgb())));
