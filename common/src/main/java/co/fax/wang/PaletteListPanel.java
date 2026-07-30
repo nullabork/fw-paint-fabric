@@ -236,7 +236,7 @@ public final class PaletteListPanel {
         if (p.kind == co.fax.wang.palette.PaletteKind.PATTERN) {
             String[] plines = {
                     "Pattern " + p.width + "×" + p.height + " · Tile: " + p.tiling.label(),
-                    "Variation: " + (p.patternVariation == 0 ? "Off" : "±" + p.patternVariation),
+                    "Variation: " + variationLabel(p),
                     "Source: " + p.source.displayName(),
                     "Paints under the Pattern paint type",
             };
@@ -254,7 +254,7 @@ public final class PaletteListPanel {
                 ? " (" + p.steps + ")" : "");
         String[] lines = {
                 "Order: " + p.order.label() + " · Curve: " + p.curve.displayName() + " · " + sizing,
-                "Variation " + pct(p.variation) + " · Chaos " + pct(p.chaos)
+                "Variation " + variationLabel(p) + " · Chaos " + pct(p.chaos)
                         + " · Step len " + pct(p.stepWobble),
                 "Noise: " + p.noiseType.displayName() + ", scale " + noiseScale
                         + (p.noiseLock ? " (locked)" : "")
@@ -283,6 +283,12 @@ public final class PaletteListPanel {
 
     private static String pct(double v) {
         return Math.round(v * 100) + "%";
+    }
+
+    /** The unified variation window+chance, e.g. "±2 @ 35%" or "Off". */
+    private static String variationLabel(Palette p) {
+        return p.variationWindow == 0 || p.variationChance == 0
+                ? "Off" : "±" + p.variationWindow + " @ " + p.variationChance + "%";
     }
 
     private static void outline(GuiGraphicsExtractor g, int x, int y, int w, int h, int color) {

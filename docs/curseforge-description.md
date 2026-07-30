@@ -64,8 +64,9 @@ your colour-sorted inventory blocks in the middle, and the **segment strip** on 
   Right-click a block in the list to ban it from Auto picks.
 - **Sizing**: **Min blocks** (shortest run that fits the ratios), **Fill space** (out to the end
   marker / first block), or **Set steps** (fixed length).
-- **Variation** (similar blocks stand in), **Chaos** (repeat/skip dither), **Step length**
-  (steps randomly run longer/shorter) — plus the palette's own noise type / scale / seed.
+- **Variation** (a ±1–±3 colour-neighbour window + a swap chance — cells shimmer to nearby
+  colours from your inventory), **Chaos** (repeat/skip dither), **Step length** (steps randomly
+  run longer/shorter) — plus the palette's own noise type / scale / seed.
 - Hover any control (or click its circled-?) for help describing what it's currently set to.
 
 ## Patterns

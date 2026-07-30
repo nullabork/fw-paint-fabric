@@ -396,9 +396,11 @@ public final class HelpPanel {
                 "Set steps: stretches or shrinks the gradient to a fixed number of blocks "
                     + "(the Steps slider appears under the toggle).")),
             t("Sliders", "Variation, Chaos, Step length.", List.of(
-                "Variation: lets blocks similar to a segment randomly stand in for it - bands "
-                    + "get visual variety without gaining or losing segments. At 0% every "
-                    + "segment is exactly its own block.",
+                "Variation: the Var toggle picks a window (+-1 to +-3) and the slider beside it "
+                    + "a chance (0-100%) - each placed cell may swap to a block within that "
+                    + "many positions of its own in the colour ordering of your inventory. "
+                    + "Changing it never restarts an in-progress paint - only new cells roll "
+                    + "the new setting. The same model drives pattern variation.",
                 "Chaos: chance a placement repeats the previous step or skips ahead one - adds "
                     + "dither across band boundaries.",
                 "Step length: chance each step runs randomly longer or shorter (its neighbour "

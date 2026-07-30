@@ -48,8 +48,15 @@ public final class Palette {
     /** Item ids never chosen when an Automatic segment resolves (right-click red in the editor). */
     public List<String> autoExclude = new ArrayList<>();
 
-    /** Similar blocks swap within each segment, 0..1. */
-    public double variation = 0.43;
+    /**
+     * Variation window (0 = off; 1–3): a placed cell may swap to a block within this many
+     * positions of its block in the Oklab-ordered source list. Same model for every kind
+     * (patterns pioneered it; gradients/noise adopted it in v2.1).
+     */
+    public int variationWindow = 0;
+
+    /** Chance (percent, 0–100) a cell actually swaps when the window is on. */
+    public int variationChance = 0;
 
     /** Chance to repeat or skip a step, 0..1. */
     public double chaos = 0.0;
@@ -87,15 +94,6 @@ public final class Palette {
     /** How the pattern repeats past its edges. */
     public PatternTiling tiling = PatternTiling.NONE;
 
-    /**
-     * Experimental pattern variation (§5.0 of the v2.1 spec): 0 = off; 1–3 = a placed cell may
-     * swap to a uniformly-random block within this many positions of its block in the
-     * Oklab-ordered source list.
-     */
-    public int patternVariation = 0;
-
-    /** Chance (percent, 0–100) that a cell actually swaps when variation is on. */
-    public int patternVariationChance = 0;
 
     /**
      * The cell placement starts from (the plus marker in the editor), or −1/−1 for the default
@@ -127,8 +125,6 @@ public final class Palette {
         p.height = height;
         p.cells = new ArrayList<>(cells);
         p.tiling = tiling;
-        p.patternVariation = patternVariation;
-        p.patternVariationChance = patternVariationChance;
         p.startU = startU;
         p.startV = startV;
         p.startAtBottom = startAtBottom;
@@ -139,7 +135,8 @@ public final class Palette {
         p.segments = new ArrayList<>();
         for (PaletteSegment s : segments) p.segments.add(s.copy());
         p.autoExclude = new ArrayList<>(autoExclude);
-        p.variation = variation;
+        p.variationWindow = variationWindow;
+        p.variationChance = variationChance;
         p.chaos = chaos;
         p.stepWobble = stepWobble;
         p.sizing = sizing;
@@ -174,11 +171,8 @@ public final class Palette {
         StringBuilder sb = new StringBuilder(id).append('|').append(kind).append('|')
                 .append(source).append('|').append(order).append('|').append(curve).append('|');
         if (kind == PaletteKind.PATTERN) {
-            sb.append(width).append('x').append(height).append('|').append(tiling).append('|');
-            if (withVariation) {
-                sb.append(patternVariation).append('@').append(patternVariationChance).append('|');
-            }
-            sb.append(startU).append(',').append(startV).append('|')
+            sb.append(width).append('x').append(height).append('|').append(tiling).append('|')
+                    .append(startU).append(',').append(startV).append('|')
                     .append(startAtBottom).append('|');
             for (String c : cells) sb.append(c).append(',');
         }
@@ -187,7 +181,12 @@ public final class Palette {
         for (PaletteSegment s : segments) sb.append(s.token()).append(',');
         sb.append('|');
         for (String e : autoExclude) sb.append(e).append(',');
-        sb.append('|').append(variation).append('|').append(chaos).append('|').append(stepWobble)
+        // Variation is display-time randomness — excluded from the cache key (withVariation
+        // false) so tweaking it never restarts an in-progress gradient/noise/pattern.
+        if (withVariation) {
+            sb.append('|').append(variationWindow).append('@').append(variationChance);
+        }
+        sb.append('|').append(chaos).append('|').append(stepWobble)
                 .append('|').append(sizing).append('|').append(steps)
                 .append('|').append(noiseType).append('|').append(noiseScaleX).append('|')
                 .append(noiseScaleY).append('|').append(noiseScaleZ).append('|').append(noiseLock)

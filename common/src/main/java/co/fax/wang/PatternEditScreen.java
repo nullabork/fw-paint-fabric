@@ -209,17 +209,17 @@ public class PatternEditScreen extends Screen {
         }));
         int half = (paneW() - 14 - 4) / 2;
         addScrolled(Button.builder(Component.literal("Var: " + variationLabel()), b -> {
-            editing.patternVariation = (editing.patternVariation + 1) % 4;
+            editing.variationWindow = (editing.variationWindow + 1) % 4;
             dirty = true;
             b.setMessage(Component.literal("Var: " + variationLabel()));
         }).bounds(cx, togY + 24, half, 20).build());
         addScrolled(new ChanceSlider(cx + half + 4, togY + 24, paneW() - 14 - half - 4));
         helpSpots.add(new HelpSpot(cx, togY + 24, paneW() - 14, 20,
-                () -> editing.patternVariation == 0
+                () -> editing.variationWindow == 0
                         ? "Off: cells place exactly the block you drew"
-                        : "±" + editing.patternVariation + ": with a " + editing.patternVariationChance
+                        : "±" + editing.variationWindow + ": with a " + editing.variationChance
                                 + "% chance a cell swaps to a block within "
-                                + editing.patternVariation + " position(s) of it in the colour ordering"));
+                                + editing.variationWindow + " position(s) of it in the colour ordering"));
         addScrolled(Button.builder(Component.literal("Start: " + (editing.startAtBottom ? "Bottom" : "Top")), b -> {
             editing.startAtBottom = !editing.startAtBottom;
             dirty = true;
@@ -257,13 +257,13 @@ public class PatternEditScreen extends Screen {
     }
 
     private String variationLabel() {
-        return editing.patternVariation == 0 ? "Off" : "±" + editing.patternVariation;
+        return editing.variationWindow == 0 ? "Off" : "±" + editing.variationWindow;
     }
 
     /** The swap-chance slider (0–100%, whole-percent steps) beside the Variation toggle. */
     private final class ChanceSlider extends net.minecraft.client.gui.components.AbstractSliderButton {
         ChanceSlider(int x, int y, int w) {
-            super(x, y, w, 20, Component.empty(), editing.patternVariationChance / 100.0);
+            super(x, y, w, 20, Component.empty(), editing.variationChance / 100.0);
             updateMessage();
         }
 
@@ -274,7 +274,7 @@ public class PatternEditScreen extends Screen {
 
         @Override
         protected void applyValue() {
-            editing.patternVariationChance = (int) Math.round(this.value * 100);
+            editing.variationChance = (int) Math.round(this.value * 100);
             dirty = true;
         }
     }

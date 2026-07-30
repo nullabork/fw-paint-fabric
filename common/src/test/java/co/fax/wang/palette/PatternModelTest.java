@@ -21,7 +21,7 @@ class PatternModelTest {
         p.height = 2;
         p.cells = List.of("minecraft:bricks", "", "", "minecraft:stone");
         p.tiling = PatternTiling.START_END_SIDES;
-        p.patternVariation = 2;
+        p.variationWindow = 2;
         return p;
     }
 
@@ -40,7 +40,7 @@ class PatternModelTest {
         assertEquals("minecraft:bricks", back.cellAt(0, 0));
         assertEquals("", back.cellAt(1, 0)); // hole survives
         assertEquals(PatternTiling.START_END_SIDES, back.tiling);
-        assertEquals(2, back.patternVariation);
+        assertEquals(2, back.variationWindow);
         assertEquals(pattern().contentKey(), back.contentKey());
     }
 
@@ -49,7 +49,7 @@ class PatternModelTest {
         Palette a = pattern();
         Palette b = pattern();
         assertEquals(a.contentKey(), b.contentKey());
-        b.patternVariation = 0;
+        b.variationWindow = 0;
         assertNotEquals(a.contentKey(), b.contentKey());
         b = pattern();
         b.cells = List.of("minecraft:bricks", "", "", "minecraft:bricks");

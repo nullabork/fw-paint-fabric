@@ -125,10 +125,10 @@ public final class PatternChoice {
     public static Block varied(Prepared p, String cellId) {
         Block base = Gradient.blockOfItemId(cellId);
         if (base == null) return null;
-        int n = Math.max(0, Math.min(3, p.pattern.patternVariation));
+        int n = Math.max(0, Math.min(3, p.pattern.variationWindow));
         int idx = p.ordered.indexOf(base);
         if (n == 0 || idx < 0) return idx < 0 && !p.available.contains(cellId) ? null : base;
-        int chance = Math.max(0, Math.min(100, p.pattern.patternVariationChance));
+        int chance = Math.max(0, Math.min(100, p.pattern.variationChance));
         if (chance == 0 || RANDOM.nextInt(100) >= chance) return base;
         int lo = Math.max(0, idx - n);
         int hi = Math.min(p.ordered.size() - 1, idx + n);
