@@ -117,27 +117,42 @@ public final class Gradient {
         GradientConfig cfg = ConfigManager.get();
         cfg.activePaintType = cfg.activePaintType.next();
         ConfigManager.save();
-        // Landing on a palette-driven paint with nothing set up → guide instead of a dead tool.
-        if (cfg.activePaintType != PaintType.SOLID
-                && co.fax.wang.palette.PaletteStore.all().isEmpty()) {
+        // Landing on a palette-driven paint with nothing of its kind set up → guide the user.
+        co.fax.wang.palette.PaletteKind kind = kindFor(cfg.activePaintType);
+        if (kind != null && co.fax.wang.palette.PaletteStore.allOf(kind).isEmpty()) {
             overlay(mc, "FW Paint — " + cfg.activePaintType.label() + ": press "
-                    + boundKey("open") + " to set up a palette");
+                    + boundKey("open") + " to set up a " + kind.label().toLowerCase(java.util.Locale.ROOT));
         } else {
             overlay(mc, "FW Paint — Paint type: " + cfg.activePaintType.label());
         }
     }
 
-    /** Step the active palette through the saved list (the palette keybind); persisted. */
+    /** The palette kind a paint type consumes (null for Solid). */
+    public static co.fax.wang.palette.PaletteKind kindFor(PaintType type) {
+        return switch (type) {
+            case GRADIENT, NOISE -> co.fax.wang.palette.PaletteKind.GRADIENT;
+            case PATTERN -> co.fax.wang.palette.PaletteKind.PATTERN;
+            case SOLID -> null;
+        };
+    }
+
+    /**
+     * Step the active item through the saved list (the palette keybind) — filtered to the kind
+     * the current paint type consumes (patterns in Pattern paint, gradients otherwise).
+     */
     public static void cyclePalette() {
         Minecraft mc = Minecraft.getInstance();
         if (!holdingPaintTool(mc)) {
             overlay(mc, "FW Paint: hold your paint tool to cycle palettes");
             return;
         }
-        co.fax.wang.palette.Palette next = co.fax.wang.palette.PaletteStore.cycleActive(1);
+        co.fax.wang.palette.PaletteKind kind = kindFor(ConfigManager.get().activePaintType);
+        if (kind == null) kind = co.fax.wang.palette.PaletteKind.GRADIENT; // Solid: cycle gradients
+        co.fax.wang.palette.Palette next = co.fax.wang.palette.PaletteStore.cycleActive(1, kind);
         overlay(mc, next == null
-                ? "FW Paint: no palettes — press " + boundKey("open") + " to set one up"
-                : "FW Paint — Palette: " + next.name);
+                ? "FW Paint: no " + kind.label().toLowerCase(java.util.Locale.ROOT) + "s — press "
+                        + boundKey("open") + " to set one up"
+                : "FW Paint — " + kind.label() + ": " + next.name);
     }
 
     private static void overlay(Minecraft mc, String msg) {

@@ -24,6 +24,9 @@ public final class Palette {
     /** Display name — unique across the store. */
     public String name = "";
 
+    /** What this item is. Absent in pre-2.1 saves — Gson leaves the GRADIENT default. */
+    public PaletteKind kind = PaletteKind.GRADIENT;
+
     /** Where placement (and Automatic resolution / variation swaps) draws blocks from. */
     public GradientSource source = GradientSource.HOTBAR_AND_INVENTORY;
 
@@ -45,8 +48,15 @@ public final class Palette {
     /** Item ids never chosen when an Automatic segment resolves (right-click red in the editor). */
     public List<String> autoExclude = new ArrayList<>();
 
-    /** Similar blocks swap within each segment, 0..1. */
-    public double variation = 0.43;
+    /**
+     * Variation window (0 = off; 1–3): a placed cell may swap to a block within this many
+     * positions of its block in the Oklab-ordered source list. Same model for every kind
+     * (patterns pioneered it; gradients/noise adopted it in v2.1).
+     */
+    public int variationWindow = 0;
+
+    /** Chance (percent, 0–100) a cell actually swaps when the window is on. */
+    public int variationChance = 0;
 
     /** Chance to repeat or skip a step, 0..1. */
     public double chaos = 0.0;
@@ -69,11 +79,55 @@ public final class Palette {
     public boolean noiseLock = true;
     public String noiseSeed = "";
 
+    // ---- pattern fields (kind == PATTERN only) --------------------------------------------------
+
+    /** Grid size in cells, 1..32 each. */
+    public int width = 8;
+    public int height = 8;
+
+    /**
+     * Row-major cells, start row first, {@code width * height} entries; each an item id or ""
+     * for a hole (placement skips holes).
+     */
+    public List<String> cells = new ArrayList<>();
+
+    /** How the pattern repeats past its edges. */
+    public PatternTiling tiling = PatternTiling.NONE;
+
+
+    /**
+     * The cell placement starts from (the plus marker in the editor), or −1/−1 for the default
+     * top-left — lets a fresh stroke begin from anywhere in the drawing (e.g. its centre).
+     */
+    public int startU = -1;
+    public int startV = -1;
+
+    /**
+     * When true the pattern's START edge is its bottom row — placement advances through the
+     * drawing bottom-up, so painting off the ground doesn't come out upside-down.
+     */
+    public boolean startAtBottom = false;
+
+    /** The cell at (u, v) or "" — no tiling applied; callers wrap/clamp first. */
+    public String cellAt(int u, int v) {
+        if (u < 0 || u >= width || v < 0 || v >= height) return "";
+        int idx = v * width + u;
+        return idx < cells.size() ? cells.get(idx) : "";
+    }
+
     /** Deep copy — the editor works on a copy so Cancel keeps the saved version intact. */
     public Palette copy() {
         Palette p = new Palette();
         p.id = id;
         p.name = name;
+        p.kind = kind;
+        p.width = width;
+        p.height = height;
+        p.cells = new ArrayList<>(cells);
+        p.tiling = tiling;
+        p.startU = startU;
+        p.startV = startV;
+        p.startAtBottom = startAtBottom;
         p.source = source;
         p.order = order;
         p.curve = curve;
@@ -81,7 +135,8 @@ public final class Palette {
         p.segments = new ArrayList<>();
         for (PaletteSegment s : segments) p.segments.add(s.copy());
         p.autoExclude = new ArrayList<>(autoExclude);
-        p.variation = variation;
+        p.variationWindow = variationWindow;
+        p.variationChance = variationChance;
         p.chaos = chaos;
         p.stepWobble = stepWobble;
         p.sizing = sizing;
@@ -96,18 +151,42 @@ public final class Palette {
     }
 
     /**
-     * Canonical content string for cache invalidation: any edit that could change what gets
-     * placed changes this key. Includes the id so switching palettes always invalidates.
+     * Canonical content string: any edit that could change what gets placed changes this key.
+     * Includes the id so switching palettes always changes it.
      */
     public String contentKey() {
-        StringBuilder sb = new StringBuilder(id).append('|').append(source).append('|')
-                .append(order).append('|').append(curve).append('|');
+        return contentKey(true);
+    }
+
+    /**
+     * The placement-cache key: like {@link #contentKey()} but EXCLUDING the pattern-variation
+     * settings — tweaking variance mid-build must not restart an in-progress pattern (the
+     * repeating drawing keeps its plane; only newly placed cells roll the new variance).
+     */
+    public String cacheKey() {
+        return contentKey(false);
+    }
+
+    private String contentKey(boolean withVariation) {
+        StringBuilder sb = new StringBuilder(id).append('|').append(kind).append('|')
+                .append(source).append('|').append(order).append('|').append(curve).append('|');
+        if (kind == PaletteKind.PATTERN) {
+            sb.append(width).append('x').append(height).append('|').append(tiling).append('|')
+                    .append(startU).append(',').append(startV).append('|')
+                    .append(startAtBottom).append('|');
+            for (String c : cells) sb.append(c).append(',');
+        }
         for (double d : stops) sb.append(d).append(',');
         sb.append('|');
         for (PaletteSegment s : segments) sb.append(s.token()).append(',');
         sb.append('|');
         for (String e : autoExclude) sb.append(e).append(',');
-        sb.append('|').append(variation).append('|').append(chaos).append('|').append(stepWobble)
+        // Variation is display-time randomness — excluded from the cache key (withVariation
+        // false) so tweaking it never restarts an in-progress gradient/noise/pattern.
+        if (withVariation) {
+            sb.append('|').append(variationWindow).append('@').append(variationChance);
+        }
+        sb.append('|').append(chaos).append('|').append(stepWobble)
                 .append('|').append(sizing).append('|').append(steps)
                 .append('|').append(noiseType).append('|').append(noiseScaleX).append('|')
                 .append(noiseScaleY).append('|').append(noiseScaleZ).append('|').append(noiseLock)
@@ -128,14 +207,20 @@ public final class Palette {
     }
 
     /**
-     * Distinct explicitly-defined block ids not present in {@code availableIds}, in strip order.
-     * Automatic segments never count as missing.
+     * Distinct explicitly-defined block ids not present in {@code availableIds} — strip order
+     * for gradients, cell order for patterns. Automatic segments and holes never count.
      */
     public List<String> missingBlocks(Set<String> availableIds) {
         Set<String> missing = new LinkedHashSet<>();
-        for (PaletteSegment s : segments) {
-            if (!s.isAutomatic() && !s.block.isEmpty() && !availableIds.contains(s.block)) {
-                missing.add(s.block);
+        if (kind == PaletteKind.PATTERN) {
+            for (String c : cells) {
+                if (c != null && !c.isEmpty() && !availableIds.contains(c)) missing.add(c);
+            }
+        } else {
+            for (PaletteSegment s : segments) {
+                if (!s.isAutomatic() && !s.block.isEmpty() && !availableIds.contains(s.block)) {
+                    missing.add(s.block);
+                }
             }
         }
         return new ArrayList<>(missing);

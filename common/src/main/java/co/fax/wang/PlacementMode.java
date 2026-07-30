@@ -15,6 +15,7 @@ public enum PlacementMode {
     MARKER_DRAW("Marker draw", "Active: Marker draw", 0xFFFFA07A),          // salmon
     SINGLE("Single", "Active: Single", 0xFF55FF55),     // green
     FACE("Face", "Active: Face", 0xFF55FFFF),           // aqua
+    FACE_PERP("Face perp", "Active: Face perp", 0xFF7FDBFF), // light blue — 1-wide snapped run
     FILL3D("3D Fill", "Active: 3D Fill", 0xFFFF55FF),   // magenta
     DISABLED("Disabled", "Disabled", 0xFFAAAAAA);       // grey
 
@@ -45,7 +46,7 @@ public enum PlacementMode {
 
     /** True for the modes that place paint (not markers, not disabled). */
     public boolean places() {
-        return this == SINGLE || this == FACE || this == FILL3D;
+        return this == SINGLE || this == FACE || this == FACE_PERP || this == FILL3D;
     }
 
     /** True for the marker-selection modes (drag lines, corner volumes, freehand). */

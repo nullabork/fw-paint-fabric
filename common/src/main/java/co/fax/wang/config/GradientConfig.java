@@ -77,11 +77,11 @@ public class GradientConfig {
     public boolean faceFillVoids = true;
 
     /**
-     * Idle seconds before an outside-marker gradient forgets its progress (the session cache is
-     * dropped and the next click starts a fresh gradient). Also cleared whenever the picker
-     * gradient changes.
+     * "Paint memory": idle seconds before free-hand paint progress is forgotten — gradient
+     * columns, 3D fills, AND pattern placements all share this timer (the session caches drop
+     * and the next click starts fresh). Also cleared when the active palette/pattern changes.
      */
-    public int gradientCacheSeconds = 60;
+    public int gradientCacheSeconds = 600;
 
     // ---- shared block source --------------------------------------------------------------------
 
@@ -99,6 +99,14 @@ public class GradientConfig {
     public String solidBlock = "";
     /** Item ids excluded from Solid placement (never placed, even on exact match). */
     public List<String> solidExcludedBlocks = new ArrayList<>();
+
+    // ---- perpendicular snapping -----------------------------------------------------------------
+
+    /**
+     * Angular snapping (degrees, 45 or 90) applied wherever a direction is derived from the
+     * player's facing: the pattern plane's width axis and the Face Perpendicular run.
+     */
+    public int perpSnapDegrees = 45;
 
     // ---- palettes -------------------------------------------------------------------------------
 

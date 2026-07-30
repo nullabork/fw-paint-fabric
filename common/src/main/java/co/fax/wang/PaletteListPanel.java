@@ -46,12 +46,18 @@ public final class PaletteListPanel {
     private String selectedId = "";
     private String expandedId = "";
     private String activeId = "";
+    private String activePatternId = "";
     private int scroll;
     private int x, y, w, h;
 
-    /** The in-use palette (shown with a green tag). */
+    /** The in-use GRADIENT palette (shown with a green tag). */
     public void setActiveId(String id) {
         activeId = id == null ? "" : id;
+    }
+
+    /** The in-use PATTERN (each kind keeps its own in-use marker). */
+    public void setActivePatternId(String id) {
+        activePatternId = id == null ? "" : id;
     }
 
     public PaletteListPanel(Font font) {
@@ -179,24 +185,36 @@ public final class PaletteListPanel {
         outline(g, x, ry, w, rh, border);
         if (selected && e.missing()) outline(g, x - 1, ry - 1, w + 2, rh + 2, WHITE);
 
-        // Header: name left, sprites right (squeezed to overlap when there are many), chevron.
+        // Header: name left; sprites (gradients) or a grid thumbnail (patterns) right; chevron.
+        boolean isPattern = p.kind == co.fax.wang.palette.PaletteKind.PATTERN;
         int textY = ry + (ROW_H - font.lineHeight) / 2;
         int chevW = 12;
-        int spriteAreaW = Math.min(w / 2, e.sprites().size() * 17);
+        int spriteAreaW = isPattern ? 20 : Math.min(w / 2, e.sprites().size() * 17);
         int spritesX = x + w - PAD - chevW - spriteAreaW;
-        boolean inUse = p.id.equals(activeId);
-        int nameMax = spritesX - x - 2 * PAD - (inUse ? font.width(" · in use") : 0);
+        boolean inUse = p.id.equals(isPattern ? activePatternId : activeId);
+        String tag = isPattern ? " · pattern" : "";
+        int nameMax = spritesX - x - 2 * PAD
+                - (inUse ? font.width(" · in use") : 0) - font.width(tag);
         String name = font.plainSubstrByWidth(p.name, nameMax);
         g.text(font, name, x + PAD + 1, textY, selected ? WHITE : 0xFFE0E0E0);
-        if (inUse) g.text(font, " · in use", x + PAD + 1 + font.width(name), textY, 0xFF55FF55);
+        int nx = x + PAD + 1 + font.width(name);
+        if (!tag.isEmpty()) {
+            g.text(font, tag, nx, textY, GREY);
+            nx += font.width(tag);
+        }
+        if (inUse) g.text(font, " · in use", nx, textY, 0xFF55FF55);
 
-        int n = e.sprites().size();
-        if (n > 0) {
-            int spacing = n == 1 ? 0 : Math.min(17, (spriteAreaW - 16) / Math.max(1, n - 1));
-            for (int i = 0; i < n; i++) {
-                int sx = spritesX + i * spacing;
-                if (e.auto().get(i)) drawCrosshatch(g, sx, ry + (ROW_H - 16) / 2, 16, e.tints().get(i));
-                else g.item(e.sprites().get(i), sx, ry + (ROW_H - 16) / 2);
+        if (isPattern) {
+            PatternThumb.draw(g, p, spritesX, ry + (ROW_H - 20) / 2, 20);
+        } else {
+            int n = e.sprites().size();
+            if (n > 0) {
+                int spacing = n == 1 ? 0 : Math.min(17, (spriteAreaW - 16) / Math.max(1, n - 1));
+                for (int i = 0; i < n; i++) {
+                    int sx = spritesX + i * spacing;
+                    if (e.auto().get(i)) drawCrosshatch(g, sx, ry + (ROW_H - 16) / 2, 16, e.tints().get(i));
+                    else g.item(e.sprites().get(i), sx, ry + (ROW_H - 16) / 2);
+                }
             }
         }
         g.text(font, expanded ? "▾" : "▸", x + w - PAD - 8, textY, GREY);
@@ -215,6 +233,20 @@ public final class PaletteListPanel {
         int sw = w - 2 * (PAD + 4);
         g.fill(sx - 2, sy, sx + sw + 2, sy + summaryHeight(e) - PAD, SUMMARY_BG);
         int yy = sy + PAD;
+        if (p.kind == co.fax.wang.palette.PaletteKind.PATTERN) {
+            String[] plines = {
+                    "Pattern " + p.width + "×" + p.height + " · Tile: " + p.tiling.label(),
+                    "Variation: " + variationLabel(p),
+                    "Source: " + p.source.displayName(),
+                    "Paints under the Pattern paint type",
+            };
+            for (String line : plines) {
+                g.text(font, font.plainSubstrByWidth(line, sw), sx, yy, GREY);
+                yy += 11;
+            }
+            renderMissing(g, e, sx, sw, yy);
+            return;
+        }
         String noiseScale = p.noiseLock
                 ? String.valueOf(Math.round(p.noiseScaleX))
                 : Math.round(p.noiseScaleX) + "/" + Math.round(p.noiseScaleY) + "/" + Math.round(p.noiseScaleZ);
@@ -222,7 +254,7 @@ public final class PaletteListPanel {
                 ? " (" + p.steps + ")" : "");
         String[] lines = {
                 "Order: " + p.order.label() + " · Curve: " + p.curve.displayName() + " · " + sizing,
-                "Variation " + pct(p.variation) + " · Chaos " + pct(p.chaos)
+                "Variation " + variationLabel(p) + " · Chaos " + pct(p.chaos)
                         + " · Step len " + pct(p.stepWobble),
                 "Noise: " + p.noiseType.displayName() + ", scale " + noiseScale
                         + (p.noiseLock ? " (locked)" : "")
@@ -233,21 +265,30 @@ public final class PaletteListPanel {
             g.text(font, font.plainSubstrByWidth(line, sw), sx, yy, GREY);
             yy += 11;
         }
-        if (e.missing()) {
-            g.text(font, "Missing blocks:", sx, yy + 2, RED);
-            yy += 13;
-            for (int i = 0; i < e.missingNames().size(); i++) {
-                ItemStack st = e.missingStacks().get(i);
-                if (!st.isEmpty()) g.item(st, sx, yy);
-                g.text(font, font.plainSubstrByWidth(e.missingNames().get(i), sw - 22),
-                        sx + 20, yy + 4, WHITE);
-                yy += 18;
-            }
+        renderMissing(g, e, sx, sw, yy);
+    }
+
+    private void renderMissing(GuiGraphicsExtractor g, Entry e, int sx, int sw, int yy) {
+        if (!e.missing()) return;
+        g.text(font, "Missing blocks:", sx, yy + 2, RED);
+        yy += 13;
+        for (int i = 0; i < e.missingNames().size(); i++) {
+            ItemStack st = e.missingStacks().get(i);
+            if (!st.isEmpty()) g.item(st, sx, yy);
+            g.text(font, font.plainSubstrByWidth(e.missingNames().get(i), sw - 22),
+                    sx + 20, yy + 4, WHITE);
+            yy += 18;
         }
     }
 
     private static String pct(double v) {
         return Math.round(v * 100) + "%";
+    }
+
+    /** The unified variation window+chance, e.g. "±2 @ 35%" or "Off". */
+    private static String variationLabel(Palette p) {
+        return p.variationWindow == 0 || p.variationChance == 0
+                ? "Off" : "±" + p.variationWindow + " @ " + p.variationChance + "%";
     }
 
     private static void outline(GuiGraphicsExtractor g, int x, int y, int w, int h, int color) {

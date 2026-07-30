@@ -7,7 +7,8 @@ package co.fax.wang;
 public enum PaintType {
     GRADIENT("Gradient"),
     NOISE("Noise"),
-    SOLID("Solid");
+    SOLID("Solid"),
+    PATTERN("Pattern");
 
     private final String label;
 

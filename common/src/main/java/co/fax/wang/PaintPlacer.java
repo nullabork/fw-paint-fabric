@@ -2,6 +2,7 @@ package co.fax.wang;
 
 import co.fax.wang.config.ConfigManager;
 import co.fax.wang.config.GradientConfig;
+import co.fax.wang.palette.PatternMath;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -35,7 +36,10 @@ import java.util.Set;
  * <p><b>Single</b>: one column out of the clicked face, resuming from its first air gap.
  * <b>Face</b>: the clicked face plus every interconnected, reachable block face on the same plane
  * (or, with a start marker behind the clicked column, the connected coplanar marker group) —
- * all columns extrude together. <b>3D Fill</b>: a connected blob growing out of the clicked face.
+ * all columns extrude together. <b>Face perp</b>: a 1-block-wide run through the clicked block
+ * crossing the player's look — perpendicular to it, snapped to the configured increment
+ * (45° = stair-stepped diagonals); inside markers only the marked blocks on the run are selected.
+ * <b>3D Fill</b>: a connected blob growing out of the clicked face.
  * Everywhere, end markers stop a column/fill even when they sit in air, and marker space
  * constrains 3D fills (start inside → stay inside; start outside → stay outside).
  *
@@ -77,6 +81,8 @@ public final class PaintPlacer {
     private static PaletteChoice.Ramp noiseRamp;    // Noise: the one ramp resolved for this press
     private static PaletteChoice.Ramp ramp3d;       // Gradient 3D: the fill's resolved ramp
     private static GradientCaches.Fill3D activeFill; // Gradient 3D: the cache entry being extended
+    private static PatternChoice.Prepared patternPrep;              // Pattern: press-wide state
+    private static GradientCaches.PatternPlacement patternPlace;    // Pattern: the plane in use
 
     // Column state (Single + Face): each column advances its own front.
     private static final class Column {
@@ -227,8 +233,76 @@ public final class PaintPlacer {
                 }
                 // Ramps resolve per column / marker segment / fill — anchors differ per context.
             }
+            case PATTERN -> {
+                patternPrep = PatternChoice.prepare(player);
+                if (patternPrep.error != null) {
+                    overlay(mc, patternPrep.error);
+                    return false;
+                }
+                resolvePatternPlane(mc, player, clicked, ConfigManager.get());
+            }
         }
         return true;
+    }
+
+    /**
+     * Fix the pattern plane for this press: continue a cached placement the click touches
+     * (so adjacent strokes line up), or anchor a new plane at the clicked column's front —
+     * width axis from the player's facing snapped to the configured increment. A completed
+     * no-wrap pattern under the click re-anchors a fresh plane on top (like a finished
+     * gradient restarting).
+     */
+    private static void resolvePatternPlane(Minecraft mc, LocalPlayer player,
+                                            BlockPos clicked, GradientConfig cfg) {
+        int first = mode == PlacementMode.FILL3D ? 1
+                : Math.max(1, firstAirOffset(mc, clicked, dir));
+        BlockPos front = clicked.relative(dir, first);
+        GradientCaches.PatternPlacement near = GradientCaches.patternNear(clicked);
+        if (near == null) near = GradientCaches.patternNear(front);
+        if (near != null) {
+            // Completed (no start/end wrap) pattern right here → fresh pattern stacked on top.
+            int[] d = {front.getX() - near.origin.getX(), front.getY() - near.origin.getY(),
+                    front.getZ() - near.origin.getZ()};
+            int v = PatternMath.vOf(d, new int[]{near.extrusion.getStepX(),
+                    near.extrusion.getStepY(), near.extrusion.getStepZ()});
+            int sv = patternStartSv(patternPrep.pattern);
+            boolean done = !patternPrep.pattern.tiling.wrapsStartEnd()
+                    && near.extrusion == dir && v + sv >= patternPrep.pattern.height;
+            if (!done) {
+                patternPlace = near;
+                return;
+            }
+        }
+        int[] facing = PatternMath.snappedFacingStep(player.getYRot(), cfg.perpSnapDegrees);
+        int[] wstep = PatternMath.widthStep(facing,
+                new int[]{dir.getStepX(), dir.getStepY(), dir.getStepZ()});
+        patternPlace = GradientCaches.newPattern(front, wstep, dir);
+    }
+
+    /**
+     * The pattern cell id for a world position (see {@link PatternMath#cellFor}). The pattern's
+     * start-cell marker offsets the lookup so the plane origin lands on the marked cell instead
+     * of the top-left.
+     */
+    private static String patternCell(BlockPos cell) {
+        int[] d = {cell.getX() - patternPlace.origin.getX(),
+                cell.getY() - patternPlace.origin.getY(),
+                cell.getZ() - patternPlace.origin.getZ()};
+        int u = PatternMath.uOf(d, patternPlace.widthStep);
+        int v = PatternMath.vOf(d, new int[]{patternPlace.extrusion.getStepX(),
+                patternPlace.extrusion.getStepY(), patternPlace.extrusion.getStepZ()});
+        var pat = patternPrep.pattern;
+        int su = pat.startU >= 0 && pat.startU < pat.width ? pat.startU : 0;
+        return PatternMath.cellFor(pat, u + su, v + patternStartSv(pat));
+    }
+
+    /**
+     * The start-cell marker's row offset in PLACEMENT space (v counts steps from the start
+     * edge; with start-at-bottom that edge is the drawing's bottom, so the drawn row flips).
+     */
+    private static int patternStartSv(co.fax.wang.palette.Palette pat) {
+        if (pat.startV < 0 || pat.startV >= pat.height) return 0;
+        return pat.startAtBottom ? pat.height - 1 - pat.startV : pat.startV;
     }
 
     private static String cantResolveMessage() {
@@ -274,6 +348,17 @@ public final class PaintPlacer {
                 markerDriven = true;
             } else {
                 bases = floodFaces(mc, clicked, dir);
+            }
+        } else if (mode == PlacementMode.FACE_PERP) {
+            BlockPos seed = findMarkerBehind(clicked, dir);
+            if (seed != null) {
+                bases = perpRun(mc, seed, dir, p -> MarkerManager.startMarkers.contains(p));
+                markerDriven = true;
+            } else {
+                bases = perpRun(mc, clicked, dir, p -> !mc.level.getBlockState(p).isAir()
+                        && mc.level.getBlockState(p.relative(dir)).isAir()
+                        && !MarkerManager.endMarkers.contains(p.relative(dir))
+                        && !outOfReach(mc, p.relative(dir)));
             }
         } else {
             bases = List.of(clicked);
@@ -352,6 +437,17 @@ public final class PaintPlacer {
                     continue;
                 }
             }
+            if (type == PaintType.PATTERN) {
+                String cellId = patternCell(cell);
+                if (cellId == PatternMath.COLUMN_DONE) { // pattern complete, no wrap
+                    it.remove();
+                    continue;
+                }
+                if (PatternChoice.cellIsHole(patternPrep, cellId)) {
+                    c.next++; // a hole: advance the front without placing anything
+                    continue;
+                }
+            }
             queue.add(new Pending(cell, g, 0));
             c.next++;
         }
@@ -383,6 +479,58 @@ public final class PaintPlacer {
                 PaletteChoice.resolveRamp(prepared, anchorAt(mc, seg.s()), anchorAt(mc, seg.e()));
         segRamps.put(key, ramp);
         return ramp;
+    }
+
+    /**
+     * Face Perpendicular: the 1-block-wide run through {@code seed} in the clicked plane, along
+     * the player's look direction projected into that plane and snapped to the configured
+     * increment (45° gives stair-stepped diagonal runs). Extends both ways from the seed while
+     * {@code valid} accepts each step; the seed itself must pass too.
+     */
+    private static List<BlockPos> perpRun(Minecraft mc, BlockPos seed, Direction dir,
+                                          java.util.function.Predicate<BlockPos> valid) {
+        int[] step = perpStep(mc, dir);
+        List<BlockPos> out = new ArrayList<>();
+        if (valid.test(seed)) out.add(seed);
+        for (int sgn = -1; sgn <= 1; sgn += 2) {
+            for (int k = 1; k <= MAX_FACES / 2; k++) {
+                BlockPos p = seed.offset(step[0] * k * sgn, step[1] * k * sgn, step[2] * k * sgn);
+                if (!valid.test(p)) break;
+                out.add(p);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * The in-plane step vector for the perpendicular run: the player's look vector projected
+     * into the plane perpendicular to {@code dir}, its angle snapped to the configured
+     * increment in that plane's 2D basis. Components are −1/0/+1, so 45° snapping yields
+     * diagonal (corner-connected) steps.
+     */
+    private static int[] perpStep(Minecraft mc, Direction dir) {
+        // Plane basis (two axes perpendicular to the face normal).
+        int[] e1, e2;
+        switch (dir.getAxis()) {
+            case Y -> { e1 = new int[]{1, 0, 0}; e2 = new int[]{0, 0, 1}; }
+            case X -> { e1 = new int[]{0, 0, 1}; e2 = new int[]{0, 1, 0}; }
+            default -> { e1 = new int[]{1, 0, 0}; e2 = new int[]{0, 1, 0}; }
+        }
+        Vec3 look = mc.player.getViewVector(1.0f);
+        double a = look.x * e1[0] + look.y * e1[1] + look.z * e1[2];
+        double b = look.x * e2[0] + look.y * e2[1] + look.z * e2[2];
+        if (Math.abs(a) < 1e-4 && Math.abs(b) < 1e-4) {
+            a = 1; // looking dead-on along the normal — arbitrary in-plane direction
+        }
+        int snap = ConfigManager.get().perpSnapDegrees == 90 ? 90 : 45;
+        double ang = Math.toDegrees(Math.atan2(b, a));
+        double snapped = Math.toRadians(Math.round(ang / snap) * (double) snap);
+        int c1 = (int) Math.round(Math.cos(snapped));
+        int c2 = (int) Math.round(Math.sin(snapped));
+        // The run crosses the view: rotate the snapped look 90° in-plane, so the selected line
+        // is PERPENDICULAR to where you're looking (like a brush stroke across your vision).
+        int r1 = -c2, r2 = c1;
+        return new int[]{r1 * e1[0] + r2 * e2[0], r1 * e1[1] + r2 * e2[1], r1 * e1[2] + r2 * e2[2]};
     }
 
     /**
@@ -605,15 +753,29 @@ public final class PaintPlacer {
                         ranOut = slot < 0;
                     }
                 }
+                case PATTERN -> {
+                    String cellId = patternCell(p.cell());
+                    if (cellId == PatternMath.COLUMN_DONE
+                            || PatternChoice.cellIsHole(patternPrep, cellId)) {
+                        slot = -1; // outside the pattern / a hole — nothing to place here
+                    } else {
+                        Block b = PatternChoice.varied(patternPrep, cellId);
+                        slot = b == null ? -1 : PatternChoice.slotFor(player, patternPrep, b);
+                        ranOut = b != null && slot < 0;
+                    }
+                }
                 default -> slot = -1;
             }
             if (ranOut) {
-                // The ramp is known (and cached) — running out of one of its blocks stops the
-                // paint with an error rather than quietly substituting something else.
-                Block missing = PaletteChoice.lastMissingBlock();
+                // The ramp/pattern is known (and cached) — running out of one of its blocks
+                // stops the paint with an error rather than quietly substituting.
+                Block missing = type == PaintType.PATTERN
+                        ? PatternChoice.lastMissingBlock() : PaletteChoice.lastMissingBlock();
                 String name = missing == null ? "a block"
                         : new ItemStack(missing.asItem()).getHoverName().getString();
-                String pal = prepared != null && prepared.palette != null ? prepared.palette.name : "palette";
+                String pal = type == PaintType.PATTERN
+                        ? (patternPrep != null && patternPrep.pattern != null ? patternPrep.pattern.name : "pattern")
+                        : (prepared != null && prepared.palette != null ? prepared.palette.name : "palette");
                 overlay(mc, "'" + pal + "': out of " + name);
                 reset();
                 return;
@@ -627,6 +789,9 @@ public final class PaintPlacer {
             if (type == PaintType.GRADIENT && p.g() != null) {
                 if (p.g().step() >= 0) GradientCaches.recordColumn(mode, p.cell(), p.g().step(), dir);
                 else if (activeFill != null) GradientCaches.recordFill(activeFill, p.cell());
+            }
+            if (type == PaintType.PATTERN && patternPlace != null) {
+                GradientCaches.recordPattern(patternPlace, p.cell());
             }
         }
     }
@@ -690,6 +855,10 @@ public final class PaintPlacer {
         boolean paletteAlways = cfg.activePaintType == PaintType.NOISE
                 || (cfg.activePaintType == PaintType.GRADIENT && pm == PlacementMode.FILL3D);
         if (paletteAlways) src.add("Selected from palette");
+        if (cfg.activePaintType == PaintType.PATTERN) {
+            co.fax.wang.palette.Palette pat = co.fax.wang.palette.PaletteStore.activePattern();
+            src.add(pat == null ? "No pattern selected" : "Pattern: " + pat.name);
+        }
 
         // Paint stays at normal block reach (the crosshair hit) — only markers target further.
         BlockHitResult hit = (mc.hitResult instanceof BlockHitResult bhr
@@ -704,6 +873,16 @@ public final class PaintPlacer {
                     List<BlockPos> bases = (seed != null) ? planeMarkers(seed, d) : floodFaces(mc, b, d);
                     for (BlockPos base : bases) addFrontPreview(mc, base, d);
                 }
+                case FACE_PERP -> {
+                    BlockPos seed = findMarkerBehind(b, d);
+                    List<BlockPos> bases = (seed != null)
+                            ? perpRun(mc, seed, d, p -> MarkerManager.startMarkers.contains(p))
+                            : perpRun(mc, b, d, p -> !mc.level.getBlockState(p).isAir()
+                                    && mc.level.getBlockState(p.relative(d)).isAir()
+                                    && !MarkerManager.endMarkers.contains(p.relative(d))
+                                    && !outOfReach(mc, p.relative(d)));
+                    for (BlockPos base : bases) addFrontPreview(mc, base, d);
+                }
                 case FILL3D -> {
                     for (Direction dd : Direction.values()) {
                         if (mc.level.getBlockState(b.relative(dd)).isAir()) {
@@ -715,11 +894,11 @@ public final class PaintPlacer {
                 default -> { }
             }
             if (cfg.activePaintType == PaintType.GRADIENT
-                    && (pm == PlacementMode.SINGLE || pm == PlacementMode.FACE)) {
+                    && (pm == PlacementMode.SINGLE || pm == PlacementMode.FACE || pm == PlacementMode.FACE_PERP)) {
                 src.addAll(gradientSourcingAt(mc, cfg, b, d));
             }
         } else if (cfg.activePaintType == PaintType.GRADIENT
-                && (pm == PlacementMode.SINGLE || pm == PlacementMode.FACE)) {
+                && (pm == PlacementMode.SINGLE || pm == PlacementMode.FACE || pm == PlacementMode.FACE_PERP)) {
             src.add("Selected from palette");
         }
         sourcing = src;
@@ -938,6 +1117,8 @@ public final class PaintPlacer {
         ramp3d = null;
         segRamps.clear();
         activeFill = null;
+        patternPrep = null;
+        patternPlace = null;
         dir = null;
         columns.clear();
         markerDriven = false;

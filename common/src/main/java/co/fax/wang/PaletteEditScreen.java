@@ -272,9 +272,29 @@ public class PaletteEditScreen extends Screen {
         // Left column: the grouped settings.
         int rx = contentX(), rw = SET_W - 14; // room for the (?) icons
         int y = COL_TOP + HEADING_H; // "Gradient & noise" heading renders above
-        y = addSlider(rx, y, rw, editing.variation, v -> "Variation: " + pct(v),
-                v -> { editing.variation = v; resetPreview(); },
-                "Similar blocks swap within each segment");
+        // Variation: the unified window+chance model — Var toggle half, chance slider half.
+        int halfW = (rw - 4) / 2;
+        addScrolled(Button.builder(Component.literal("Var: " + varLabel()), b -> {
+            editing.variationWindow = (editing.variationWindow + 1) % 4;
+            dirty = true;
+            resetPreview();
+            b.setMessage(Component.literal("Var: " + varLabel()));
+        }).bounds(rx, y, halfW, 20).build());
+        addScrolled(new EditSlider(rx + halfW + 4, y, rw - halfW - 4,
+                editing.variationChance / 100.0,
+                v -> ((int) Math.round(v * 100)) + "%",
+                v -> {
+                    editing.variationChance = (int) Math.round(v * 100);
+                    dirty = true;
+                    resetPreview();
+                }));
+        helpSpots.add(new HelpSpot(rx, y, rw, 20, () ->
+                editing.variationWindow == 0 || editing.variationChance == 0
+                        ? "Variation off: cells place exactly their segment's block"
+                        : "±" + editing.variationWindow + " @ " + editing.variationChance
+                                + "%: a cell may swap to a block that many positions away in "
+                                + "the colour ordering", true));
+        y += 24;
         y = addSlider(rx, y, rw, editing.chaos, v -> "Chaos: " + pct(v),
                 v -> { editing.chaos = v; resetPreview(); },
                 "Chance to repeat or skip a step");
@@ -363,6 +383,10 @@ public class PaletteEditScreen extends Screen {
     private static double clampScale(double s) { return Math.max(1, Math.min(15, s)); }
 
     private static String pct(double v) { return Math.round(v * 100) + "%"; }
+
+    private String varLabel() {
+        return editing.variationWindow == 0 ? "Off" : "±" + editing.variationWindow;
+    }
 
     private String orderStateText() {
         return switch (editing.order) {
@@ -1645,16 +1669,25 @@ public class PaletteEditScreen extends Screen {
                 }
                 int idx = PaletteMath.indexFor(t, wob);
                 List<ItemStack> band = bands.get(idx);
-                cylCache[i][j] = band.isEmpty() ? null : band.get(rnd.nextInt(band.size()));
+                cylCache[i][j] = rollBand(band, rnd);
                 cylTint[i][j] = band.isEmpty() && idx < segTints.size() ? segTints.get(idx) : 0;
             }
         }
     }
 
-    /** Per segment: its stack + variation alternates from the source (empty list = crosshatch). */
+    /**
+     * Per segment: its stack first, then its ±window colour-order neighbours from the source
+     * (empty list = crosshatch). The previews roll the palette's chance per cell: index 0 on a
+     * failed roll, a random later entry on success — matching placement's unified model.
+     */
     private List<List<ItemStack>> previewBands() {
         List<List<ItemStack>> out = new ArrayList<>();
-        double thresh = Math.max(0, Math.min(1, editing.variation)) * 127.5;
+        int n = Math.max(0, Math.min(3, editing.variationWindow));
+        // leftRows is already colour-sorted; its block rows ARE the Oklab ordering.
+        List<LRow> blocks = new ArrayList<>();
+        for (LRow row : leftRows) {
+            if (row.auto() == null) blocks.add(row);
+        }
         for (int k = 0; k < editing.segments.size(); k++) {
             PaletteSegment seg = editing.segments.get(k);
             if (seg.isAutomatic() || segStacks.get(k).isEmpty()) {
@@ -1663,17 +1696,32 @@ public class PaletteEditScreen extends Screen {
             }
             List<ItemStack> band = new ArrayList<>();
             band.add(segStacks.get(k));
-            if (thresh > 0) {
-                Block base = Gradient.blockOfItemId(seg.block);
-                int rgb = base == null ? 0 : BlockTextures.gradientValue(base, null, GradientMode.COLOR, 0.5);
-                for (LRow row : leftRows) {
-                    if (row.auto() != null || row.id().equals(seg.block)) continue;
-                    if (ColorOrder.oklabDist(row.rgb(), rgb) * 255.0 <= thresh) band.add(row.stack());
+            if (n > 0 && editing.variationChance > 0) {
+                int idx = -1;
+                for (int i = 0; i < blocks.size(); i++) {
+                    if (blocks.get(i).id().equals(seg.block)) {
+                        idx = i;
+                        break;
+                    }
+                }
+                if (idx >= 0) {
+                    for (int i = Math.max(0, idx - n); i <= Math.min(blocks.size() - 1, idx + n); i++) {
+                        if (i != idx) band.add(blocks.get(i).stack());
+                    }
                 }
             }
             out.add(band);
         }
         return out;
+    }
+
+    /** One preview cell's roll under the unified model: base, or a random window neighbour. */
+    private ItemStack rollBand(List<ItemStack> band, Random rnd) {
+        if (band.isEmpty()) return null;
+        if (band.size() > 1 && rnd.nextInt(100) < Math.max(0, Math.min(100, editing.variationChance))) {
+            return band.get(1 + rnd.nextInt(band.size() - 1));
+        }
+        return band.get(0);
     }
 
     private static int[][] ringCells(int d) {
@@ -1774,8 +1822,8 @@ public class PaletteEditScreen extends Screen {
                         idx = Math.max(0, Math.min(count - 1, cell.nextBoolean() ? idx - 1 : idx + 1));
                     }
                     ItemStack st = segStacks.get(idx);
-                    List<ItemStack> band = bands.get(idx);
-                    if (!band.isEmpty()) st = band.get(cell.nextInt(band.size()));
+                    ItemStack rolled = rollBand(bands.get(idx), cell);
+                    if (rolled != null) st = rolled;
                     g.pose().pushMatrix();
                     g.pose().translate((gx - gz + (n - 1)) * ISO_X, (gx + gz) * ISO_DOWN + (n - 1 - gy) * ISO_UP);
                     if (editing.segments.get(idx).isAutomatic() || st.isEmpty()) {

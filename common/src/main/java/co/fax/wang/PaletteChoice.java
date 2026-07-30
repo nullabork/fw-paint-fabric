@@ -50,32 +50,32 @@ public final class PaletteChoice {
         public final List<SourceEntry> source;
         final List<SourceEntry> autoPool;         // source minus the palette's auto-exclusions
         final List<PaletteSegment> effective;     // segments minus skipped missing blocks
+        final List<Block> ordered;                // source in Oklab colour order (variation)
         public final String error;
 
         private Prepared(Palette palette, List<SourceEntry> source, List<SourceEntry> autoPool,
-                         List<PaletteSegment> effective, String error) {
+                         List<PaletteSegment> effective, List<Block> ordered, String error) {
             this.palette = palette;
             this.source = source;
             this.autoPool = autoPool;
             this.effective = effective;
+            this.ordered = ordered;
             this.error = error;
         }
 
         private static Prepared fail(Palette palette, String error) {
-            return new Prepared(palette, List.of(), List.of(), List.of(), error);
+            return new Prepared(palette, List.of(), List.of(), List.of(), List.of(), error);
         }
     }
 
-    /** A resolved ramp: flat step blocks, their band boundaries, and variation swap groups. */
+    /** A resolved ramp: flat step blocks and their band boundaries. */
     public static final class Ramp {
         final Block[] blocks;
         final double[] bounds;           // internal flat boundaries in curved space
-        final List<List<Block>> bands;   // per flat step: the block + its variation alternates
 
-        private Ramp(Block[] blocks, double[] bounds, List<List<Block>> bands) {
+        private Ramp(Block[] blocks, double[] bounds) {
             this.blocks = blocks;
             this.bounds = bounds;
-            this.bands = bands;
         }
 
         public int steps() {
@@ -137,7 +137,13 @@ public final class PaletteChoice {
         }
         if (autoPool.isEmpty()) autoPool = source; // everything excluded → ignore the exclusions
 
-        return new Prepared(palette, source, autoPool, effective, null);
+        // The Oklab colour ordering variation windows index into.
+        List<SourceEntry> sorted = new ArrayList<>(source);
+        sorted.sort(java.util.Comparator.comparingLong(e -> ColorOrder.colorSortKey(e.rgb())));
+        List<Block> ordered = new ArrayList<>(sorted.size());
+        for (SourceEntry e : sorted) ordered.add(e.block());
+
+        return new Prepared(palette, source, autoPool, effective, ordered, null);
     }
 
     /** Distinct blocks from the palette's source range, hotbar-first, with id + average colour. */
@@ -241,12 +247,7 @@ public final class PaletteChoice {
             }
         }
         double[] bounds = PaletteMath.flatBounds(segBounds, counts);
-
-        List<List<Block>> bands = new ArrayList<>(flat.size());
-        for (int f = 0; f < flat.size(); f++) {
-            bands.add(bandFor(p, flat.get(f), flatMode.get(f)));
-        }
-        return new Ramp(flat.toArray(new Block[0]), bounds, bands);
+        return new Ramp(flat.toArray(new Block[0]), bounds);
     }
 
     /**
@@ -318,20 +319,6 @@ public final class PaletteChoice {
         return best.block();
     }
 
-    /** Variation band: the step's block plus source blocks within the palette's variation range. */
-    private static List<Block> bandFor(Prepared p, Block block, AutoMode mode) {
-        double thresh = clamp01(p.palette.variation) * 127.5;
-        List<Block> band = new ArrayList<>();
-        band.add(block);
-        if (thresh <= 0) return band;
-        GradientMode metric = mode == AutoMode.BRIGHTNESS ? GradientMode.BRIGHTNESS : GradientMode.COLOR;
-        int rgb = colorOf(block);
-        for (SourceEntry e : p.source) {
-            if (e.block() == block) continue;
-            if (distance(e.rgb(), rgb, metric) <= thresh) band.add(e.block());
-        }
-        return band;
-    }
 
     /** Colour/brightness distance in the space the mod's perceptual toggle selects. */
     private static double distance(int a, int b, GradientMode metric) {
@@ -415,19 +402,38 @@ public final class PaletteChoice {
     }
 
     /**
-     * Random available block in the step's own band — STRICT: the ramp is known (it's what the
-     * cache/preview promised), so running out of a block is an error for the caller to surface,
-     * never a silent substitution from a neighbouring step.
+     * The slot for a step, with variation applied: with the palette's chance a cell swaps to a
+     * uniformly-random OTHER block within the window (±N in the Oklab ordering); an unavailable
+     * swap falls back to the step's own block. STRICT on the base: the ramp is what the
+     * cache/preview promised, so running out of the step's block is an error for the caller to
+     * surface, never a silent substitution.
      */
     private static int slotForStep(LocalPlayer player, Prepared p, Ramp r, int idx) {
-        List<Block> band = new ArrayList<>(r.bands.get(idx));
-        Collections.shuffle(band, RANDOM);
-        for (Block b : band) {
-            int slot = findSlot(player, b, p.palette);
-            if (slot >= 0) return slot;
+        Block base = r.blocks[idx];
+        Block pick = varied(p, base);
+        if (pick != base) {
+            int slot = findSlot(player, pick, p.palette);
+            if (slot >= 0) return slot; // swap unavailable → fall through to the drawn block
         }
-        lastMissing = r.blocks[idx];
-        return -1;
+        int slot = findSlot(player, base, p.palette);
+        if (slot < 0) lastMissing = base;
+        return slot;
+    }
+
+    /** The variation roll: the base block, or a window neighbour on a successful chance roll. */
+    private static Block varied(Prepared p, Block base) {
+        int n = Math.max(0, Math.min(3, p.palette.variationWindow));
+        int chance = Math.max(0, Math.min(100, p.palette.variationChance));
+        if (n == 0 || chance == 0) return base;
+        int idx = p.ordered.indexOf(base);
+        if (idx < 0) return base;
+        if (RANDOM.nextInt(100) >= chance) return base;
+        int lo = Math.max(0, idx - n);
+        int hi = Math.min(p.ordered.size() - 1, idx + n);
+        if (hi <= lo) return base;
+        int pick = lo + RANDOM.nextInt(hi - lo); // window minus the base itself
+        if (pick >= idx) pick++;
+        return p.ordered.get(pick);
     }
 
     /** First slot holding {@code block} anywhere in the palette's source range, or -1. */

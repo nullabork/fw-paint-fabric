@@ -4,13 +4,13 @@ Open source (MIT) — [github.com/nullabork/fw-paint-fabric](https://github.com/
 
 ![One palette, two paints: a gradient wall and its noise counterpart](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/gradient-vs-noise-same-palette-walls-v2.0.0-beta.1.jpg)
 
-**Paint with blocks.** A client-side mod (Fabric **and** NeoForge) with three paints — **Solid**
+**Paint with blocks.** A client-side mod (Fabric **and** NeoForge) with four paints — **Solid**
 (one block: walls, columns, volumes), **Gradient** (smooth colour/brightness blends), **Noise**
-(natural, blotchy 3D patterns) — all driven by **Palettes**: named, saved block ramps you build
-once and reuse everywhere. A **Finder** tab ranks every block in the game by colour. Any paint
-works through any placement mode, with or without markers. Placement is the legit,
-multiplayer-safe way (normal block-place interactions the server validates), so it works on
-servers.
+(natural, blotchy 3D patterns), and **Pattern** (hand-drawn 2D block grids painted as planes) —
+driven by **Palettes**: named, saved block ramps and patterns you build once and reuse
+everywhere. A **Finder** tab ranks every block in the game by colour. Any paint works through
+any placement mode, with or without markers. Placement is the legit, multiplayer-safe way
+(normal block-place interactions the server validates), so it works on servers.
 
 > **v2 beta.** Palettes replace v1's per-tool block picker. v1 gradient settings are not
 > migrated — build your first palette on the Palette tab and you're going again in a minute.
@@ -19,7 +19,7 @@ servers.
 
 1. Press **K** → **Settings** → **Paint tool**: pick any item (e.g. a stick). The mod is active
    only while you hold it.
-2. On the **Palette** tab press **+ New**: double-click (or drag) blocks — or the **Auto**
+2. On the **Palette** tab press **+ Gradient**: double-click (or drag) blocks — or the **Auto**
    wildcards — into the strip, then **Save**. Saving makes it the active palette.
 3. **K** lands on the **Paint** tab: buttons for paint type, placement mode, and the active
    palette (in-game: **V**, **G**, and **B**).
@@ -31,9 +31,10 @@ servers.
 ## Keybinds
 
 - **K** — open / close the FW Paint screen (lands on the Paint quick-controls tab)
-- **V** — switch paint type · **B** — cycle the active palette
-- **G** — cycle placement mode: Marker → Marker corners → Marker draw → Single → Face → 3D Fill →
-  Disabled
+- **V** — switch paint type (Gradient / Noise / Solid / Pattern) · **B** — cycle the active
+  palette or pattern (whichever the paint type uses)
+- **G** — cycle placement mode: Marker → Marker corners → Marker draw → Single → Face →
+  Face perp → 3D Fill → Disabled
 - **L-Ctrl** (hold + click) — a marker-removing click clears the whole connected plane
 - All rebindable under Options → Controls → Key Binds → MISC.
 
@@ -63,9 +64,25 @@ your colour-sorted inventory blocks in the middle, and the **segment strip** on 
   Right-click a block in the list to ban it from Auto picks.
 - **Sizing**: **Min blocks** (shortest run that fits the ratios), **Fill space** (out to the end
   marker / first block), or **Set steps** (fixed length).
-- **Variation** (similar blocks stand in), **Chaos** (repeat/skip dither), **Step length**
-  (steps randomly run longer/shorter) — plus the palette's own noise type / scale / seed.
+- **Variation** (a ±1–±3 colour-neighbour window + a swap chance — cells shimmer to nearby
+  colours from your inventory), **Chaos** (repeat/skip dither), **Step length** (steps randomly
+  run longer/shorter) — plus the palette's own noise type / scale / seed.
 - Hover any control (or click its circled-?) for help describing what it's currently set to.
+
+## Patterns
+
+![A patterned wall painted stroke by stroke, variance shimmer included](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/pattern-wall-placed-variation-v2.1.0-beta.1.jpg)
+
+Draw a block grid by hand (up to **32×32**) and paint it as a plane. **+ Pattern** on the
+Palette tab opens the editor: left-click a block (its sprite rides your cursor), hold and scrub
+to draw — press a same-block cell to erase, **Shift-drag** for straight/45° lines,
+**right-click** to flood fill, **middle-click** to eyedrop, **Ctrl-click** to set where
+placement starts (empty cells are holes). A live iso preview (expandable) shows the wall,
+variance included; **Start: Top/Bottom** keeps ground-up painting upright. Painting advances
+out of the clicked face, the width crossing a plane snapped from your facing (45°/90°) —
+adjacent strokes **continue the drawing** instead of restarting, so you can build a patterned
+wall column by column. Tiling: none / sides / start–end / both. Patterns are their own paint
+type — **B** cycles your patterns while it's active.
 
 ## Placement modes
 
@@ -76,6 +93,9 @@ the next click grows from, and rides the advancing fronts while you hold.
 - **Face** — the whole connected plane extrudes together: click a wall's top to raise it, its side
   to thicken it. A start marker behind the clicked column selects the connected marker group
   instead. **Fill voids first** (Settings) levels the lowest columns before stacking new layers.
+- **Face perp** — a 1-block-wide run through the clicked block crossing your view (perpendicular to your look),
+  snapped to 45° or 90° (the **Perp snap** setting) — diagonal stair-stepped lines included.
+  Inside markers only the marked blocks along the run are selected.
 - **3D Fill** — a connected blob out of the clicked face; tap for the first shell, hold to grow.
   Contained by walls, end markers, and start-marker space.
 - Everywhere: an **end marker stops a column or fill even floating in air**, and a finished column
@@ -105,7 +125,7 @@ The active palette blended along your build — between markers or free-hand.
 - **Between markers**: mark a start and end, click the face the line runs out of and hold — the
   palette stretches start→end, Automatic segments anchoring to the real marker blocks.
 - **Anywhere else**: the gradient grows out of the clicked face, sized by the palette's Sizing
-  mode. **Gradient memory** continues a half-finished gradient when re-clicked (cleared when you
+  mode. **Paint memory** continues a half-finished gradient when re-clicked (cleared when you
   switch or edit palettes, or after the Settings idle timer); a *finished* gradient starts a
   fresh one on top.
 - **3D gradients**: sphere-ish blends from the centre out; each fill remembers its centre. 3D
@@ -143,7 +163,7 @@ Every placeable block in the game ranked by colour — discover blocks beyond yo
 
 ## Settings
 
-- **Placement**, **Marker dist**, **Auto end marker**, **Fill voids first**, **Gradient memory**
+- **Placement**, **Marker dist**, **Auto end marker**, **Fill voids first**, **Paint memory**
   — see above. **Missing blocks**: refuse to paint or skip absent segments. **Color match**:
   Perceptual (Oklab) or Classic.
 - **Move helper text…** repositions the HUD lines with a live preview.

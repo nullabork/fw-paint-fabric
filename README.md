@@ -100,9 +100,11 @@ The mod is client-side only; servers need nothing.
 ```
 common/src/main/java/co/fax/wang/
   Gradient.java          loader-free core: keybinds, tick driving, shared state
-  GradientScreen.java    the K screen (Solid / Palette / Finder / Settings / Help tabs)
+  GradientScreen.java    the K screen (Paint / Solid / Palette / Finder / Settings / Help tabs)
   PaletteEditScreen.java the palette editor       PaletteListPanel.java  the Palette tab's rows
+  PatternEditScreen.java the pattern editor       PatternThumb.java  mini pattern renderer
   PaletteChoice.java     resolves the active palette into placeable ramps (Automatic segments etc.)
+  PatternChoice.java     pattern press state + Oklab-neighbour variation
   HelpPanel.java         in-game manual           UiIcons.java  shared pixel-art glyphs
   HudOverlay.java        helper-text + palette-row HUD   HudPlacementScreen.java  move-the-text screen
   MarkerManager.java     marker modes/persistence + in-world rendering
@@ -113,7 +115,8 @@ common/src/main/java/co/fax/wang/
   Noise.java / NoiseType.java / FloodFill.java / CurveFunction.java / FaceOverlay.java
   PlacementMode.java / PaintType.java / SolidMatch.java / GradientMode.java / GradientSource.java
   palette/               the v2 model: Palette, PaletteSegment, PaletteStore (fw-paint-palettes.json),
-                         PaletteMath, AutoMode, PaletteOrder, SizingMode, MissingBlockPolicy
+                         PaletteMath, PatternMath, AutoMode, PaletteOrder, PaletteKind,
+                         PatternTiling, SizingMode, MissingBlockPolicy
   config/GradientConfig.java + config/ConfigManager.java   Gson config -> config/gradient.json
 common/src/test/java/co/fax/wang/   unit tests (pure maths only)
 fabric/src/main/java/co/fax/wang/fabric/GradientFabric.java       Fabric entrypoint

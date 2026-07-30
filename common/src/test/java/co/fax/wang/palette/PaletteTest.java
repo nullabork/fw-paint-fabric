@@ -47,8 +47,11 @@ class PaletteTest {
         Palette a = sample();
         Palette b = sample();
         assertEquals(a.contentKey(), b.contentKey());
-        b.variation = 0.9;
+        b.variationWindow = 2;
+        b.variationChance = 50;
         assertNotEquals(a.contentKey(), b.contentKey());
+        // ...but the CACHE key ignores variation, so tweaks don't restart in-progress paint.
+        assertEquals(a.cacheKey(), b.cacheKey());
         b = sample();
         b.sizing = SizingMode.SET_STEPS;
         assertNotEquals(a.contentKey(), b.contentKey());

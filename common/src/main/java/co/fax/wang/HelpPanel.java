@@ -171,16 +171,16 @@ public final class HelpPanel {
         t("Getting started", "Assign a tool item, build a palette, paint.", List.of(
             "1. On the Settings tab, click \"Paint tool\" and pick any item (a stick works well). "
                 + "FW Paint only does anything while you hold that item.",
-            "2. On the Palette tab, press + New and build your first palette: double-click "
+            "2. On the Palette tab, press + Gradient and build your first palette: double-click "
                 + "blocks (or the Automatic rows) into the strip, then Save. Gradient and noise "
                 + "painting both use the active palette; press {palette} in-game to cycle "
                 + "through your saved ones.",
-            "3. Hold the tool. Press {paint} to switch what it paints - Solid, Gradient, or "
-                + "Noise - and {cycle} to cycle where blocks go: Marker, Marker corners, Marker "
-                + "draw, Single, Face, 3D Fill, Disabled. The Paint tab ({open} lands on it) "
-                + "has buttons for all of these too. Any paint type works with any placement "
-                + "mode, with or without markers. The helper text in the top-left always shows "
-                + "both, plus the active palette.",
+            "3. Hold the tool. Press {paint} to switch what it paints - Gradient, Noise, "
+                + "Solid, or Pattern - and {cycle} to cycle where blocks go: Marker, Marker "
+                + "corners, Marker draw, Single, Face, Face perp, 3D Fill, Disabled. The Paint "
+                + "tab ({open} lands on it) has buttons for all of these too. Any paint type "
+                + "works with any placement mode, with or without markers. The helper text in "
+                + "the top-left always shows both, plus the active palette or pattern.",
             "4. Aim at a block face and right-click to paint (hold to keep going). Markers are "
                 + "optional - they bound what you paint and anchor Automatic segments.",
             "{open} opens and closes this screen. All keys are rebindable under "
@@ -217,6 +217,18 @@ public final class HelpPanel {
                     + "together. It's about keeping things even, so only columns within your "
                     + "reach count - a void you can't reach never holds the rest up. Turn it off "
                     + "to advance every column at once.")),
+            t("Face perpendicular", "A 1-block-wide run, snapped to 45 degrees.", List.of(
+                "Like Face, but instead of the whole surface it selects a single-block-wide "
+                    + "line through the block you click, crossing your view - perpendicular to where you're "
+                    + "looking - snapped to 45 or 90 degrees (the Perp snap setting). 45 lets "
+                    + "you paint diagonal, stair-stepped runs, including up-diagonals across "
+                    + "walls.",
+                "The run extends both ways from the click while faces stay exposed and in "
+                    + "reach; end markers stop it like everything else. With a start marker "
+                    + "behind the clicked block, only the marked blocks along the run are "
+                    + "selected - never the whole marker plane.",
+                "Works with every paint type - solid lines, gradient runs, noise streaks, or "
+                    + "pattern strips.")),
             t("3D Fill", "A blob of blocks growing out of the clicked face.", List.of(
                 "Tap right-click to place the first shell, hold to grow the fill layer by layer. "
                     + "It only spreads through connected air, so walls, end markers, and "
@@ -384,13 +396,56 @@ public final class HelpPanel {
                 "Set steps: stretches or shrinks the gradient to a fixed number of blocks "
                     + "(the Steps slider appears under the toggle).")),
             t("Sliders", "Variation, Chaos, Step length.", List.of(
-                "Variation: lets blocks similar to a segment randomly stand in for it - bands "
-                    + "get visual variety without gaining or losing segments. At 0% every "
-                    + "segment is exactly its own block.",
+                "Variation: the Var toggle picks a window (+-1 to +-3) and the slider beside it "
+                    + "a chance (0-100%) - each placed cell may swap to a block within that "
+                    + "many positions of its own in the colour ordering of your inventory. "
+                    + "Changing it never restarts an in-progress paint - only new cells roll "
+                    + "the new setting. The same model drives pattern variation.",
                 "Chaos: chance a placement repeats the previous step or skips ahead one - adds "
                     + "dither across band boundaries.",
                 "Step length: chance each step runs randomly longer or shorter (its neighbour "
                     + "compensates, so the gradient still starts and ends on time)."))),
+
+        t("Patterns", "Hand-drawn 2D block grids, painted as planes.",
+            List.of(
+                "A pattern is a grid you draw cell by cell (up to 32x32) in the pattern editor "
+                    + "- press + Pattern on the Palette tab. Patterns live in the same list as "
+                    + "gradient palettes and paint under the PATTERN paint type ({paint} "
+                    + "cycles to it); the cycle keybind ({palette}) then steps through your "
+                    + "patterns instead of gradients - each keeps its own selection.",
+                "Placement starts at the pattern's START edge and advances out of the face "
+                    + "you click; the pattern's width runs across a plane derived from the "
+                    + "direction you're facing, snapped to 45 or 90 degrees (Perp snap). "
+                    + "Painting a box with the same pattern gives the pattern on the faces "
+                    + "parallel to its plane and edge streaks on the perpendicular sides.",
+                "Adjacent strokes continue the same pattern instead of restarting - placed "
+                    + "cells remember their position in the drawing, so painting column by "
+                    + "column lines up. Switching or editing patterns starts fresh.",
+                "Empty cells are holes: nothing is placed there. Tiling controls repetition: "
+                    + "none, sides (wraps across the width), start/end (columns repeat), or "
+                    + "both.",
+                "Variation (experimental): at +-1 to +-3, a cell may swap to a block within "
+                    + "that many positions of it in the colour ordering of your inventory - "
+                    + "subtle texture shimmer with no chaos."),
+            t("The pattern editor", "Pick a block, draw on the grid.", List.of(
+                "Left-click a block in the list to make it your drawing block - its sprite "
+                    + "follows the cursor. Hold left-click and scrub over the canvas to draw "
+                    + "it into cells (over empty cells and other blocks alike). The pinned "
+                    + "Eraser row clears any cell instead.",
+                "Press on a cell that already holds your selected block and the drag becomes "
+                    + "an eraser for that block only - other blocks and empty cells are left "
+                    + "alone. A drag never toggles cell by cell.",
+                "Shift-drag draws a straight or 45-degree line, previewed live and locked in "
+                    + "on release. Right-click flood fills the clicked cell's connected "
+                    + "same-content region (other blocks bound it). Middle-click picks a "
+                    + "cell's block; Ctrl-click sets the placement-origin plus (one per grid) "
+                    + "so a fresh stroke can start anywhere in the drawing.",
+                "Width/Height (1-32) resize the canvas; shrinking keeps the cropped cells "
+                    + "until you save, so growing back restores them; Clear (with a confirm) "
+                    + "empties the grid. 'start' is the edge placed first - the Start: "
+                    + "Top/Bottom button flips it so painting up from the ground keeps the "
+                    + "drawing upright. The iso preview up top shows the wall with variance "
+                    + "applied; its expand button opens it full screen."))),
 
         t("Gradient paint", "Blend along the active palette - between markers or free-hand.",
             List.of(
@@ -402,14 +457,16 @@ public final class HelpPanel {
                     + "start.",
                 "The helper text always says what the next click would anchor to - markers, or "
                     + "the palette alone."),
-            t("Gradient memory", "How free-hand gradients keep their place.", List.of(
+            t("Paint memory", "How free-hand paint keeps its place.", List.of(
                 "Painting outside markers remembers which step each placed block was, so "
                     + "clicking the face of a half-finished gradient continues it instead of "
-                    + "restarting.",
-                "The memory clears when you switch or edit the active palette, or after the "
-                    + "\"Gradient memory\" idle time in Settings (default 1 minute) - stop for "
-                    + "longer than that and the next click starts a fresh gradient. Clicking a "
-                    + "FINISHED gradient starts a new one on top rather than doing nothing.",
+                    + "restarting. Pattern placements remember their plane the same way.",
+                "The memory clears when you switch or edit the active palette or pattern, or "
+                    + "after the \"Paint memory\" idle time in Settings (default 10 minutes, up "
+                    + "to 30) - stop for longer than that and the next click starts fresh. "
+                    + "Clicking a FINISHED gradient starts a new one on top rather than doing "
+                    + "nothing. Changing a pattern's variance does NOT reset an in-progress "
+                    + "pattern - only new cells roll the new variance.",
                 "3D fills remember their centre: click a block that belongs to one and it keeps "
                     + "growing the same sphere from the original middle; click elsewhere to start "
                     + "a new one."))),

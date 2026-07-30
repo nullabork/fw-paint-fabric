@@ -77,6 +77,18 @@ public final class HudOverlay {
             }
             return y + rowH;
         }
+        if (cfg.activePaintType == PaintType.PATTERN) {
+            co.fax.wang.palette.Palette pat = co.fax.wang.palette.PaletteStore.activePattern();
+            if (pat == null) {
+                g.text(font, "Press " + Gradient.boundKey("open") + " to set up a pattern",
+                        x, y + 4, YELLOW);
+            } else {
+                PatternThumb.draw(g, pat, x, y, 16);
+                g.text(font, pat.name + " (" + pat.width + "×" + pat.height + ")",
+                        x + 20, y + 4, SOURCE_COLOR);
+            }
+            return y + rowH;
+        }
         co.fax.wang.palette.Palette active = co.fax.wang.palette.PaletteStore.active();
         if (active == null) {
             g.text(font, "Press " + Gradient.boundKey("open") + " to set up a palette",
