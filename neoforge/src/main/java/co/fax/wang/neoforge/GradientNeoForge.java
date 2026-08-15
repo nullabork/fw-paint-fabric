@@ -60,6 +60,14 @@ public class GradientNeoForge {
         }
     }
 
+    /** Scrolling while aiming a shape-marker control slides the shape along its axis. */
+    @SubscribeEvent
+    static void onMouseScroll(InputEvent.MouseScrollingEvent event) {
+        if (co.fax.wang.shape.ShapeMarkers.onScroll(event.getScrollDeltaY())) {
+            event.setCanceled(true); // keep the hotbar slot where it is
+        }
+    }
+
     /**
      * In-world marker + placement-preview rendering, submitted through the same
      * {@code SubmitNodeCollector} phase vanilla uses for entities + the block outline. Our

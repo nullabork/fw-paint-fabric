@@ -174,18 +174,21 @@ public final class HelpPanel {
                 + "blocks (or the Automatic rows) into the strip, then Save. Gradient and noise "
                 + "painting both use the active palette; press {palette} in-game to cycle "
                 + "through your saved ones.",
-            "3. Hold the tool, then hold {wheel} to open the selector wheel. Its Paint slot "
-                + "picks what the tool paints - Solid, Gradient, Pattern, or Noise - its "
-                + "Markers slot the marker tools (Marker, Marker corners, Marker draw), and "
-                + "its Placement slot where blocks go (Single, Face, Face perp, 3D Fill); the "
-                + "Disabled slot switches the tool off. The Palette slot follows the paint "
-                + "type: it lists your gradient palettes (or patterns under Pattern paint), "
-                + "or - with Solid paint - Closest colour plus your inventory's blocks in "
-                + "colour order; clicking one makes it the Solid block. Anything selected but "
-                + "no longer available shows red (a crossed-out block, or a palette missing "
-                + "its blocks). Long lists become a "
-                + "scrolling carousel: step with the < > arrows or the mouse wheel. Click a "
-                + "slot to fan out its options, click to choose, release {wheel} when done. The Paint "
+            "3. Hold the tool, then hold {wheel} to open the selector wheel. Hover a wedge to "
+                + "fan out its options (clicks are only for choosing): Paint picks what the "
+                + "tool paints (Solid, Gradient, Pattern, Noise); Place fans out Blocks "
+                + "(Single, Face, Face perp, 3D Fill), Markers (Marker, Marker draw), and "
+                + "Shape markers (Marker box, circle, square) on a third ring. The Palette "
+                + "wedge follows the paint type: your gradient palettes (or patterns under "
+                + "Pattern paint), or - with Solid paint - the match modes, where hovering "
+                + "Select block fans your inventory's blocks (colour-sorted compact icons) "
+                + "onto the next ring; clicking one makes it the Solid block. "
+                + "The wedge directly holding the current selection shows a blue tint, so "
+                + "where the active choice lives reads at a glance. "
+                + "Anything selected but no longer available shows red (a crossed-out block, "
+                + "or a palette missing its blocks). Long lists become a "
+                + "scrolling carousel: step with the < > arrows or the mouse wheel. Click an "
+                + "option to choose (set several in one hold), release {wheel} when done. The Paint "
                 + "tab ({open} lands on it) has buttons for all of these too. Any paint type "
                 + "works with any placement mode, with or without markers. The helper text in "
                 + "the top-left always shows both, plus the active palette or pattern.",
@@ -252,29 +255,47 @@ public final class HelpPanel {
                     + "(turquoise), right-click marks end blocks (amber). Click and drag to mark a "
                     + "straight line locked to one axis. Starting a click or drag on an "
                     + "already-marked block removes instead of adds.",
-                "Markers aren't real blocks, so every marker mode reaches out to the Marker dist "
-                    + "setting - far beyond block-placing range.",
+                "Markers aren't real blocks: block markers reach out to the Marker dist "
+                    + "setting, and the region markers (box, shapes) place and edit at sight "
+                    + "range - far beyond block-placing range.",
                 "Hold the clear-connected key ({clear}, rebindable) while clicking a marked "
                     + "block to remove it together with every marker connected to it in that "
                     + "plane, instead of one at a time.",
                 "Markers are remembered per world and dimension. The Clear Markers button on the "
                     + "Settings tab removes them all."),
-            t("Marker corners", "Two clicks mark a whole volume of columns.", List.of(
-                "Left-click the first corner - its clicked face sets the column direction, and a "
-                    + "thin box follows your aim showing the volume. Right-click the opposite "
-                    + "corner to commit: start markers fill the first corner's plane, end markers "
-                    + "the opposite plane, one pair per column. Left-click again to move the "
-                    + "pending corner; switching modes cancels it.",
-                "The box depth is capped at Marker dist. Once placed they're perfectly normal "
-                    + "markers - toggle any of them off as usual.",
-                "With Auto end marker on, each column hugs the terrain instead: the start marker "
-                    + "lands on the last solid block before the column's air gap, and the end on "
-                    + "the first non-air block after it (or the far plane if it's all air). "
-                    + "Everything stays inside the drawn box - a column with no start block "
-                    + "inside it, or whose start and end would land on the same block, is simply "
-                    + "skipped.",
-                "Clicking an already-marked block toggles it off here too ({clear} for its whole "
-                    + "plane) - no need to switch back to plain Marker mode.")),
+            t("Marker box", "Drag once to mark a whole region as one box.", List.of(
+                "Press left-click on a block to anchor the first corner - the face you press on "
+                    + "sets the gradient direction, and that side of the box is the START. Drag "
+                    + "to the opposite corner (the box preview follows your aim) and release to "
+                    + "commit. One box at a time; a new drag replaces it.",
+                "The box is a single region, not a pile of markers: the start plane tints "
+                    + "turquoise and the end plane amber. Gradients inside it run from the start "
+                    + "plane to the end plane, and painting that begins inside the box stays "
+                    + "inside it.",
+                "Middle-click while aiming at the box deletes it. The Clear Markers button "
+                    + "removes it too.")),
+            t("Shape markers", "Circle and square donut regions - cylinders with drawn wall thickness.", List.of(
+                "In Marker circle or Marker square mode, three clicks make a shape: click a "
+                    + "block for the CENTER (the clicked face sets the shape's plane - that base "
+                    + "plane is the gradient START side), then click two radii on that plane "
+                    + "(they work over open air). Equal radii give a one-block-wide outline; "
+                    + "different radii give a band - the wall thickness.",
+                "Blue control blocks appear on the shape: drag the center to move it, drag a "
+                    + "radius control to resize the band (dragging the inner past the outer just "
+                    + "swaps them). Squares grow green corner nodes - drag one to rotate the "
+                    + "square freely. Controls respond whenever the tool is in hand - just aim "
+                    + "at one; no need to switch modes. The bright outline lights up while "
+                    + "you're looking at a region with the tool held.",
+                "Right-click a control to extrude the shape one layer along its plane's normal "
+                    + "(hold {clear} to extrude the other way); scroll while aiming a control to "
+                    + "slide the whole shape along that axis. Middle-click removes whatever "
+                    + "marker you're aiming at - a shape, the box, or a plain block marker - in "
+                    + "any mode. Multiple shapes can exist at once.",
+                "Painting into a shape is restricted to its band: Face mode click inside the "
+                    + "ring selects exactly the ring's faces, columns stop at the extrusion's "
+                    + "far end, and gradients run from the base plane (start) to the far side "
+                    + "(end) - so a tall extruded circle paints as a giant gradient cylinder "
+                    + "with exactly the wall thickness you drew.")),
             t("Marker draw", "A freehand marker pencil.", List.of(
                 "Hold left-click and sweep the crosshair to spatter start markers over whatever "
                     + "it touches; hold right-click for end markers (they only stick where a "

@@ -51,57 +51,66 @@ class WheelMathTest {
     }
 
     @Test
-    void childSlotWidthCapsAtMax() {
-        assertEquals(WheelMath.MAX_CHILD_SLOT, WheelMath.childSlotWidth(1), EPS);
-        assertEquals(WheelMath.MAX_CHILD_SLOT, WheelMath.childSlotWidth(8), EPS);
-        assertEquals(TAU / 12, WheelMath.childSlotWidth(12), EPS);
+    void slotWidthScalesWithContentAndCapsAtAQuarterTurn() {
+        // 16px icons at radius 100: (16+12)/100 rad — far narrower than the 45° cap.
+        assertEquals(0.28, WheelMath.slotWidthFor(16, 100), EPS);
+        // Wide labels at a small radius hit the cap.
+        assertEquals(WheelMath.MAX_CHILD_SLOT, WheelMath.slotWidthFor(200, 100), EPS);
+        // Bigger radius → narrower slots for the same content.
+        assertTrue(WheelMath.slotWidthFor(84, 300) < WheelMath.slotWidthFor(84, 150));
     }
 
     @Test
-    void eightChildrenAtTheCapFillTheWholeRing() {
-        assertTrue(WheelMath.childArcIsFullCircle(8));
-        assertTrue(WheelMath.childArcIsFullCircle(12));
-        assertFalse(WheelMath.childArcIsFullCircle(4));
-        // Every angle lands in some slot when the arc is a full circle.
-        for (double a = 0; a < TAU; a += 0.05) {
-            assertTrue(WheelMath.childSlot(a, Math.PI / 3, 8) >= 0, "angle=" + a);
-        }
+    void capacityFollowsSlotWidth() {
+        assertEquals(8, WheelMath.arcCapacity(WheelMath.MAX_CHILD_SLOT)); // 45° slots: 8 max
+        assertEquals(22, WheelMath.arcCapacity(WheelMath.slotWidthFor(16, 100))); // icons pack in
+        assertTrue(WheelMath.arcCapacity(WheelMath.slotWidthFor(16, 200))
+                > WheelMath.arcCapacity(WheelMath.slotWidthFor(16, 100)));
     }
 
     @Test
-    void singleChildArcIsCenteredOnParent() {
+    void fullCircleDetection() {
+        assertTrue(WheelMath.arcIsFullCircle(8, WheelMath.MAX_CHILD_SLOT));
+        assertFalse(WheelMath.arcIsFullCircle(4, WheelMath.MAX_CHILD_SLOT));
+    }
+
+    @Test
+    void singleSlotArcIsCenteredOnParent() {
         double parent = Math.PI; // category at the bottom
-        assertEquals(parent, WheelMath.childSlotCenter(parent, 1, 0), EPS);
-        assertEquals(0, WheelMath.childSlot(parent, parent, 1));
+        double w = WheelMath.MAX_CHILD_SLOT;
+        assertEquals(parent, WheelMath.arcSlotCenter(parent, 1, w, 0), EPS);
+        assertEquals(0, WheelMath.arcSlot(parent, parent, 1, w));
         // Inside the slot's half-width still hits; outside misses.
-        double half = WheelMath.childSlotWidth(1) / 2;
-        assertEquals(0, WheelMath.childSlot(parent + half - 0.01, parent, 1));
-        assertEquals(-1, WheelMath.childSlot(parent + half + 0.01, parent, 1));
-        assertEquals(-1, WheelMath.childSlot(0, parent, 1));
+        assertEquals(0, WheelMath.arcSlot(parent + w / 2 - 0.01, parent, 1, w));
+        assertEquals(-1, WheelMath.arcSlot(parent + w / 2 + 0.01, parent, 1, w));
+        assertEquals(-1, WheelMath.arcSlot(0, parent, 1, w));
     }
 
     @Test
-    void multiChildArcFansAroundParentAndWraps() {
+    void multiSlotArcFansAroundParentAndWraps() {
         double parent = 0; // category at the top: arc spans across the 0/TAU wrap
-        double slot = WheelMath.childSlotWidth(3);
-        assertEquals(WheelMath.normalize(-slot), WheelMath.childSlotCenter(parent, 3, 0), EPS);
-        assertEquals(0, WheelMath.childSlotCenter(parent, 3, 1), EPS);
-        assertEquals(slot, WheelMath.childSlotCenter(parent, 3, 2), EPS);
+        double w = 0.4;
+        assertEquals(WheelMath.normalize(-w), WheelMath.arcSlotCenter(parent, 3, w, 0), EPS);
+        assertEquals(0, WheelMath.arcSlotCenter(parent, 3, w, 1), EPS);
+        assertEquals(w, WheelMath.arcSlotCenter(parent, 3, w, 2), EPS);
 
-        assertEquals(0, WheelMath.childSlot(WheelMath.normalize(-slot), parent, 3));
-        assertEquals(1, WheelMath.childSlot(0.0, parent, 3));
-        assertEquals(2, WheelMath.childSlot(slot, parent, 3));
-        assertEquals(-1, WheelMath.childSlot(Math.PI, parent, 3));
+        assertEquals(0, WheelMath.arcSlot(WheelMath.normalize(-w), parent, 3, w));
+        assertEquals(1, WheelMath.arcSlot(0.0, parent, 3, w));
+        assertEquals(2, WheelMath.arcSlot(w, parent, 3, w));
+        assertEquals(-1, WheelMath.arcSlot(Math.PI, parent, 3, w));
     }
 
     @Test
-    void childSlotCentersRoundTripThroughChildSlot() {
+    void arcSlotCentersRoundTripThroughArcSlot() {
         double parent = 3 * Math.PI / 2;
-        for (int count = 1; count <= 8; count++) {
-            for (int i = 0; i < count; i++) {
-                double center = WheelMath.childSlotCenter(parent, count, i);
-                assertEquals(i, WheelMath.childSlot(center, parent, count),
-                        "count=" + count + " i=" + i);
+        for (double w : new double[] {0.15, 0.3, WheelMath.MAX_CHILD_SLOT}) {
+            int max = WheelMath.arcCapacity(w);
+            for (int count = 1; count <= Math.min(12, max); count++) {
+                for (int i = 0; i < count; i++) {
+                    double center = WheelMath.arcSlotCenter(parent, count, w, i);
+                    assertEquals(i, WheelMath.arcSlot(center, parent, count, w),
+                            "w=" + w + " count=" + count + " i=" + i);
+                }
             }
         }
     }

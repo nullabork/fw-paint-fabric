@@ -50,4 +50,12 @@ public record WheelItem(String label, int labelColor, ItemStack icon, BooleanSup
     public boolean isSelected() {
         return selected != null && selected.getAsBoolean();
     }
+
+    /** True when one of this category's DIRECT children is the current selection. */
+    public boolean hasSelectedChild() {
+        for (WheelItem c : children) {
+            if (c.isSelected()) return true;
+        }
+        return false;
+    }
 }

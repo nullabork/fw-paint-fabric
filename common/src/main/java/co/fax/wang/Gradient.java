@@ -126,12 +126,12 @@ public final class Gradient {
         }
     }
 
-    /** Solid paint via the wheel: place the closest colour match instead of a picked block. */
-    public static void setSolidClosestColour() {
+    /** Solid paint via the wheel: switch how the placed block is chosen. */
+    public static void setSolidMatch(SolidMatch match) {
         GradientConfig cfg = ConfigManager.get();
-        cfg.solidMatch = SolidMatch.CLOSEST_COLOR;
+        cfg.solidMatch = match;
         ConfigManager.save();
-        overlay(Minecraft.getInstance(), "FW Paint — Solid: closest colour match");
+        overlay(Minecraft.getInstance(), "FW Paint — Solid: " + match.displayName());
     }
 
     /** Solid paint via the wheel: place exactly this block (selects it, like the Solid tab). */

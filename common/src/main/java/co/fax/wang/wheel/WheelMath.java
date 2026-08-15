@@ -48,32 +48,42 @@ public final class WheelMath {
         return (int) (normalize(angle + slot / 2) / slot) % count;
     }
 
-    /** Angular width of one child slot when a category has {@code count} children. */
-    public static double childSlotWidth(int count) {
-        return Math.min(TAU / count, MAX_CHILD_SLOT);
+    /** Arc padding (px) added around an item when sizing its slot's angular width. */
+    public static final double SLOT_ARC_PAD = 12;
+
+    /**
+     * Content-driven slot width: just wide enough that the slot's arc at {@code radius} holds
+     * the ring's widest item plus padding, capped at {@link #MAX_CHILD_SLOT}. Narrow items
+     * (16px block icons) get narrow slots, so far more fit around the circle than wide labels.
+     */
+    public static double slotWidthFor(int maxItemWidth, double radius) {
+        return Math.min(MAX_CHILD_SLOT, (maxItemWidth + SLOT_ARC_PAD) / Math.max(1, radius));
     }
 
-    /** True when {@code count} children fill the whole outer ring (no arc ends). */
-    public static boolean childArcIsFullCircle(int count) {
-        return count * childSlotWidth(count) >= TAU - 1e-9;
+    /** How many slots of {@code slotWidth} fit the full circle (the carousel threshold). */
+    public static int arcCapacity(double slotWidth) {
+        return (int) Math.floor(TAU / slotWidth + 1e-9);
     }
 
-    /** Center angle of child slot {@code i} in the arc fanned around {@code parentCenter}. */
-    public static double childSlotCenter(double parentCenter, int count, int i) {
-        double slot = childSlotWidth(count);
-        double start = parentCenter - count * slot / 2;
-        return normalize(start + slot * (i + 0.5));
+    /** True when {@code slots} slots of {@code slotWidth} fill the whole ring (no arc ends). */
+    public static boolean arcIsFullCircle(int slots, double slotWidth) {
+        return slots * slotWidth >= TAU - 1e-9;
+    }
+
+    /** Center angle of slot {@code i} in an arc of {@code slots} fanned around {@code parentCenter}. */
+    public static double arcSlotCenter(double parentCenter, int slots, double slotWidth, int i) {
+        double start = parentCenter - slots * slotWidth / 2;
+        return normalize(start + slotWidth * (i + 0.5));
     }
 
     /**
-     * Which child slot the angle falls in for an arc of {@code count} slots centered on
-     * {@code parentCenter}, or {@code -1} when the angle is outside the arc.
+     * Which slot the angle falls in for an arc of {@code slots} slots of {@code slotWidth}
+     * centered on {@code parentCenter}, or {@code -1} when the angle is outside the arc.
      */
-    public static int childSlot(double angle, double parentCenter, int count) {
-        double slot = childSlotWidth(count);
-        double half = count * slot / 2;
+    public static int arcSlot(double angle, double parentCenter, int slots, double slotWidth) {
+        double half = slots * slotWidth / 2;
         double d = delta(angle, parentCenter);
         if (d < -half || d >= half) return -1;
-        return Math.min(count - 1, (int) ((d + half) / slot));
+        return Math.min(slots - 1, (int) ((d + half) / slotWidth));
     }
 }

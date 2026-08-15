@@ -38,22 +38,25 @@ import java.util.function.BooleanSupplier;
 
 /**
  * The radial selector wheel. Held open by the wheel keybind (default G); releasing it (or Esc)
- * closes, keeping whatever was chosen. The inner ring holds the root slots — Paint, Markers,
- * Placement, Palette, and Disabled — and clicking a category fans its children out into an
- * outer arc around its angle (via {@link ExpandedRing}, which turns into a scrollable radial
- * carousel when a list outgrows the arc). The Palette slot's children follow the active paint
- * type: gradient palettes for Gradient/Noise paint, patterns for Pattern paint, and for Solid
- * paint "Closest colour" followed by every unique placeable block in the configured source
- * (Oklab colour-sorted like the list views; clicking one selects it as the Solid block).
- * Clicking a child applies it exactly like the old cycle hotkeys did (persisted to config +
- * action-bar flash); the wheel stays open so several things can be set in one hold. The donut
- * hole always shows the current paint type + placement mode, mirroring the HUD.
+ * closes, keeping whatever was chosen. Three ring levels: the root holds <b>Paint</b>,
+ * <b>Place</b>, and <b>Palette</b>; hovering a category fans its children into the next ring
+ * out (clicking is reserved for the actual options). Paint fans the paint types; Place fans
+ * <b>Blocks</b> (Single/Face/Face perp/3D Fill), <b>Markers</b> (Marker/Marker draw), and
+ * <b>Shape markers</b> (Marker box/circle/square), each fanning a third ring of modes. The
+ * Palette ring follows the active paint type (palettes, patterns, or the Solid block picker,
+ * Oklab colour-sorted like the list views) and becomes a scrollable radial carousel when it
+ * outgrows the arc ({@link ExpandedRing}). The category wedge DIRECTLY holding the current
+ * selection gets a blue-tinted background, so where the active choice lives reads at a
+ * glance without opening anything. Clicking a
+ * leaf applies it exactly like the old hotkeys did (persisted + action-bar flash); the wheel
+ * stays open so several things can be set in one hold. The donut hole always shows the current
+ * paint type + placement mode, mirroring the HUD.
  *
- * <p>Ring radii come from {@link WheelLayout}, solved from the pixel widths of every label when
- * the wheel opens (across every possible Palette-ring variant) — longer labels make a bigger
- * wheel from the start, nothing resizes live. The donut is painted per-pixel (with horizontal
- * run merging into {@code fill} calls) — the 26.2 render-state GUI only exposes axis-aligned
- * fills, and even a large wheel is well under ~100k pixel tests per frame, which is nothing.
+ * <p>Ring radii come from {@link WheelLayout}, solved from the pixel widths of every label
+ * when the wheel opens (across every possible Palette-ring variant) — longer labels make a
+ * bigger wheel from the start, nothing resizes live. The donut is painted per-pixel (with
+ * horizontal run merging into {@code fill} calls) — the 26.2 render-state GUI only exposes
+ * axis-aligned fills, and even a large wheel is well under ~100k pixel tests per frame.
  */
 public class WheelScreen extends Screen {
 
@@ -66,18 +69,21 @@ public class WheelScreen extends Screen {
     private static final int COL_MISSING_HOVER = 0xC8D04040;
     private static final int COL_CROSS = 0xFFFF4040;         // the X over a missing block icon
     private static final int COL_SEPARATOR = 0x38FFFFFF;     // thin line between slots
+    private static final int COL_SEMI = 0xC81A3A78;          // category directly holding the selection
+    private static final int COL_SEMI_HOVER = 0xC82E5498;
     private static final int COL_DIM = 0x48000000;           // full-screen dim behind the wheel
     private static final int WHITE = 0xFFFFFFFF;
     private static final int GREY = 0xFFA0A0A0;
 
     /** Root slot whose children are rebuilt from the active paint type on every expansion. */
-    private static final int PALETTE_INDEX = 3;
+    private static final int PALETTE_INDEX = 2;
 
     private final List<WheelItem> root;
     private final WheelLayout layout;
 
-    /** The category currently fanned out into the outer ring, or null. */
-    private ExpandedRing expanded;
+    /** The fanned-out rings: level 1 (children of a root category) and level 2, or null. */
+    private ExpandedRing expanded1;
+    private ExpandedRing expanded2;
 
     public WheelScreen() {
         super(Component.literal("FW Paint selector wheel"));
@@ -96,22 +102,22 @@ public class WheelScreen extends Screen {
                     () -> ConfigManager.get().activePaintType == t,
                     () -> Gradient.setPaintType(t)));
         }
-        List<WheelItem> markers = new ArrayList<>();
-        List<WheelItem> placing = new ArrayList<>();
-        for (PlacementMode m : PlacementMode.values()) {
-            if (m == PlacementMode.DISABLED) continue;
-            (m.isMarker() ? markers : placing).add(modeLeaf(m));
-        }
+        WheelItem blocks = WheelItem.category("Blocks",
+                modeLeaf(PlacementMode.SINGLE), modeLeaf(PlacementMode.FACE),
+                modeLeaf(PlacementMode.FACE_PERP), modeLeaf(PlacementMode.FILL3D));
+        WheelItem markers = WheelItem.category("Markers",
+                modeLeaf(PlacementMode.MARKER), modeLeaf(PlacementMode.MARKER_DRAW));
+        WheelItem shapes = WheelItem.category("Shape markers",
+                modeLeaf(PlacementMode.MARKER_BOX), modeLeaf(PlacementMode.MARKER_CIRCLE),
+                modeLeaf(PlacementMode.MARKER_SQUARE));
         return List.of(
                 WheelItem.category("Paint", paints.toArray(WheelItem[]::new)),
-                WheelItem.category("Markers", markers.toArray(WheelItem[]::new)),
-                WheelItem.category("Placement", placing.toArray(WheelItem[]::new)),
+                WheelItem.category("Place", blocks, markers, shapes),
                 // Children here are only the open-time snapshot (they make it a category and
                 // feed the layout); every expansion rebuilds them for the paint type of the
-                // moment — see mouseClicked.
+                // moment — see updateExpansion.
                 WheelItem.category("Palette",
-                        paletteChildren(mc, ConfigManager.get().activePaintType).toArray(WheelItem[]::new)),
-                modeLeaf(PlacementMode.DISABLED));
+                        paletteChildren(mc, ConfigManager.get().activePaintType).toArray(WheelItem[]::new)));
     }
 
     private static WheelItem modeLeaf(PlacementMode m) {
@@ -120,9 +126,21 @@ public class WheelScreen extends Screen {
                 () -> Gradient.setPlacementMode(m));
     }
 
-    /** The Palette ring's items for a paint type: palettes, patterns, or the Solid block picker. */
+    /**
+     * The Palette ring's items for a paint type: palettes, patterns, or — for Solid — the
+     * match modes, with "Select block" fanning the inventory block picker onto the next ring.
+     */
     private static List<WheelItem> paletteChildren(Minecraft mc, PaintType type) {
-        if (type == PaintType.SOLID) return solidChildren(mc);
+        if (type == PaintType.SOLID) {
+            List<WheelItem> blocks = solidBlockItems(mc);
+            WheelItem select = blocks.isEmpty()
+                    ? WheelItem.leaf("No blocks in inventory", GREY, null, () -> {})
+                    : WheelItem.category("Select block", blocks.toArray(WheelItem[]::new));
+            return List.of(select,
+                    matchLeaf(SolidMatch.EXACT, "Exact block"),
+                    matchLeaf(SolidMatch.CLOSEST_COLOR, "Closest colour"),
+                    matchLeaf(SolidMatch.CLOSEST_BRIGHTNESS, "Closest brightness"));
+        }
         PaletteKind kind = Gradient.kindFor(type);
         List<Palette> list = PaletteStore.allOf(kind);
         if (list.isEmpty()) {
@@ -145,6 +163,12 @@ public class WheelScreen extends Screen {
                     : WheelItem.leaf(p.name, WHITE, selected, action));
         }
         return out;
+    }
+
+    private static WheelItem matchLeaf(SolidMatch m, String label) {
+        return WheelItem.leaf(label, WHITE,
+                () -> ConfigManager.get().solidMatch == m,
+                () -> Gradient.setSolidMatch(m));
     }
 
     /** Inventory slot range [from, to) for a block source (the idiom every scan here uses). */
@@ -171,15 +195,12 @@ public class WheelScreen extends Screen {
     }
 
     /**
-     * Solid paint's ring: "Closest colour" first, then the unique placeable blocks from the
-     * configured source range (the same scan the Solid tab does), skipping excluded blocks and
-     * Oklab colour-sorted like the list views.
+     * The Select-block ring: the unique placeable blocks from the configured source range (the
+     * same scan the Solid tab does), skipping excluded blocks and Oklab colour-sorted like the
+     * list views. Clicking one makes it the Solid block.
      */
-    private static List<WheelItem> solidChildren(Minecraft mc) {
+    private static List<WheelItem> solidBlockItems(Minecraft mc) {
         List<WheelItem> out = new ArrayList<>();
-        out.add(WheelItem.leaf("Closest colour", WHITE,
-                () -> ConfigManager.get().solidMatch == SolidMatch.CLOSEST_COLOR,
-                Gradient::setSolidClosestColour));
         if (mc.player == null) return out;
         GradientConfig cfg = ConfigManager.get();
         var items = mc.player.getInventory().getNonEquipmentItems();
@@ -234,48 +255,72 @@ public class WheelScreen extends Screen {
      * never resizes live".
      */
     private static WheelLayout computeLayout(Font font, List<WheelItem> root, Minecraft mc) {
-        int[] rootW = new int[root.size()];
-        int[][] childW = new int[root.size()][];
+        int n = root.size();
+        int[] rootW = new int[n];
+        WheelLayout.RingSpec[] level1 = new WheelLayout.RingSpec[n];
+        WheelLayout.RingSpec[][] level2 = new WheelLayout.RingSpec[n][];
         int centerW = 0;
-        for (int i = 0; i < root.size(); i++) {
+        for (int i = 0; i < n; i++) {
             WheelItem item = root.get(i);
             rootW[i] = font.width(item.label());
-            childW[i] = ringWidths(font, item.children());
-            for (WheelItem child : item.children()) {
-                if (child.icon() == null) {
-                    // The hole shows the current paint type + mode — those labels come from here.
-                    centerW = Math.max(centerW, font.width(child.label()));
+            List<WheelItem> children = item.children();
+            level1[i] = specOf(font, children);
+            level2[i] = new WheelLayout.RingSpec[children.size()];
+            for (int j = 0; j < children.size(); j++) {
+                if (children.get(j).isCategory()) {
+                    level2[i][j] = specOf(font, children.get(j).children());
                 }
             }
         }
-        int centerH = 2 * font.lineHeight + 2;
-        WheelLayout best = null;
-        for (PaintType type : new PaintType[] { PaintType.GRADIENT, PaintType.PATTERN, PaintType.SOLID }) {
-            childW[PALETTE_INDEX] = ringWidths(font, paletteChildren(mc, type));
-            WheelLayout l = WheelLayout.compute(font.lineHeight, centerW, centerH, rootW, childW);
-            if (best == null || l.r1Out > best.r1Out) best = l;
+        // The hole shows the current paint type + placement mode — those labels come from the
+        // Paint children and the Place grandchildren.
+        for (WheelItem child : root.get(0).children()) {
+            centerW = Math.max(centerW, font.width(child.label()));
         }
-        return best;
+        for (WheelItem group : root.get(1).children()) {
+            for (WheelItem mode : group.children()) {
+                centerW = Math.max(centerW, font.width(mode.label()));
+            }
+        }
+        // The Palette ring's content depends on the paint type, which can change while the
+        // wheel is open — merge every variant it could show into one conservative spec
+        // ("sized from the start, never resizes live").
+        int palCount = 0, palMax = 8;
+        WheelLayout.RingSpec blockSpec = null;
+        for (PaintType type : new PaintType[] { PaintType.GRADIENT, PaintType.PATTERN, PaintType.SOLID }) {
+            List<WheelItem> variant = paletteChildren(mc, type);
+            WheelLayout.RingSpec spec = specOf(font, variant);
+            palCount = Math.max(palCount, spec.count());
+            palMax = Math.max(palMax, spec.maxItemWidth());
+            for (WheelItem child : variant) {
+                if (child.isCategory()) blockSpec = specOf(font, child.children());
+            }
+        }
+        level1[PALETTE_INDEX] = new WheelLayout.RingSpec(palCount, palMax);
+        level2[PALETTE_INDEX] = new WheelLayout.RingSpec[Math.max(1, palCount)];
+        level2[PALETTE_INDEX][0] = blockSpec; // Select block sits first on the Solid ring
+        return WheelLayout.compute(font.lineHeight, centerW, 2 * font.lineHeight + 2,
+                rootW, level1, level2);
     }
 
-    /**
-     * Slot widths a ring presents to the layout: the actual label widths (16 for icon slots) —
-     * or, when the list overflows into a carousel, its fixed slot arc: an arrow, the visible
-     * item slots each as wide as the widest item (any item can scroll into any slot), an arrow.
-     */
-    private static int[] ringWidths(Font font, List<WheelItem> items) {
-        int[] w = new int[items.size()];
-        for (int i = 0; i < items.size(); i++) {
-            WheelItem it = items.get(i);
-            w[i] = it.icon() != null ? 16 : font.width(it.label());
+    /** A ring's layout summary: item count + the widest item (16 for icon slots). */
+    private static WheelLayout.RingSpec specOf(Font font, List<WheelItem> items) {
+        int max = 8;
+        for (WheelItem it : items) {
+            max = Math.max(max, it.icon() != null ? 16 : font.width(it.label()));
         }
-        if (items.size() <= ExpandedRing.MAX_SLOTS) return w;
-        int max = 16;
-        for (int width : w) max = Math.max(max, width);
-        int[] slots = new int[ExpandedRing.CAROUSEL_SLOTS];
-        java.util.Arrays.fill(slots, max);
-        slots[0] = slots[slots.length - 1] = font.width("<");
-        return slots;
+        return new WheelLayout.RingSpec(items.size(), max);
+    }
+
+    /** Build the fanned ring for a category at its level's solved radius. */
+    private static ExpandedRing makeRing(WheelItem category, List<WheelItem> children,
+                                         double parentAngle, double midRadius) {
+        Font font = Minecraft.getInstance().font;
+        int max = 8;
+        for (WheelItem it : children) {
+            max = Math.max(max, it.icon() != null ? 16 : font.width(it.label()));
+        }
+        return new ExpandedRing(category, children, parentAngle, max, midRadius);
     }
 
     @Override
@@ -283,9 +328,9 @@ public class WheelScreen extends Screen {
         return false;
     }
 
-    // ---- hit testing ----------------------------------------------------------------------
+    // ---- hit testing + hover expansion ------------------------------------------------------
 
-    /** ring: 0 = root, 1 = slots of {@link #expanded} (carousel arrows included). */
+    /** ring: 0 = root, 1 = {@link #expanded1}'s slots, 2 = {@link #expanded2}'s. */
     private record Hit(int ring, int index) {}
 
     private Hit hitAt(double mx, double my) {
@@ -295,11 +340,45 @@ public class WheelScreen extends Screen {
         if (r >= layout.r0In && r <= layout.r0Out) {
             return new Hit(0, WheelMath.rootSlot(angle, root.size()));
         }
-        if (expanded != null && r >= layout.r1In && r <= layout.r1Out) {
-            int i = expanded.slotAt(angle);
+        if (expanded1 != null && r >= layout.r1In && r <= layout.r1Out) {
+            int i = expanded1.slotAt(angle);
             if (i >= 0) return new Hit(1, i);
         }
+        if (expanded2 != null && r >= layout.r2In && r <= layout.r2Out) {
+            int i = expanded2.slotAt(angle);
+            if (i >= 0) return new Hit(2, i);
+        }
         return null;
+    }
+
+    /** Hovering a category fans it out; hovering a leaf collapses anything deeper than it. */
+    private void updateExpansion(Hit hover) {
+        if (hover == null) return;
+        if (hover.ring() == 0) {
+            WheelItem item = root.get(hover.index());
+            if (item.isCategory() && (expanded1 == null || expanded1.category != item)) {
+                // The Palette ring follows the paint type of the moment; the rest are static.
+                List<WheelItem> children = hover.index() == PALETTE_INDEX
+                        ? paletteChildren(Minecraft.getInstance(), ConfigManager.get().activePaintType)
+                        : item.children();
+                expanded1 = makeRing(item, children,
+                        WheelMath.rootSlotCenter(hover.index(), root.size()),
+                        (layout.r1In + layout.r1Out) / 2.0);
+                expanded2 = null;
+            }
+        } else if (hover.ring() == 1) {
+            WheelItem item = expanded1.itemAt(hover.index());
+            if (item == null) return; // carousel arrow — leave the expansion alone
+            if (item.isCategory()) {
+                if (expanded2 == null || expanded2.category != item) {
+                    expanded2 = makeRing(item, item.children(),
+                            expanded1.slotAngle(hover.index()),
+                            (layout.r2In + layout.r2Out) / 2.0);
+                }
+            } else {
+                expanded2 = null;
+            }
+        }
     }
 
     // ---- input ----------------------------------------------------------------------------
@@ -309,10 +388,21 @@ public class WheelScreen extends Screen {
         if (event.button() == 0) {
             Hit hit = hitAt(event.x(), event.y());
             if (hit != null) {
-                if (hit.ring() == 0) {
-                    clickRoot(hit.index());
-                } else {
-                    clickExpanded(hit.index());
+                ExpandedRing ring = hit.ring() == 1 ? expanded1 : hit.ring() == 2 ? expanded2 : null;
+                if (ring != null) {
+                    if (ring.isLeftArrow(hit.index())) {
+                        ring.scroll(-1);
+                    } else if (ring.isRightArrow(hit.index())) {
+                        ring.scroll(1);
+                    } else {
+                        WheelItem item = ring.itemAt(hit.index());
+                        // Apply but stay open — the wheel only closes on key release / Esc, so
+                        // paint, placement, and palette can all be set in one hold. Categories
+                        // expand on hover; clicks are reserved for the actual options.
+                        if (item != null && !item.isCategory() && item.action() != null) {
+                            item.action().run();
+                        }
+                    }
                 }
                 return true;
             }
@@ -320,43 +410,12 @@ public class WheelScreen extends Screen {
         return super.mouseClicked(event, doubled);
     }
 
-    private void clickRoot(int index) {
-        WheelItem item = root.get(index);
-        if (item.isCategory()) {
-            if (expanded != null && expanded.category == item) {
-                expanded = null;
-            } else {
-                // The Palette ring follows the paint type of the moment; the rest are static.
-                List<WheelItem> children = index == PALETTE_INDEX
-                        ? paletteChildren(Minecraft.getInstance(), ConfigManager.get().activePaintType)
-                        : item.children();
-                expanded = new ExpandedRing(item, children,
-                        WheelMath.rootSlotCenter(index, root.size()));
-            }
-        } else if (item.action() != null) {
-            item.action().run();
-        }
-    }
-
-    private void clickExpanded(int slot) {
-        if (expanded.isLeftArrow(slot)) {
-            expanded.scroll(-1);
-            return;
-        }
-        if (expanded.isRightArrow(slot)) {
-            expanded.scroll(1);
-            return;
-        }
-        WheelItem item = expanded.itemAt(slot);
-        // Apply but stay open — the wheel only closes on key release / Esc, so paint type,
-        // placement, and palette can all be set in one hold.
-        if (item != null && item.action() != null) item.action().run();
-    }
-
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        if (expanded != null && expanded.carousel() && scrollY != 0) {
-            expanded.scroll(scrollY > 0 ? -1 : 1);
+        ExpandedRing carousel = expanded2 != null && expanded2.carousel() ? expanded2
+                : expanded1 != null && expanded1.carousel() ? expanded1 : null;
+        if (carousel != null && scrollY != 0) {
+            carousel.scroll(scrollY > 0 ? -1 : 1);
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
@@ -388,6 +447,8 @@ public class WheelScreen extends Screen {
 
         int cx = this.width / 2, cy = this.height / 2;
         Hit hover = hitAt(mouseX, mouseY);
+        updateExpansion(hover);
+        hover = hitAt(mouseX, mouseY); // a fresh expansion can put a ring under the cursor
         paintRings(g, cx, cy, hover);
         paintSlotContents(g, cx, cy);
 
@@ -398,50 +459,82 @@ public class WheelScreen extends Screen {
 
         // Below the wheel: the hovered icon-slot's name (icons carry no label), then the
         // carousel window position.
-        int maxR = expanded == null ? layout.r0Out : layout.r1Out;
+        int maxR = maxRadius();
         int belowY = cy + maxR + 6;
-        if (hover != null && hover.ring() == 1) {
-            WheelItem item = expanded.itemAt(hover.index());
+        if (hover != null && hover.ring() >= 1) {
+            ExpandedRing ring = hover.ring() == 1 ? expanded1 : expanded2;
+            WheelItem item = ring == null ? null : ring.itemAt(hover.index());
             if (item != null && item.icon() != null) {
                 g.centeredText(this.font, item.label(), cx, belowY, WHITE);
                 belowY += this.font.lineHeight + 2;
             }
         }
-        if (expanded != null && expanded.carousel()) {
-            String pos = (expanded.offset() + 1) + "-"
-                    + Math.min(expanded.offset() + ExpandedRing.CAROUSEL_ITEMS, expanded.items.size())
-                    + " of " + expanded.items.size();
+        ExpandedRing carousel = expanded2 != null && expanded2.carousel() ? expanded2
+                : expanded1 != null && expanded1.carousel() ? expanded1 : null;
+        if (carousel != null) {
+            String pos = (carousel.offset() + 1) + "-"
+                    + Math.min(carousel.offset() + carousel.visibleItems(), carousel.items.size())
+                    + " of " + carousel.items.size();
             g.centeredText(this.font, pos, cx, belowY, GREY);
         }
     }
 
-    /** Color for one slot given its state; selection wins over hover, hover over expansion. */
-    private static int slotColor(boolean selected, boolean missing, boolean hovered, boolean expandedSlot) {
+    private int maxRadius() {
+        if (expanded2 != null) return layout.r2Out;
+        if (expanded1 != null) return layout.r1Out;
+        return layout.r0Out;
+    }
+
+    /**
+     * Color for one slot given its state; selection wins over hover, hover over the semi
+     * (parent-of-selection) tint, and that over plain expansion.
+     */
+    private static int slotColor(boolean selected, boolean missing, boolean hovered,
+                                 boolean semi, boolean expandedSlot) {
         if (selected) {
             if (missing) return hovered ? COL_MISSING_HOVER : COL_MISSING;
             return hovered ? COL_SELECTED_HOVER : COL_SELECTED;
         }
+        if (semi) return hovered ? COL_SEMI_HOVER : COL_SEMI;
         if (hovered) return COL_HOVER;
         return expandedSlot ? COL_EXPANDED : COL_BASE;
     }
 
-    /** Per-pixel scan of both rings, merging same-colored horizontal runs into fills. */
+    /** Per-slot render state for one ring, resolved once per frame. */
+    private record RingState(ExpandedRing ring, boolean[] selected, boolean[] missing,
+                             boolean[] semi, int hoverSlot, int expandedSlot) {}
+
+    private RingState stateOf(ExpandedRing ring, Hit hover, int hoverRing, WheelItem expandedChild) {
+        int count = ring.slotCount();
+        boolean[] sel = new boolean[count];
+        boolean[] miss = new boolean[count];
+        boolean[] semi = new boolean[count];
+        int expandedSlot = -1;
+        for (int i = 0; i < count; i++) {
+            WheelItem item = ring.itemAt(i);
+            if (item == null) continue;
+            sel[i] = item.isSelected();
+            miss[i] = item.missing();
+            semi[i] = item.hasSelectedChild();
+            if (expandedChild != null && item == expandedChild) expandedSlot = i;
+        }
+        int hoverSlot = hover != null && hover.ring() == hoverRing ? hover.index() : -1;
+        return new RingState(ring, sel, miss, semi, hoverSlot, expandedSlot);
+    }
+
+    /** Per-pixel scan of all rings, merging same-colored horizontal runs into fills. */
     private void paintRings(GuiGraphicsExtractor g, int cx, int cy, Hit hover) {
         int rootCount = root.size();
-        int slotCount = expanded == null ? 0 : expanded.slotCount();
         int hoverRoot = hover != null && hover.ring() == 0 ? hover.index() : -1;
-        int hoverChild = hover != null && hover.ring() == 1 ? hover.index() : -1;
-        int expandedIndex = expanded == null ? -1 : root.indexOf(expanded.category);
-        int maxR = expanded == null ? layout.r0Out : layout.r1Out;
-
-        // Selected/missing state per slot, resolved once per frame.
-        boolean[] slotSelected = new boolean[slotCount];
-        boolean[] slotMissing = new boolean[slotCount];
-        for (int i = 0; i < slotCount; i++) {
-            WheelItem item = expanded.itemAt(i);
-            slotSelected[i] = item != null && item.isSelected();
-            slotMissing[i] = item != null && item.missing();
+        int expandedRoot = expanded1 == null ? -1 : root.indexOf(expanded1.category);
+        boolean[] rootSemi = new boolean[rootCount];
+        for (int i = 0; i < rootCount; i++) {
+            rootSemi[i] = root.get(i).hasSelectedChild();
         }
+        RingState s1 = expanded1 == null ? null
+                : stateOf(expanded1, hover, 1, expanded2 == null ? null : expanded2.category);
+        RingState s2 = expanded2 == null ? null : stateOf(expanded2, hover, 2, null);
+        int maxR = maxRadius();
 
         for (int y = cy - maxR; y <= cy + maxR; y++) {
             int runStart = 0, runColor = 0;
@@ -453,17 +546,15 @@ public class WheelScreen extends Screen {
                     if (r >= layout.r0In && r <= layout.r0Out) {
                         double angle = WheelMath.angleOf(dx, dy);
                         int slot = WheelMath.rootSlot(angle, rootCount);
-                        color = slotColor(root.get(slot).isSelected(), false, slot == hoverRoot,
-                                slot == expandedIndex);
-                        if (rootCount > 1 && onRootBoundary(angle, rootCount, r)) color = COL_SEPARATOR;
-                    } else if (slotCount > 0 && r >= layout.r1In && r <= layout.r1Out) {
-                        double angle = WheelMath.angleOf(dx, dy);
-                        int slot = expanded.slotAt(angle);
-                        if (slot >= 0) {
-                            color = slotColor(slotSelected[slot], slotMissing[slot],
-                                    slot == hoverChild, false);
-                            if (onChildBoundary(angle, slotCount, r)) color = COL_SEPARATOR;
+                        color = slotColor(false, false, slot == hoverRoot,
+                                rootSemi[slot], slot == expandedRoot);
+                        if (rootCount > 1 && onRootBoundary(angle, rootCount, r)) {
+                            color = COL_SEPARATOR;
                         }
+                    } else if (s1 != null && r >= layout.r1In && r <= layout.r1Out) {
+                        color = arcPixel(s1, dx, dy, r, layout.r1In, layout.r1Out);
+                    } else if (s2 != null && r >= layout.r2In && r <= layout.r2Out) {
+                        color = arcPixel(s2, dx, dy, r, layout.r2In, layout.r2Out);
                     }
                 }
                 if (color != runColor) {
@@ -475,6 +566,16 @@ public class WheelScreen extends Screen {
         }
     }
 
+    /** One arc ring's pixel: slot fill or separator line. */
+    private int arcPixel(RingState s, double dx, double dy, double r, int rIn, int rOut) {
+        double angle = WheelMath.angleOf(dx, dy);
+        int slot = s.ring().slotAt(angle);
+        if (slot < 0) return 0;
+        if (onArcBoundary(s.ring(), angle, r)) return COL_SEPARATOR;
+        return slotColor(s.selected()[slot], s.missing()[slot],
+                slot == s.hoverSlot(), s.semi()[slot], slot == s.expandedSlot());
+    }
+
     /** True when the pixel sits within ~0.8px of a root slot boundary line. */
     private boolean onRootBoundary(double angle, int count, double r) {
         double slot = WheelMath.TAU / count;
@@ -482,17 +583,18 @@ public class WheelScreen extends Screen {
         return Math.min(off, slot - off) * r < 0.8;
     }
 
-    /** True near an interior boundary of the child arc (not its two outer ends). */
-    private boolean onChildBoundary(double angle, int count, double r) {
+    /** True near an interior boundary of an arc ring (not its two outer ends). */
+    private boolean onArcBoundary(ExpandedRing ring, double angle, double r) {
+        int count = ring.slotCount();
         if (count < 2) return false;
-        double slot = WheelMath.childSlotWidth(count);
-        double fromStart = WheelMath.delta(angle, expanded.parentAngle) + count * slot / 2;
+        double slot = ring.slotWidth;
+        double fromStart = WheelMath.delta(angle, ring.parentAngle) + count * slot / 2;
         double off = fromStart % slot;
         double distance = Math.min(off, slot - off) * r;
         if (distance >= 0.8) return false;
         // A full-circle arc has no ends; otherwise exclude them — only boundaries strictly
         // between slots count.
-        return WheelMath.childArcIsFullCircle(count)
+        return WheelMath.arcIsFullCircle(count, slot)
                 || (fromStart > slot / 2 && fromStart < count * slot - slot / 2);
     }
 
@@ -503,30 +605,38 @@ public class WheelScreen extends Screen {
             drawLabelAt(g, cx, cy, root.get(i).label(), root.get(i).labelColor(),
                     WheelMath.rootSlotCenter(i, root.size()), mid0);
         }
-        if (expanded == null) return;
-        double mid1 = (layout.r1In + layout.r1Out) / 2.0;
         List<int[]> crosses = new ArrayList<>(); // missing icons get their X above the sprites
-        for (int slot = 0; slot < expanded.slotCount(); slot++) {
-            double angle = expanded.slotAngle(slot);
-            if (expanded.isLeftArrow(slot)) {
-                drawLabelAt(g, cx, cy, "<", expanded.canScroll(-1) ? WHITE : GREY, angle, mid1);
-            } else if (expanded.isRightArrow(slot)) {
-                drawLabelAt(g, cx, cy, ">", expanded.canScroll(1) ? WHITE : GREY, angle, mid1);
-            } else {
-                WheelItem item = expanded.itemAt(slot);
-                if (item.icon() != null) {
-                    int x = cx + (int) Math.round(Math.sin(angle) * mid1);
-                    int y = cy - (int) Math.round(Math.cos(angle) * mid1);
-                    g.item(item.icon(), x - 8, y - 8);
-                    if (item.missing()) crosses.add(new int[] {x - 8, y - 8});
-                } else {
-                    drawLabelAt(g, cx, cy, item.label(), item.labelColor(), angle, mid1);
-                }
-            }
+        if (expanded1 != null) {
+            paintArcContents(g, cx, cy, expanded1, (layout.r1In + layout.r1Out) / 2.0, crosses);
+        }
+        if (expanded2 != null) {
+            paintArcContents(g, cx, cy, expanded2, (layout.r2In + layout.r2Out) / 2.0, crosses);
         }
         if (!crosses.isEmpty()) {
             g.nextStratum(); // item sprites render on their own layer; the X must sit above them
             for (int[] c : crosses) drawCross(g, c[0], c[1]);
+        }
+    }
+
+    private void paintArcContents(GuiGraphicsExtractor g, int cx, int cy, ExpandedRing ring,
+                                  double mid, List<int[]> crosses) {
+        for (int slot = 0; slot < ring.slotCount(); slot++) {
+            double angle = ring.slotAngle(slot);
+            if (ring.isLeftArrow(slot)) {
+                drawLabelAt(g, cx, cy, "<", ring.canScroll(-1) ? WHITE : GREY, angle, mid);
+            } else if (ring.isRightArrow(slot)) {
+                drawLabelAt(g, cx, cy, ">", ring.canScroll(1) ? WHITE : GREY, angle, mid);
+            } else {
+                WheelItem item = ring.itemAt(slot);
+                if (item.icon() != null) {
+                    int x = cx + (int) Math.round(Math.sin(angle) * mid);
+                    int y = cy - (int) Math.round(Math.cos(angle) * mid);
+                    g.item(item.icon(), x - 8, y - 8);
+                    if (item.missing()) crosses.add(new int[] {x - 8, y - 8});
+                } else {
+                    drawLabelAt(g, cx, cy, item.label(), item.labelColor(), angle, mid);
+                }
+            }
         }
     }
 

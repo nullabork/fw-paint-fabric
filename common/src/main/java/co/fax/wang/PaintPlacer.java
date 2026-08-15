@@ -91,6 +91,7 @@ public final class PaintPlacer {
         int progress;  // outside-marker gradient: next cell index to place
         PaletteChoice.Ramp ramp; // outside-marker gradient: this column's resolved ramp
         int cells;               // outside-marker gradient: column length per the sizing mode
+        boolean inRegion;        // seeded inside a shape/box region: the column stays on its side
 
         Column(BlockPos base, int next, int progress) {
             this.base = base;
@@ -152,7 +153,9 @@ public final class PaintPlacer {
         updatePreviewAndSourcing(mc, cfg, pm);
 
         boolean down = mc.options.keyUse.isDown();
-        if (down && !lastUseDown) start(mc, cfg, pm);
+        // Aiming at a shape-marker control block: right-click belongs to the shape (extrude),
+        // not to painting.
+        if (down && !lastUseDown && !co.fax.wang.shape.ShapeMarkers.controlAimed()) start(mc, cfg, pm);
         if (active && down) {
             if (mode == PlacementMode.FILL3D && !regionFill) tickFill(mc);
             else if (mode != PlacementMode.FILL3D) tickColumns(mc);
@@ -324,11 +327,16 @@ public final class PaintPlacer {
     private record EndScan(int boundary, Block colour) {}
 
     private static EndScan scanEnd(Minecraft mc, BlockPos base, Direction dir, int firstAir) {
+        // Inside a shape/box region the column ends where it would leave the region — the region
+        // edge bounds and sizes the gradient exactly like an end marker.
+        boolean inRegion = co.fax.wang.shape.ShapeMarkers.contains(base.relative(dir, firstAir));
         int boundary = -1;
         for (int k = firstAir; k <= SCAN_LIMIT; k++) {
             BlockPos p = base.relative(dir, k);
             var state = mc.level.getBlockState(p);
-            if (boundary < 0 && (MarkerManager.endMarkers.contains(p) || !state.isAir())) {
+            if (boundary < 0 && (MarkerManager.endMarkers.contains(p)
+                    || (inRegion && !co.fax.wang.shape.ShapeMarkers.contains(p))
+                    || !state.isAir())) {
                 boundary = k;
             }
             if (!state.isAir()) return new EndScan(boundary, state.getBlock());
@@ -355,9 +363,11 @@ public final class PaintPlacer {
                 bases = perpRun(mc, seed, dir, p -> MarkerManager.startMarkers.contains(p));
                 markerDriven = true;
             } else {
+                boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(clicked.relative(dir));
                 bases = perpRun(mc, clicked, dir, p -> !mc.level.getBlockState(p).isAir()
                         && mc.level.getBlockState(p.relative(dir)).isAir()
                         && !MarkerManager.endMarkers.contains(p.relative(dir))
+                        && (!regionOnly || co.fax.wang.shape.ShapeMarkers.contains(p.relative(dir)))
                         && !outOfReach(mc, p.relative(dir)));
             }
         } else {
@@ -369,6 +379,7 @@ public final class PaintPlacer {
             int first = firstAirOffset(mc, base, dir);
             if (first <= 0) continue;
             Column col = new Column(base, first, 0);
+            col.inRegion = co.fax.wang.shape.ShapeMarkers.contains(base.relative(dir, first));
             if (type == PaintType.GRADIENT) {
                 col.progress = GradientCaches.columnProgress(mode, base.relative(dir, first - 1), dir);
                 // Resolve this column's ramp: start anchor = the block the column grows from,
@@ -423,8 +434,11 @@ public final class PaintPlacer {
             if (level && c.next > minNext) continue; // waits for the lower columns to catch up
             BlockPos cell = c.base.relative(dir, c.next);
             // An end marker bounds the column even in air; a marker on a block is also caught by
-            // the air check like any obstruction.
+            // the air check like any obstruction. A shape/box region bounds it the same way:
+            // the column stays on the side of the region boundary it started on.
             if (MarkerManager.endMarkers.contains(cell)
+                    || (co.fax.wang.shape.ShapeMarkers.any()
+                            && co.fax.wang.shape.ShapeMarkers.contains(cell) != c.inRegion)
                     || !mc.level.getBlockState(cell).isAir() || outOfReach(mc, cell)) {
                 it.remove();
                 continue;
@@ -548,6 +562,9 @@ public final class PaintPlacer {
         List<BlockPos> out = new ArrayList<>();
         ArrayDeque<BlockPos> bfs = new ArrayDeque<>();
         Set<BlockPos> seen = new HashSet<>();
+        // Clicking into a shape/box region keeps the flood inside it: on a donut band that
+        // selects exactly the ring's faces, so the cylinder wall paints as one.
+        boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(clicked.relative(dir));
         bfs.add(clicked);
         seen.add(clicked);
         while (!bfs.isEmpty() && out.size() < MAX_FACES) {
@@ -562,6 +579,7 @@ public final class PaintPlacer {
                     BlockPos front = n.relative(dir);
                     if (!mc.level.getBlockState(front).isAir()) continue;     // face not exposed on this plane
                     if (MarkerManager.endMarkers.contains(front)) continue;   // marker right on the face
+                    if (regionOnly && !co.fax.wang.shape.ShapeMarkers.contains(front)) continue;
                     if (outOfReach(mc, front)) continue;
                     seen.add(n);
                     bfs.add(n);
@@ -601,8 +619,9 @@ public final class PaintPlacer {
             return;
         }
         growCooldown = HOLD_DELAY; // a beat after the first shell, so a tap can stay one shell
-        spaceConstrained = !MarkerManager.startMarkers.isEmpty();
-        startedInSpace = spaceConstrained && inMarkerSpace(seed);
+        spaceConstrained = !MarkerManager.startMarkers.isEmpty()
+                || co.fax.wang.shape.ShapeMarkers.any();
+        startedInSpace = spaceConstrained && inSpace(seed);
         visited.add(center);
         if (!seed.equals(center)) visited.add(seed); // resuming: grow outward from the click too
         radius = (int) Math.ceil(Math.sqrt(seed.distSqr(center)));
@@ -637,7 +656,7 @@ public final class PaintPlacer {
                 if (n.distSqr(center) > r2) continue;
                 if (!mc.level.getBlockState(n).isAir()) continue; // walls block the fill
                 if (MarkerManager.endMarkers.contains(n)) continue; // end markers bound it even in air
-                if (spaceConstrained && inMarkerSpace(n) != startedInSpace) continue;
+                if (spaceConstrained && inSpace(n) != startedInSpace) continue;
                 if (outOfReach(mc, n)) continue;
                 visited.add(n);
                 fresh.add(n);
@@ -678,13 +697,23 @@ public final class PaintPlacer {
         return false;
     }
 
+    /** Marker space OR a shape/box region — the combined containment the 3D fill respects. */
+    private static boolean inSpace(BlockPos cell) {
+        return inMarkerSpace(cell) || co.fax.wang.shape.ShapeMarkers.contains(cell);
+    }
+
     // ---- in-marker noise region fill ----------------------------------------------------------------
 
     /** The classic noise fill: flood the marked region the crosshair points into, all at once. */
     private static boolean tryNoiseRegionFill(Minecraft mc) {
-        if (MarkerManager.startMarkers.isEmpty() || MarkerManager.endMarkers.isEmpty()) return false;
+        boolean haveMarkers = !MarkerManager.startMarkers.isEmpty()
+                && !MarkerManager.endMarkers.isEmpty();
+        boolean haveRegions = co.fax.wang.shape.ShapeMarkers.any();
+        if (!haveMarkers && !haveRegions) return false;
         int maxDist = Math.max(1, ConfigManager.get().maxMarkerDistance);
-        FloodFill.Region region = (x, y, z) -> NoisePlacer.inMarkedSegment(x, y, z, maxDist);
+        FloodFill.Region region = (x, y, z) ->
+                (haveMarkers && NoisePlacer.inMarkedSegment(x, y, z, maxDist))
+                || (haveRegions && co.fax.wang.shape.ShapeMarkers.contains(new BlockPos(x, y, z)));
         FloodFill.AirTest air = (x, y, z) -> mc.level.getBlockState(new BlockPos(x, y, z)).isAir();
         int[][] seed = NoisePlacer.raycastSeed(mc, region, air);
         if (seed == null) return false; // not aimed into a region — fall through to the blob fill
@@ -814,6 +843,10 @@ public final class PaintPlacer {
                 if (i > 0 && i < length) return new Seg(s, e, i, length);
             }
         }
+        // Shape/box regions: inside one, the segment runs from the region's start plane to its
+        // end plane (box: corner A's side → corner B's; rings: base plane → extrusion far end).
+        co.fax.wang.shape.RingShape.Segment rs = co.fax.wang.shape.ShapeMarkers.segmentFor(cell);
+        if (rs != null) return new Seg(rs.start(), rs.end(), rs.index(), rs.length());
         return null;
     }
 
@@ -875,11 +908,13 @@ public final class PaintPlacer {
                 }
                 case FACE_PERP -> {
                     BlockPos seed = findMarkerBehind(b, d);
+                    boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(b.relative(d));
                     List<BlockPos> bases = (seed != null)
                             ? perpRun(mc, seed, d, p -> MarkerManager.startMarkers.contains(p))
                             : perpRun(mc, b, d, p -> !mc.level.getBlockState(p).isAir()
                                     && mc.level.getBlockState(p.relative(d)).isAir()
                                     && !MarkerManager.endMarkers.contains(p.relative(d))
+                                    && (!regionOnly || co.fax.wang.shape.ShapeMarkers.contains(p.relative(d)))
                                     && !outOfReach(mc, p.relative(d)));
                     for (BlockPos base : bases) addFrontPreview(mc, base, d);
                 }

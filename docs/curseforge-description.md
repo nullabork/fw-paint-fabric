@@ -12,7 +12,7 @@ everywhere. A **Finder** tab ranks every block in the game by colour. Any paint 
 any placement mode, with or without markers. Placement is the legit, multiplayer-safe way
 (normal block-place interactions the server validates), so it works on servers.
 
-> **v2 beta.** Palettes replace v1's per-tool block picker. v1 gradient settings are not
+> **v2.** Palettes replace v1's per-tool block picker. v1 gradient settings are not
 > migrated — build your first palette on the Palette tab and you're going again in a minute.
 
 ## Quick start
@@ -31,13 +31,18 @@ any placement mode, with or without markers. Placement is the legit, multiplayer
 ## Keybinds
 
 - **K** — open / close the FW Paint screen (lands on the Paint quick-controls tab)
-- **G** (hold) — the selector wheel: **Paint** fans out the paint types (Solid / Gradient /
-  Pattern / Noise), **Markers** the marker tools (Marker / Marker corners / Marker draw),
-  **Placement** where blocks go (Single / Face / Face perp / 3D Fill), **Palette** the
-  palettes/patterns for the current paint type (or, with Solid paint, Closest colour + your
-  inventory's blocks in colour order), and **Disabled** turns the tool off. Long lists scroll
-  as a carousel (arrows or mouse wheel). Click to choose — set several in one hold — then
-  release
+- **G** (hold) — the selector wheel. Hover a wedge to fan out its options; click only to
+  choose. **Paint** fans the paint types (Solid / Gradient / Pattern / Noise); **Place** fans
+  **Blocks** (Single / Face / Face perp / 3D Fill), **Markers** (Marker / Marker draw), and
+  **Shape markers** (Marker box / circle / square) onto a third ring; **Palette** follows the
+  paint type (palettes, patterns, or — with Solid paint — the match modes, with **Select
+  block** fanning your inventory's blocks in colour order). The wedge directly holding the
+  current selection shows a blue tint; segments size themselves to their content (block icons
+  pack tight), and anything that still doesn't fit scrolls as a carousel (arrows or mouse
+  wheel). Set several things in one hold, then release
+
+![The selector wheel: Place fanned out to the shape-marker modes](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/selector-wheel-place-shape-markers-v2.2.0.jpg)
+
 - **B** — cycle the active palette or pattern (whichever the paint type uses)
 - **L-Ctrl** (hold + click) — a marker-removing click clears the whole connected plane
 - All rebindable under Options → Controls → Key Binds → MISC.
@@ -107,17 +112,27 @@ the next click grows from, and rides the advancing fronts while you hold.
 
 ## Markers
 
-Turquoise **starts** and amber **ends** aim and bound every tool. They aren't real blocks: every
-marker mode reaches to the **Marker dist** setting, far beyond block reach. Saved per world and
-dimension; **Clear Markers** (Settings) wipes them.
+Turquoise **starts** and amber **ends** aim and bound every tool. They aren't real blocks: block
+markers reach to the **Marker dist** setting and the region markers (box, shapes) place and edit
+at sight range — far beyond block reach. Saved per world and dimension; **Clear Markers**
+(Settings) wipes them all, regions included.
 
 - **Marker** — left-click starts, right-click ends; click-drag for straight axis-locked lines;
   starting on a marked block removes instead.
-- **Marker corners** — two clicks mark a volume: left-click one corner (its face sets the column
-  direction, a thin box follows your aim), right-click the opposite — starts fill one plane, ends
-  the other. With Auto end on, columns hug the terrain and empty columns are skipped.
+- **Marker box** — press-drag-release marks a whole region as ONE box: the face you press on is
+  the gradient START side, the opposite side the end (tinted turquoise/amber). Painting that
+  begins inside the box stays inside; middle-click the box deletes it.
 - **Marker draw** — a freehand pencil: sweep to spatter starts over whatever the crosshair
   touches, right-click for ends (auto ends scan along the stroke's starting face).
+- **Marker circle / Marker square** — donut-ring regions: click a center (the clicked face sets
+  the plane; that base plane is the gradient start side), then two radii — apart for a thick
+  wall, equal for one-wide. Drag the blue controls to move/resize, drag a square's green corner
+  nodes to rotate, right-click to extrude into a cylinder/tube (Ctrl = the other way), scroll to
+  slide it. Controls respond whenever the tool is in hand — just aim at one; the bright region
+  outline lights up as you look at it. Painting into a shape is restricted to its band — giant
+  gradient cylinders and square donuts with exactly the wall thickness you drew.
+- **Middle-click removes whatever marker you're aiming at** — a shape, the box, or a plain
+  block marker — in any mode, tool in hand.
 - Clicking a marked block toggles it off in any marker mode; **Ctrl** clears its connected plane.
 - **Auto end marker** (Settings) — each start scans out from the clicked face and marks the first
   non-air block (all air → max distance), with a blue face + arrow preview.

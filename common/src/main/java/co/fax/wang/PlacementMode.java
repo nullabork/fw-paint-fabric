@@ -11,8 +11,10 @@ package co.fax.wang;
  */
 public enum PlacementMode {
     MARKER("Marker", "Active: Marker", 0xFFFFAA00),                          // orange
-    MARKER_CORNERS("Marker corners", "Active: Marker corners", 0xFFFFD24D), // gold
+    MARKER_BOX("Marker box", "Active: Marker box", 0xFFFFD24D),             // gold — one-piece box region
     MARKER_DRAW("Marker draw", "Active: Marker draw", 0xFFFFA07A),          // salmon
+    MARKER_CIRCLE("Marker circle", "Active: Marker circle", 0xFFFF8A3C),    // orange — donut ring region
+    MARKER_SQUARE("Marker square", "Active: Marker square", 0xFF7BD88A),    // green — square ring region
     SINGLE("Single", "Active: Single", 0xFF55FF55),     // green
     FACE("Face", "Active: Face", 0xFF55FFFF),           // aqua
     FACE_PERP("Face perp", "Active: Face perp", 0xFF7FDBFF), // light blue — 1-wide snapped run
@@ -49,9 +51,10 @@ public enum PlacementMode {
         return this == SINGLE || this == FACE || this == FACE_PERP || this == FILL3D;
     }
 
-    /** True for the marker-selection modes (drag lines, corner volumes, freehand). */
+    /** True for the marker-selection modes (drag lines, box, freehand, shape regions). */
     public boolean isMarker() {
-        return this == MARKER || this == MARKER_CORNERS || this == MARKER_DRAW;
+        return this == MARKER || this == MARKER_BOX || this == MARKER_DRAW
+                || this == MARKER_CIRCLE || this == MARKER_SQUARE;
     }
 
     /** The next mode, wrapping. */

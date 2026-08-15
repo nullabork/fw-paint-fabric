@@ -1,18 +1,20 @@
 package co.fax.wang.wheel;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
- * Label-driven ring sizing for the selector wheel, solved once when the wheel opens. Unlike
- * icon wheels the slots carry horizontal text labels, so fixed radii would collide as soon as
- * a long label ("Marker corners") appears. The solver takes every label's pixel width and
- * pushes the rings out until no two labels — nor a label and the center text block — can
- * overlap in any expansion state. Longer labels therefore mean a bigger wheel from the start;
- * nothing resizes while the wheel is open.
+ * Label-driven ring sizing for the selector wheel, solved once when the wheel opens. Slots are
+ * content-sized ({@link WheelMath#slotWidthFor}): adjacent items on a ring can never collide
+ * because each slot's arc already spans its ring's widest item — the solver's job is the rest:
+ * the hole must fit the center text, and every ring must sit far enough out that its items
+ * clear the center block, the inner rings' labels, and each other across the circle, in any
+ * expansion state. Longer labels therefore mean a bigger wheel from the start; nothing
+ * resizes while the wheel is open.
  *
- * <p>Two labels are "clear" of each other when their boxes are separated horizontally by
- * {@link #LABEL_GAP} or vertically by the line height + gap. Same-ring and label-vs-center
- * distances all scale linearly with the ring radius, so those minimums are closed-form; child
- * labels against the (already fixed) root labels are not monotone in the child radius, so the
- * outer ring scans outward for the first clear radius.
+ * <p>Three rings: the root (evenly divided), the level-1 arc (children of a root category),
+ * and the level-2 arc (children of a level-1 category, fanned around that slot's angle). Each
+ * level's radius is shared: the max any of its categories needs.
  *
  * <p>Pure math (no Minecraft classes) so it unit-tests headlessly.
  */
@@ -20,7 +22,7 @@ public final class WheelLayout {
 
     /** Radial thickness of each ring, px. */
     public static final int THICKNESS = 24;
-    /** Gap between the root ring's outside and the child ring's inside. */
+    /** Gap between one ring's outside and the next ring's inside. */
     static final int RING_GAP = 4;
     /** Padding between the center text block and the hole edge. */
     static final int HOLE_PAD = 8;
@@ -31,24 +33,31 @@ public final class WheelLayout {
     /** Sanity cap; beyond this we accept overlap rather than fill the screen. */
     static final int MAX_RADIUS = 400;
 
-    public final int r0In, r0Out, r1In, r1Out;
+    /** One ring's content summary: how many items, and how wide the widest one is. */
+    public record RingSpec(int count, int maxItemWidth) {}
 
-    private WheelLayout(int r0Mid, int r1Mid) {
+    public final int r0In, r0Out, r1In, r1Out, r2In, r2Out;
+
+    private WheelLayout(int r0Mid, int r1Mid, int r2Mid) {
         this.r0In = r0Mid - THICKNESS / 2;
         this.r0Out = r0Mid + THICKNESS / 2;
         this.r1In = r1Mid - THICKNESS / 2;
         this.r1Out = r1Mid + THICKNESS / 2;
+        this.r2In = r2Mid - THICKNESS / 2;
+        this.r2Out = r2Mid + THICKNESS / 2;
     }
 
     /**
-     * @param lineHeight  font line height, px
-     * @param centerW     widest text the donut hole can show
-     * @param centerH     total height of the hole text block
-     * @param rootWidths  label pixel widths of the root items, in slot order
-     * @param childWidths per root slot, that category's child label widths (null/empty for leaves)
+     * @param lineHeight font line height, px
+     * @param centerW    widest text the donut hole can show
+     * @param centerH    total height of the hole text block
+     * @param rootWidths label pixel widths of the root items, in slot order
+     * @param level1     per root slot, that category's ring content (null for leaves)
+     * @param level2     per root slot, per child index, that sub-category's ring content
+     *                   (null for leaves / no level-2 ring)
      */
     public static WheelLayout compute(int lineHeight, int centerW, int centerH,
-                                      int[] rootWidths, int[][] childWidths) {
+                                      int[] rootWidths, RingSpec[] level1, RingSpec[][] level2) {
         int n = rootWidths.length;
         double[] ux = new double[n], uy = new double[n]; // unit position of each root label
         for (int i = 0; i < n; i++) {
@@ -72,38 +81,95 @@ public final class WheelLayout {
         }
         int r0Mid = (int) Math.ceil(Math.min(r0, MAX_RADIUS));
 
-        // Child ring: same closed-form pass within each category and against the center text …
-        double r1 = r0Mid + THICKNESS + RING_GAP;
+        // Fixed root-label boxes for the outer rings to clear.
+        List<double[]> rootBoxes = new ArrayList<>();
         for (int i = 0; i < n; i++) {
-            int[] widths = childWidths == null || childWidths[i] == null ? new int[0] : childWidths[i];
-            int m = widths.length;
-            double parent = WheelMath.rootSlotCenter(i, n);
-            double[] cx = new double[m], cy = new double[m];
-            for (int k = 0; k < m; k++) {
-                double a = WheelMath.childSlotCenter(parent, m, k);
-                cx[k] = Math.sin(a);
-                cy[k] = -Math.cos(a);
-            }
-            for (int k = 0; k < m; k++) {
-                for (int l = k + 1; l < m; l++) {
-                    r1 = Math.max(r1, minApart(cx[k] - cx[l], cy[k] - cy[l],
-                            (widths[k] + widths[l]) / 2.0 + LABEL_GAP,
-                            lineHeight + LABEL_GAP));
-                }
-                r1 = Math.max(r1, minApart(cx[k], cy[k],
-                        (widths[k] + centerW) / 2.0 + LABEL_GAP,
-                        (lineHeight + centerH) / 2.0 + LABEL_GAP));
-            }
+            rootBoxes.add(new double[] {ux[i] * r0Mid, uy[i] * r0Mid, rootWidths[i] / 2.0});
         }
 
-        // … then, against the now-fixed root label positions, scan outward for the first radius
-        // where every child label clears every root label (this distance isn't monotone in r1).
-        int r1Mid = (int) Math.ceil(Math.min(r1, MAX_RADIUS));
-        while (r1Mid < MAX_RADIUS
-                && !clearOfRootLabels(r1Mid, r0Mid, lineHeight, rootWidths, childWidths, ux, uy)) {
-            r1Mid++;
+        // Level-1 ring: each category solves at its own adaptive slot width; radius is shared.
+        int r1Mid = r0Mid + THICKNESS + RING_GAP;
+        for (int i = 0; i < n; i++) {
+            RingSpec spec = level1 == null ? null : level1[i];
+            if (spec == null || spec.count() == 0) continue;
+            r1Mid = Math.max(r1Mid, solveRing(r0Mid + THICKNESS + RING_GAP, spec,
+                    WheelMath.rootSlotCenter(i, n), lineHeight, centerW, centerH, rootBoxes));
         }
-        return new WheelLayout(r0Mid, r1Mid);
+
+        // Level-2 ring: cleared against the root labels AND its own category's level-1 labels
+        // (a level-2 group only ever shows alongside those).
+        int r2Mid = r1Mid + THICKNESS + RING_GAP;
+        for (int i = 0; i < n; i++) {
+            RingSpec parentSpec = level1 == null ? null : level1[i];
+            RingSpec[] subs = level2 == null ? null : level2[i];
+            if (parentSpec == null || subs == null) continue;
+            double rootA = WheelMath.rootSlotCenter(i, n);
+            List<double[]> fixed = new ArrayList<>(rootBoxes);
+            fixed.addAll(arcBoxes(parentSpec, rootA, r1Mid));
+            for (int j = 0; j < subs.length; j++) {
+                RingSpec sub = subs[j];
+                if (sub == null || sub.count() == 0) continue;
+                double parent = arcAngleOf(parentSpec, rootA, r1Mid, j);
+                r2Mid = Math.max(r2Mid, solveRing(r1Mid + THICKNESS + RING_GAP, sub,
+                        parent, lineHeight, centerW, centerH, fixed));
+            }
+        }
+        return new WheelLayout(r0Mid, r1Mid, r2Mid);
+    }
+
+    /** The slot-center angle of child {@code j} of an arc with {@code spec} at {@code radius}. */
+    private static double arcAngleOf(RingSpec spec, double parentAngle, int radius, int j) {
+        double w = WheelMath.slotWidthFor(spec.maxItemWidth(), radius);
+        int slots = Math.min(spec.count(), WheelMath.arcCapacity(w));
+        return WheelMath.arcSlotCenter(parentAngle, slots, w, Math.min(j, slots - 1));
+    }
+
+    /** {@code {x, y, halfWidth}} boxes of an arc's items at {@code radius}. */
+    private static List<double[]> arcBoxes(RingSpec spec, double parentAngle, int radius) {
+        List<double[]> out = new ArrayList<>();
+        double w = WheelMath.slotWidthFor(spec.maxItemWidth(), radius);
+        int slots = Math.min(spec.count(), WheelMath.arcCapacity(w));
+        for (int k = 0; k < slots; k++) {
+            double a = WheelMath.arcSlotCenter(parentAngle, slots, w, k);
+            out.add(new double[] {Math.sin(a) * radius, -Math.cos(a) * radius,
+                    spec.maxItemWidth() / 2.0});
+        }
+        return out;
+    }
+
+    /**
+     * Smallest radius ≥ {@code rLo} where the arc's items (at their content-driven slot width
+     * for that radius) clear the center block and the fixed inner labels. Items on the SAME
+     * ring never need checking: content-sized slots space adjacent centers by the widest item
+     * plus {@link WheelMath#SLOT_ARC_PAD} along the circle (and non-adjacent pairs sit even
+     * further apart), which no two item boxes can bridge in both axes at once.
+     */
+    private static int solveRing(int rLo, RingSpec spec, double parentAngle,
+                                 int lineHeight, int centerW, int centerH, List<double[]> fixed) {
+        double halfW = spec.maxItemWidth() / 2.0;
+        for (int r = rLo; r < MAX_RADIUS; r++) {
+            double w = WheelMath.slotWidthFor(spec.maxItemWidth(), r);
+            int slots = Math.min(spec.count(), WheelMath.arcCapacity(w));
+            boolean ok = true;
+            for (int k = 0; k < slots && ok; k++) {
+                double a = WheelMath.arcSlotCenter(parentAngle, slots, w, k);
+                double x = Math.sin(a) * r, y = -Math.cos(a) * r;
+                if (Math.abs(x) < halfW + centerW / 2.0 + LABEL_GAP
+                        && Math.abs(y) < (lineHeight + centerH) / 2.0 + LABEL_GAP) {
+                    ok = false;
+                    break;
+                }
+                for (double[] f : fixed) {
+                    if (Math.abs(x - f[0]) < halfW + f[2] + LABEL_GAP
+                            && Math.abs(y - f[1]) < lineHeight + LABEL_GAP) {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if (ok) return r;
+        }
+        return MAX_RADIUS;
     }
 
     /**
@@ -116,29 +182,5 @@ public final class WheelLayout {
         double byX = Math.abs(dxPerR) < 1e-9 ? Double.MAX_VALUE : needX / Math.abs(dxPerR);
         double byY = Math.abs(dyPerR) < 1e-9 ? Double.MAX_VALUE : needY / Math.abs(dyPerR);
         return Math.min(byX, byY);
-    }
-
-    /** True when, at child radius {@code r1}, no child label's box collides with a root label's. */
-    private static boolean clearOfRootLabels(int r1, int r0Mid, int lineHeight,
-                                             int[] rootWidths, int[][] childWidths,
-                                             double[] ux, double[] uy) {
-        int n = rootWidths.length;
-        for (int i = 0; i < n; i++) {
-            int[] widths = childWidths == null || childWidths[i] == null ? new int[0] : childWidths[i];
-            double parent = WheelMath.rootSlotCenter(i, n);
-            for (int k = 0; k < widths.length; k++) {
-                double a = WheelMath.childSlotCenter(parent, widths.length, k);
-                double x = Math.sin(a) * r1, y = -Math.cos(a) * r1;
-                for (int j = 0; j < n; j++) {
-                    double dx = Math.abs(x - ux[j] * r0Mid);
-                    double dy = Math.abs(y - uy[j] * r0Mid);
-                    if (dx < (widths[k] + rootWidths[j]) / 2.0 + LABEL_GAP
-                            && dy < lineHeight + LABEL_GAP) {
-                        return false;
-                    }
-                }
-            }
-        }
-        return true;
     }
 }
