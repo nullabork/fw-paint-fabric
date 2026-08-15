@@ -1103,7 +1103,8 @@ public class GradientScreen extends Screen {
 
     private Component sourceLabel() { return Component.literal("Source: " + ConfigManager.get().source.displayName()); }
     private Component clearMarkersLabel() {
-        return Component.literal("Clear Markers (" + (MarkerManager.startMarkers.size() + MarkerManager.endMarkers.size()) + ")");
+        return Component.literal("Clear Markers (" + (MarkerManager.startMarkers.size()
+                + MarkerManager.endMarkers.size() + co.fax.wang.shape.ShapeMarkers.count()) + ")");
     }
 
     private void cycleButton(int x, int y, int w, java.util.function.Supplier<Component> label, Runnable onCycle) {

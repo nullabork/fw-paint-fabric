@@ -36,8 +36,7 @@ public class GradientNeoForge {
     @SubscribeEvent
     static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(Gradient.openKey);
-        event.register(Gradient.cycleKey);
-        event.register(Gradient.paintTypeKey);
+        event.register(Gradient.wheelKey);
         event.register(Gradient.cyclePaletteKey);
         event.register(Gradient.clearConnectedKey);
     }
@@ -58,6 +57,14 @@ public class GradientNeoForge {
         if (mc.level != null && Gradient.toolEngaged()) {
             event.setCanceled(true);
             event.setSwingHand(false);
+        }
+    }
+
+    /** Scrolling while aiming a shape-marker control slides the shape along its axis. */
+    @SubscribeEvent
+    static void onMouseScroll(InputEvent.MouseScrollingEvent event) {
+        if (co.fax.wang.shape.ShapeMarkers.onScroll(event.getScrollDeltaY())) {
+            event.setCanceled(true); // keep the hotbar slot where it is
         }
     }
 

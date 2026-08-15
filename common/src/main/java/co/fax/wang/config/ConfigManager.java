@@ -65,6 +65,9 @@ public final class ConfigManager {
             LOG.warn("Failed to read {} — using defaults. Cause: {}", path(), e.toString());
         }
         config = (loaded != null) ? loaded : new GradientConfig();
+        // Gson maps unknown enum names to null (e.g. the retired MARKER_CORNERS placement
+        // from pre-shape-marker configs) — fall back rather than NPE everywhere.
+        if (config.placementMode == null) config.placementMode = co.fax.wang.PlacementMode.DISABLED;
         co.fax.wang.GradientRamp.perceptual = config.perceptualColor;
     }
 

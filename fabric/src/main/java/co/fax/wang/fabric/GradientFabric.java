@@ -10,6 +10,7 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
+import net.fabricmc.fabric.api.event.client.player.ClientHotbarScrollEvents;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
 import net.fabricmc.fabric.api.event.player.UseBlockCallback;
 import net.fabricmc.loader.api.FabricLoader;
@@ -30,12 +31,16 @@ public class GradientFabric implements ClientModInitializer {
         // Keybinds (26.2: register via KeyMappingHelper, pass a KeyMapping.Category not a String).
         Gradient.createKeyMappings();
         KeyMappingHelper.registerKeyMapping(Gradient.openKey);
-        KeyMappingHelper.registerKeyMapping(Gradient.cycleKey);
-        KeyMappingHelper.registerKeyMapping(Gradient.paintTypeKey);
+        KeyMappingHelper.registerKeyMapping(Gradient.wheelKey);
         KeyMappingHelper.registerKeyMapping(Gradient.cyclePaletteKey);
         KeyMappingHelper.registerKeyMapping(Gradient.clearConnectedKey);
 
         ClientTickEvents.END_CLIENT_TICK.register(Gradient::endClientTick);
+
+        // Scrolling while aiming a shape-marker control slides the shape along its axis — steal
+        // the scroll from the hotbar then (ALLOW returning false blocks the slot change).
+        ClientHotbarScrollEvents.ALLOW.register((inventory, currentSlot, newSlot, scrollX, scrollY) ->
+                !co.fax.wang.shape.ShapeMarkers.onScroll(scrollY));
 
         // While the tool is engaged, suppress vanilla left/right click so it doesn't break/use the
         // world. Cancel client-side only (stops the action packet). Fabric's UseBlockCallback also
