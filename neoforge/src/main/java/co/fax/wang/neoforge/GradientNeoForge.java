@@ -36,8 +36,7 @@ public class GradientNeoForge {
     @SubscribeEvent
     static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
         event.register(Gradient.openKey);
-        event.register(Gradient.cycleKey);
-        event.register(Gradient.paintTypeKey);
+        event.register(Gradient.wheelKey);
         event.register(Gradient.cyclePaletteKey);
         event.register(Gradient.clearConnectedKey);
     }

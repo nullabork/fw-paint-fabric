@@ -30,8 +30,7 @@ public class GradientFabric implements ClientModInitializer {
         // Keybinds (26.2: register via KeyMappingHelper, pass a KeyMapping.Category not a String).
         Gradient.createKeyMappings();
         KeyMappingHelper.registerKeyMapping(Gradient.openKey);
-        KeyMappingHelper.registerKeyMapping(Gradient.cycleKey);
-        KeyMappingHelper.registerKeyMapping(Gradient.paintTypeKey);
+        KeyMappingHelper.registerKeyMapping(Gradient.wheelKey);
         KeyMappingHelper.registerKeyMapping(Gradient.cyclePaletteKey);
         KeyMappingHelper.registerKeyMapping(Gradient.clearConnectedKey);
 

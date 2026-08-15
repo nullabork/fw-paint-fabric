@@ -84,14 +84,13 @@ public final class HelpPanel {
     }
 
     /**
-     * Substitute the {open}/{cycle}/{paint}/{palette}/{clear} placeholders with the CURRENT key
+     * Substitute the {open}/{wheel}/{palette}/{clear} placeholders with the CURRENT key
      * bindings, so the manual stays correct after a rebind. Runs on every layout rebuild.
      */
     private static String subKeys(String s) {
         if (s.indexOf('{') < 0) return s;
         return s.replace("{open}", Gradient.boundKey("open"))
-                .replace("{cycle}", Gradient.boundKey("cycle"))
-                .replace("{paint}", Gradient.boundKey("paint"))
+                .replace("{wheel}", Gradient.boundKey("wheel"))
                 .replace("{palette}", Gradient.boundKey("palette"))
                 .replace("{clear}", Gradient.boundKey("clear"));
     }
@@ -175,9 +174,18 @@ public final class HelpPanel {
                 + "blocks (or the Automatic rows) into the strip, then Save. Gradient and noise "
                 + "painting both use the active palette; press {palette} in-game to cycle "
                 + "through your saved ones.",
-            "3. Hold the tool. Press {paint} to switch what it paints - Gradient, Noise, "
-                + "Solid, or Pattern - and {cycle} to cycle where blocks go: Marker, Marker "
-                + "corners, Marker draw, Single, Face, Face perp, 3D Fill, Disabled. The Paint "
+            "3. Hold the tool, then hold {wheel} to open the selector wheel. Its Paint slot "
+                + "picks what the tool paints - Solid, Gradient, Pattern, or Noise - its "
+                + "Markers slot the marker tools (Marker, Marker corners, Marker draw), and "
+                + "its Placement slot where blocks go (Single, Face, Face perp, 3D Fill); the "
+                + "Disabled slot switches the tool off. The Palette slot follows the paint "
+                + "type: it lists your gradient palettes (or patterns under Pattern paint), "
+                + "or - with Solid paint - Closest colour plus your inventory's blocks in "
+                + "colour order; clicking one makes it the Solid block. Anything selected but "
+                + "no longer available shows red (a crossed-out block, or a palette missing "
+                + "its blocks). Long lists become a "
+                + "scrolling carousel: step with the < > arrows or the mouse wheel. Click a "
+                + "slot to fan out its options, click to choose, release {wheel} when done. The Paint "
                 + "tab ({open} lands on it) has buttons for all of these too. Any paint type "
                 + "works with any placement mode, with or without markers. The helper text in "
                 + "the top-left always shows both, plus the active palette or pattern.",
@@ -188,7 +196,7 @@ public final class HelpPanel {
                 + "bindings). Placement is done with normal block-place actions the server "
                 + "validates, so everything works in multiplayer.")),
 
-        t("Placement modes", "Single, Face, and 3D Fill - where blocks go (cycle with {cycle}).",
+        t("Placement modes", "Single, Face, and 3D Fill - where blocks go (pick on the {wheel} wheel).",
             List.of(
                 "The green face tint and arrow show exactly which faces the next click will grow "
                     + "from, and in which direction.",
@@ -240,7 +248,7 @@ public final class HelpPanel {
 
         t("Markers", "Turquoise start and amber end blocks that aim and bound every tool.",
             List.of(
-                "Hold the tool in Marker mode (cycle with {cycle}). Left-click marks start blocks "
+                "Hold the tool in Marker mode (pick it on the {wheel} wheel). Left-click marks start blocks "
                     + "(turquoise), right-click marks end blocks (amber). Click and drag to mark a "
                     + "straight line locked to one axis. Starting a click or drag on an "
                     + "already-marked block removes instead of adds.",
@@ -410,8 +418,8 @@ public final class HelpPanel {
             List.of(
                 "A pattern is a grid you draw cell by cell (up to 32x32) in the pattern editor "
                     + "- press + Pattern on the Palette tab. Patterns live in the same list as "
-                    + "gradient palettes and paint under the PATTERN paint type ({paint} "
-                    + "cycles to it); the cycle keybind ({palette}) then steps through your "
+                    + "gradient palettes and paint under the PATTERN paint type (pick it on "
+                    + "the {wheel} wheel); the cycle keybind ({palette}) then steps through your "
                     + "patterns instead of gradients - each keeps its own selection.",
                 "Placement starts at the pattern's START edge and advances out of the face "
                     + "you click; the pattern's width runs across a plane derived from the "

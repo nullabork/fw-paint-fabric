@@ -22,7 +22,7 @@ any placement mode, with or without markers. Placement is the legit, multiplayer
 2. On the **Palette** tab press **+ Gradient**: double-click (or drag) blocks — or the **Auto**
    wildcards — into the strip, then **Save**. Saving makes it the active palette.
 3. **K** lands on the **Paint** tab: buttons for paint type, placement mode, and the active
-   palette (in-game: **V**, **G**, and **B**).
+   palette (in-game: hold **G** for the selector wheel, **B** cycles palettes).
 4. Right-click a block face to paint: a tap places one layer, holding keeps going. The green face
    tint + arrows preview exactly what the click will grow, and which way.
 5. Markers are optional: they bound what you paint and anchor Automatic segments.
@@ -31,10 +31,14 @@ any placement mode, with or without markers. Placement is the legit, multiplayer
 ## Keybinds
 
 - **K** — open / close the FW Paint screen (lands on the Paint quick-controls tab)
-- **V** — switch paint type (Gradient / Noise / Solid / Pattern) · **B** — cycle the active
-  palette or pattern (whichever the paint type uses)
-- **G** — cycle placement mode: Marker → Marker corners → Marker draw → Single → Face →
-  Face perp → 3D Fill → Disabled
+- **G** (hold) — the selector wheel: **Paint** fans out the paint types (Solid / Gradient /
+  Pattern / Noise), **Markers** the marker tools (Marker / Marker corners / Marker draw),
+  **Placement** where blocks go (Single / Face / Face perp / 3D Fill), **Palette** the
+  palettes/patterns for the current paint type (or, with Solid paint, Closest colour + your
+  inventory's blocks in colour order), and **Disabled** turns the tool off. Long lists scroll
+  as a carousel (arrows or mouse wheel). Click to choose — set several in one hold — then
+  release
+- **B** — cycle the active palette or pattern (whichever the paint type uses)
 - **L-Ctrl** (hold + click) — a marker-removing click clears the whole connected plane
 - All rebindable under Options → Controls → Key Binds → MISC.
 

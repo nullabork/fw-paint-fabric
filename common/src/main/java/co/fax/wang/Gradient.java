@@ -27,8 +27,8 @@ public final class Gradient {
     public static final Logger LOG = LoggerFactory.getLogger(MOD_ID);
 
     public static KeyMapping openKey;
-    public static KeyMapping cycleKey;
-    public static KeyMapping paintTypeKey;
+    /** Held (default G): shows the radial selector wheel for paint type + placement mode. */
+    public static KeyMapping wheelKey;
     /** Cycle the active palette through the saved list (default B). */
     public static KeyMapping cyclePaletteKey;
     /** Held modifier (default L-Ctrl): a marker-removing click clears the whole connected plane. */
@@ -40,15 +40,16 @@ public final class Gradient {
     public static void createKeyMappings() {
         openKey = new KeyMapping("key.gradient.open", InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_K, KeyMapping.Category.MISC);
-        cycleKey = new KeyMapping("key.gradient.cycle", InputConstants.Type.KEYSYM,
+        wheelKey = new KeyMapping("key.gradient.wheel", InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_G, KeyMapping.Category.MISC);
-        paintTypeKey = new KeyMapping("key.gradient.paint_type", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_V, KeyMapping.Category.MISC);
         cyclePaletteKey = new KeyMapping("key.gradient.cycle_palette", InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_B, KeyMapping.Category.MISC);
         clearConnectedKey = new KeyMapping("key.gradient.clear_connected", InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_LEFT_CONTROL, KeyMapping.Category.MISC);
     }
+
+    /** Physical state of {@link #wheelKey} last tick (edge detection for hold-to-open). */
+    private static boolean wheelWasDown;
 
     /** Runs once at the end of every client tick (wired by the loader entrypoints). */
     public static void endClientTick(Minecraft client) {
@@ -56,12 +57,19 @@ public final class Gradient {
             // 26.2: open screens via setScreenAndShow (there is no setScreen).
             client.setScreenAndShow(new GradientScreen());
         }
-        while (cycleKey.consumeClick()) {
-            cyclePlacement();
+        // Hold-to-open selector wheel. Open only on a fresh down-transition rather than
+        // consumeClick: when a screen closes while the key is still physically held, the game
+        // re-syncs key state and queues a phantom click, which would instantly reopen it.
+        while (wheelKey.consumeClick()) {} // drain the click queue either way
+        boolean down = wheelKey.isDown();
+        if (down && !wheelWasDown && client.gui.screen() == null) {
+            if (holdingPaintTool(client)) {
+                client.setScreenAndShow(new co.fax.wang.wheel.WheelScreen());
+            } else {
+                overlay(client, "FW Paint: hold your paint tool to use the selector wheel");
+            }
         }
-        while (paintTypeKey.consumeClick()) {
-            switchPaintType();
-        }
+        wheelWasDown = down;
         while (cyclePaletteKey.consumeClick()) {
             cyclePalette();
         }
@@ -94,28 +102,19 @@ public final class Gradient {
         return ConfigManager.get().placementMode;
     }
 
-    /** Advance the placement mode, persist it, and flash an action-bar message. */
-    public static void cyclePlacement() {
-        Minecraft mc = Minecraft.getInstance();
-        if (!holdingPaintTool(mc)) {
-            overlay(mc, "FW Paint: hold your paint tool to cycle placement");
-            return;
-        }
+    /** Set the placement mode (wheel selection), persist it, and flash an action-bar message. */
+    public static void setPlacementMode(PlacementMode mode) {
         GradientConfig cfg = ConfigManager.get();
-        cfg.placementMode = cfg.placementMode.next();
+        cfg.placementMode = mode;
         ConfigManager.save();
-        overlay(mc, "FW Paint — Placement: " + cfg.placementMode.shortName());
+        overlay(Minecraft.getInstance(), "FW Paint — Placement: " + mode.shortName());
     }
 
-    /** Cycle Gradient → Noise → Solid paint. Only works while the paint tool is held; persisted. */
-    public static void switchPaintType() {
+    /** Set the paint type (wheel selection), persist it, and flash an action-bar message. */
+    public static void setPaintType(PaintType type) {
         Minecraft mc = Minecraft.getInstance();
-        if (!holdingPaintTool(mc)) {
-            overlay(mc, "FW Paint: hold your paint tool to switch paint type");
-            return;
-        }
         GradientConfig cfg = ConfigManager.get();
-        cfg.activePaintType = cfg.activePaintType.next();
+        cfg.activePaintType = type;
         ConfigManager.save();
         // Landing on a palette-driven paint with nothing of its kind set up → guide the user.
         co.fax.wang.palette.PaletteKind kind = kindFor(cfg.activePaintType);
@@ -125,6 +124,30 @@ public final class Gradient {
         } else {
             overlay(mc, "FW Paint — Paint type: " + cfg.activePaintType.label());
         }
+    }
+
+    /** Solid paint via the wheel: place the closest colour match instead of a picked block. */
+    public static void setSolidClosestColour() {
+        GradientConfig cfg = ConfigManager.get();
+        cfg.solidMatch = SolidMatch.CLOSEST_COLOR;
+        ConfigManager.save();
+        overlay(Minecraft.getInstance(), "FW Paint — Solid: closest colour match");
+    }
+
+    /** Solid paint via the wheel: place exactly this block (selects it, like the Solid tab). */
+    public static void setSolidBlock(String id) {
+        GradientConfig cfg = ConfigManager.get();
+        cfg.solidMatch = SolidMatch.SELECTED;
+        cfg.solidExcludedBlocks.remove(id); // selecting an excluded block un-excludes it
+        cfg.solidBlock = id;
+        ConfigManager.save();
+        overlay(Minecraft.getInstance(), "FW Paint — Solid: " + toolDisplayName(id));
+    }
+
+    /** Make a palette/pattern the active one of its kind (wheel selection). */
+    public static void setActivePalette(co.fax.wang.palette.Palette p) {
+        co.fax.wang.palette.PaletteStore.setActive(p.id);
+        overlay(Minecraft.getInstance(), "FW Paint — " + p.kind.label() + ": " + p.name);
     }
 
     /** The palette kind a paint type consumes (null for Solid). */
@@ -172,14 +195,13 @@ public final class Gradient {
     }
 
     /**
-     * Display name of a mod keybind ("open" / "cycle" / "paint" / "clear") as currently bound —
+     * Display name of a mod keybind ("open" / "wheel" / "palette" / "clear") as currently bound —
      * UI text (e.g. the Help tab) uses this so rebinds always read correctly.
      */
     public static String boundKey(String id) {
         KeyMapping k = switch (id) {
             case "open" -> openKey;
-            case "cycle" -> cycleKey;
-            case "paint" -> paintTypeKey;
+            case "wheel" -> wheelKey;
             case "palette" -> cyclePaletteKey;
             case "clear" -> clearConnectedKey;
             default -> null;

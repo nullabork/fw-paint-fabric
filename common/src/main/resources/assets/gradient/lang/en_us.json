@@ -1,8 +1,7 @@
 {
   "category.gradient": "FW Paint",
   "key.gradient.open": "Open FW Paint screen",
-  "key.gradient.cycle": "Cycle placement mode (Marker/Single/Face/3D)",
-  "key.gradient.paint_type": "Switch paint type (Solid/Gradient/Noise)",
+  "key.gradient.wheel": "Selector wheel — paint type + placement (hold)",
   "key.gradient.cycle_palette": "Cycle active palette",
   "key.gradient.clear_connected": "Clear connected markers (hold + click)"
 }
