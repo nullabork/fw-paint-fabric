@@ -1,7 +1,7 @@
 {
-  "category.gradient": "FW Paint",
+  "key.category.gradient.main": "FW Paint",
   "key.gradient.open": "Open FW Paint screen",
-  "key.gradient.wheel": "Selector wheel — paint, place + palette (hold)",
+  "key.gradient.wheel": "Quick selector",
   "key.gradient.cycle_palette": "Cycle active palette",
   "key.gradient.clear_connected": "Clear connected markers (hold + click)"
 }

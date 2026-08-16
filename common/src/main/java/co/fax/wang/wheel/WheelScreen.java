@@ -78,6 +78,9 @@ public class WheelScreen extends Screen {
     /** Root slot whose children are rebuilt from the active paint type on every expansion. */
     private static final int PALETTE_INDEX = 2;
 
+    /** Height of the tab bar along the top (matches GradientScreen / the editors). */
+    private static final int BAR_H = 22;
+
     private final List<WheelItem> root;
     private final WheelLayout layout;
 
@@ -383,8 +386,37 @@ public class WheelScreen extends Screen {
 
     // ---- input ----------------------------------------------------------------------------
 
+    /** Right-aligned tab x positions: {x, width} pairs, matching the editors' title bars. */
+    private int[] tabXs() {
+        String[] names = co.fax.wang.GradientScreen.barTabNames();
+        int gap = 14;
+        int[] out = new int[names.length * 2];
+        int x = this.width - 10;
+        for (int i = names.length - 1; i >= 0; i--) {
+            int w = this.font.width(names[i]);
+            x -= w;
+            out[i * 2] = x;
+            out[i * 2 + 1] = w;
+            x -= gap;
+        }
+        return out;
+    }
+
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
+        // Title bar: clicking a tab opens the full FW Paint screen there — a quick shortcut
+        // out of the wheel. The new screen stays open when the wheel key is released.
+        if (event.button() == 0 && event.y() < BAR_H) {
+            int[] xs = tabXs();
+            String[] names = co.fax.wang.GradientScreen.barTabNames();
+            for (int i = 0; i < names.length; i++) {
+                if (event.x() >= xs[i * 2] && event.x() <= xs[i * 2] + xs[i * 2 + 1]) {
+                    this.minecraft.setScreenAndShow(co.fax.wang.GradientScreen.atBarTab(i));
+                    return true;
+                }
+            }
+            return true;
+        }
         if (event.button() == 0) {
             Hit hit = hitAt(event.x(), event.y());
             if (hit != null) {
@@ -451,6 +483,7 @@ public class WheelScreen extends Screen {
         hover = hitAt(mouseX, mouseY); // a fresh expansion can put a ring under the cursor
         paintRings(g, cx, cy, hover);
         paintSlotContents(g, cx, cy);
+        paintTabBar(g, mouseX, mouseY);
 
         // The donut hole mirrors the HUD: current paint type over current placement mode.
         GradientConfig cfg = ConfigManager.get();
@@ -476,6 +509,25 @@ public class WheelScreen extends Screen {
                     + Math.min(carousel.offset() + carousel.visibleItems(), carousel.items.size())
                     + " of " + carousel.items.size();
             g.centeredText(this.font, pos, cx, belowY, GREY);
+        }
+    }
+
+    /**
+     * The FW Paint tab bar along the top, same look as the main screen's: quick shortcuts to
+     * the settings pages while the wheel is held. No tab is highlighted — the wheel isn't a
+     * tab — and clicking one opens the full screen there (which then outlives the key release).
+     */
+    private void paintTabBar(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        g.fill(0, 0, this.width, BAR_H, 0xE0000000);
+        g.fill(0, BAR_H, this.width, BAR_H + 1, 0x60FFFFFF);
+        int textY = (BAR_H - this.font.lineHeight) / 2 + 1;
+        g.text(this.font, "FW Paint — Quick selector", 8, textY, WHITE);
+        String[] names = co.fax.wang.GradientScreen.barTabNames();
+        int[] xs = tabXs();
+        for (int i = 0; i < names.length; i++) {
+            boolean hover = mouseY < BAR_H && mouseX >= xs[i * 2]
+                    && mouseX <= xs[i * 2] + xs[i * 2 + 1];
+            g.text(this.font, names[i], xs[i * 2], textY, hover ? WHITE : GREY);
         }
     }
 

@@ -313,10 +313,10 @@ public final class PaintPlacer {
         return "'" + name + "': can't resolve colours — add a block to the palette";
     }
 
-    /** The block at {@code pos} as a colour anchor, or null when it's air. */
+    /** The block at {@code pos} as a colour anchor, or null when it's empty (air/fluid). */
     private static Block anchorAt(Minecraft mc, BlockPos pos) {
         var state = mc.level.getBlockState(pos);
-        return state.isAir() ? null : state.getBlock();
+        return Gradient.emptyCell(state) ? null : state.getBlock();
     }
 
     /**
@@ -336,10 +336,10 @@ public final class PaintPlacer {
             var state = mc.level.getBlockState(p);
             if (boundary < 0 && (MarkerManager.endMarkers.contains(p)
                     || (inRegion && !co.fax.wang.shape.ShapeMarkers.contains(p))
-                    || !state.isAir())) {
+                    || !Gradient.emptyCell(state))) {
                 boundary = k;
             }
-            if (!state.isAir()) return new EndScan(boundary, state.getBlock());
+            if (!Gradient.emptyCell(state)) return new EndScan(boundary, state.getBlock());
         }
         return new EndScan(boundary, null);
     }
@@ -364,8 +364,8 @@ public final class PaintPlacer {
                 markerDriven = true;
             } else {
                 boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(clicked.relative(dir));
-                bases = perpRun(mc, clicked, dir, p -> !mc.level.getBlockState(p).isAir()
-                        && mc.level.getBlockState(p.relative(dir)).isAir()
+                bases = perpRun(mc, clicked, dir, p -> !Gradient.emptyCell(mc.level.getBlockState(p))
+                        && Gradient.emptyCell(mc.level.getBlockState(p.relative(dir)))
                         && !MarkerManager.endMarkers.contains(p.relative(dir))
                         && (!regionOnly || co.fax.wang.shape.ShapeMarkers.contains(p.relative(dir)))
                         && !outOfReach(mc, p.relative(dir)));
@@ -439,7 +439,7 @@ public final class PaintPlacer {
             if (MarkerManager.endMarkers.contains(cell)
                     || (co.fax.wang.shape.ShapeMarkers.any()
                             && co.fax.wang.shape.ShapeMarkers.contains(cell) != c.inRegion)
-                    || !mc.level.getBlockState(cell).isAir() || outOfReach(mc, cell)) {
+                    || !Gradient.emptyCell(mc.level.getBlockState(cell)) || outOfReach(mc, cell)) {
                 it.remove();
                 continue;
             }
@@ -575,9 +575,9 @@ public final class PaintPlacer {
                     if (du == 0 && dv == 0) continue;
                     BlockPos n = p.offset(du * ux, du * uy + dv * vy, dv * vz);
                     if (seen.contains(n)) continue;
-                    if (mc.level.getBlockState(n).isAir()) continue;          // needs a block to grow from
+                    if (Gradient.emptyCell(mc.level.getBlockState(n))) continue; // needs a block to grow from
                     BlockPos front = n.relative(dir);
-                    if (!mc.level.getBlockState(front).isAir()) continue;     // face not exposed on this plane
+                    if (!Gradient.emptyCell(mc.level.getBlockState(front))) continue; // face not exposed on this plane
                     if (MarkerManager.endMarkers.contains(front)) continue;   // marker right on the face
                     if (regionOnly && !co.fax.wang.shape.ShapeMarkers.contains(front)) continue;
                     if (outOfReach(mc, front)) continue;
@@ -614,7 +614,7 @@ public final class PaintPlacer {
                 default -> Math.max(1, Math.min(16, PaletteChoice.columnCells(prepared, ramp3d, -1)));
             };
         }
-        if (!mc.level.getBlockState(seed).isAir()) {
+        if (!Gradient.emptyCell(mc.level.getBlockState(seed))) {
             overlay(mc, type.label() + ": no space to fill there");
             return;
         }
@@ -625,7 +625,7 @@ public final class PaintPlacer {
         visited.add(center);
         if (!seed.equals(center)) visited.add(seed); // resuming: grow outward from the click too
         radius = (int) Math.ceil(Math.sqrt(seed.distSqr(center)));
-        if (mc.level.getBlockState(seed).isAir()) {
+        if (Gradient.emptyCell(mc.level.getBlockState(seed))) {
             queue.add(new Pending(seed, gradCtx3d(seed), 0));
         }
         active = true;
@@ -654,7 +654,7 @@ public final class PaintPlacer {
                 BlockPos n = p.relative(d);
                 if (visited.contains(n)) continue;
                 if (n.distSqr(center) > r2) continue;
-                if (!mc.level.getBlockState(n).isAir()) continue; // walls block the fill
+                if (!Gradient.emptyCell(mc.level.getBlockState(n))) continue; // walls block the fill
                 if (MarkerManager.endMarkers.contains(n)) continue; // end markers bound it even in air
                 if (spaceConstrained && inSpace(n) != startedInSpace) continue;
                 if (outOfReach(mc, n)) continue;
@@ -714,7 +714,8 @@ public final class PaintPlacer {
         FloodFill.Region region = (x, y, z) ->
                 (haveMarkers && NoisePlacer.inMarkedSegment(x, y, z, maxDist))
                 || (haveRegions && co.fax.wang.shape.ShapeMarkers.contains(new BlockPos(x, y, z)));
-        FloodFill.AirTest air = (x, y, z) -> mc.level.getBlockState(new BlockPos(x, y, z)).isAir();
+        FloodFill.AirTest air = (x, y, z) ->
+                Gradient.emptyCell(mc.level.getBlockState(new BlockPos(x, y, z)));
         int[][] seed = NoisePlacer.raycastSeed(mc, region, air);
         if (seed == null) return false; // not aimed into a region — fall through to the blob fill
 
@@ -751,7 +752,7 @@ public final class PaintPlacer {
         int budget = queue.size(); // one pass — retries wait for the next tick
         while (!queue.isEmpty() && placed < PLACE_PER_TICK && budget-- > 0) {
             Pending p = queue.poll();
-            if (!mc.level.getBlockState(p.cell()).isAir()) continue;
+            if (!Gradient.emptyCell(mc.level.getBlockState(p.cell()))) continue;
             BlockPos support = findSupport(mc, p.cell());
             if (support == null) {
                 if (p.tries() + 1 < MAX_TRIES) queue.add(new Pending(p.cell(), p.g(), p.tries() + 1));
@@ -911,8 +912,8 @@ public final class PaintPlacer {
                     boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(b.relative(d));
                     List<BlockPos> bases = (seed != null)
                             ? perpRun(mc, seed, d, p -> MarkerManager.startMarkers.contains(p))
-                            : perpRun(mc, b, d, p -> !mc.level.getBlockState(p).isAir()
-                                    && mc.level.getBlockState(p.relative(d)).isAir()
+                            : perpRun(mc, b, d, p -> !Gradient.emptyCell(mc.level.getBlockState(p))
+                                    && Gradient.emptyCell(mc.level.getBlockState(p.relative(d)))
                                     && !MarkerManager.endMarkers.contains(p.relative(d))
                                     && (!regionOnly || co.fax.wang.shape.ShapeMarkers.contains(p.relative(d)))
                                     && !outOfReach(mc, p.relative(d)));
@@ -920,7 +921,7 @@ public final class PaintPlacer {
                 }
                 case FILL3D -> {
                     for (Direction dd : Direction.values()) {
-                        if (mc.level.getBlockState(b.relative(dd)).isAir()) {
+                        if (Gradient.emptyCell(mc.level.getBlockState(b.relative(dd)))) {
                             previewPos.add(b);
                             previewDir.add(dd);
                         }
@@ -953,8 +954,8 @@ public final class PaintPlacer {
         BlockPos cell = b.relative(d, Math.max(1, first));
         Seg seg = segmentForCell(cell);
         if (seg == null) return List.of("Selected from palette");
-        boolean sAir = mc.level.getBlockState(seg.s()).isAir();
-        boolean eAir = mc.level.getBlockState(seg.e()).isAir();
+        boolean sAir = Gradient.emptyCell(mc.level.getBlockState(seg.s()));
+        boolean eAir = Gradient.emptyCell(mc.level.getBlockState(seg.e()));
         if (!sAir && !eAir) return List.of("Anchored to markers");
         if (sAir && eAir) return List.of("Selected from palette");
         return sAir
@@ -991,7 +992,7 @@ public final class PaintPlacer {
         for (int k = 1; k <= SCAN_LIMIT; k++) {
             BlockPos p = base.relative(dir, k);
             if (MarkerManager.endMarkers.contains(p)) return -1;
-            if (mc.level.getBlockState(p).isAir()) return k;
+            if (Gradient.emptyCell(mc.level.getBlockState(p))) return k;
         }
         return -1;
     }
@@ -1035,7 +1036,8 @@ public final class PaintPlacer {
     private static BlockPos findSupport(Minecraft mc, BlockPos cell) {
         for (Direction d : Direction.values()) {
             BlockPos n = cell.relative(d);
-            if (!mc.level.getBlockState(n).isAir()) return n;
+            // A fluid/replaceable neighbour can't be clicked against — only real blocks support.
+            if (!Gradient.emptyCell(mc.level.getBlockState(n))) return n;
         }
         return null;
     }

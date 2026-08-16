@@ -36,16 +36,20 @@ public final class Gradient {
 
     private Gradient() {}
 
+    /** The mod's own keybind category (Options → Controls → Key Binds → FW Paint). */
+    private static final KeyMapping.Category KEY_CATEGORY =
+            KeyMapping.Category.register(Identifier.fromNamespaceAndPath(MOD_ID, "main"));
+
     /** Build the (vanilla) key mappings; each loader entry registers them its own way. */
     public static void createKeyMappings() {
         openKey = new KeyMapping("key.gradient.open", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_K, KeyMapping.Category.MISC);
+                GLFW.GLFW_KEY_K, KEY_CATEGORY);
         wheelKey = new KeyMapping("key.gradient.wheel", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_G, KeyMapping.Category.MISC);
+                GLFW.GLFW_KEY_G, KEY_CATEGORY);
         cyclePaletteKey = new KeyMapping("key.gradient.cycle_palette", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_B, KeyMapping.Category.MISC);
+                GLFW.GLFW_KEY_B, KEY_CATEGORY);
         clearConnectedKey = new KeyMapping("key.gradient.clear_connected", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_LEFT_CONTROL, KeyMapping.Category.MISC);
+                GLFW.GLFW_KEY_LEFT_CONTROL, KEY_CATEGORY);
     }
 
     /** Physical state of {@link #wheelKey} last tick (edge detection for hold-to-open). */
@@ -85,6 +89,15 @@ public final class Gradient {
      */
     public static boolean shouldCancelClick() {
         return toolEngaged() && !BlockPlacement.isPlacing();
+    }
+
+    /**
+     * True when a cell counts as empty space for painting: air, or anything vanilla hand
+     * placement would replace — fluids (water, lava), tall grass, snow layers. Waterlogged
+     * solids are NOT empty. Columns grow through it, fills flood it, scans see past it.
+     */
+    public static boolean emptyCell(net.minecraft.world.level.block.state.BlockState state) {
+        return state.isAir() || state.canBeReplaced();
     }
 
     /** True when the configured paint tool item is in the player's main hand. */

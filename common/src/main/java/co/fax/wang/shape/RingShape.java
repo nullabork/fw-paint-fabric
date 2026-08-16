@@ -195,45 +195,99 @@ public final class RingShape {
         ctrlB = cellFromOffset(offB[0] * c - offB[1] * s, offB[0] * s + offB[1] * c);
     }
 
-    // ---- silhouette (bright outline drawn after water) ----------------------------------------
+    // ---- cached geometry: silhouette + band raster --------------------------------------------
 
     private VoxelShape silhouetteCache;
     private long silhouetteKey = Long.MIN_VALUE;
     private int silhouetteBound; // bound the cache was built with — the origin must match it
+    // Band raster, built with the silhouette: every band cell's in-plane offset plus a 4-bit
+    // neighbor mask (bit0 +u, bit1 -u, bit2 +v, bit3 -v: that neighbor is ALSO in the band).
+    // Renderers iterate this instead of re-running the trig membership test per cell per frame.
+    private int[] rasterDu = new int[0], rasterDv = new int[0];
+    private byte[] rasterMask = new byte[0];
 
     /**
-     * A merged {@link VoxelShape} of the whole ring band × extrusion, anchored at
-     * {@link #silhouetteOrigin()} — its outline traces the composite shape's true edges and
-     * is submitted after translucent terrain so it reads over water. The shape is
-     * center-relative (moving/scrolling never rebuilds it) and cached against the parameters
-     * that change the geometry; {@code allowRebuild=false} serves the stale cache instead of
-     * rebuilding (drag throttling — unions aren't free).
+     * Rebuilds the cached silhouette + raster when the geometry key (radii, height, kind,
+     * rotation) changed. The caches are center-relative (moving/scrolling never rebuilds);
+     * {@code allowRebuild=false} serves stale caches instead (drag throttling).
      */
-    public VoxelShape silhouette(boolean allowRebuild) {
+    public void ensureGeometry(boolean allowRebuild) {
         long key = ((long) rMin() * 31 + rMax()) * 31 + height;
         key = key * 31 + kind.ordinal();
         key ^= Double.doubleToLongBits(theta);
-        if (silhouetteCache != null && (key == silhouetteKey || !allowRebuild)) return silhouetteCache;
+        if (silhouetteCache != null && (key == silhouetteKey || !allowRebuild)) return;
 
         int bound = scanBound();
         silhouetteBound = bound;
         int span = layerHi() - layerLo() + 1;
-        VoxelShape acc = Shapes.empty();
+        java.util.List<VoxelShape> boxes = new java.util.ArrayList<>();
+        int cap = (2 * bound + 1) * (2 * bound + 1);
+        int[] cdu = new int[cap], cdv = new int[cap];
+        byte[] cmask = new byte[cap];
+        int cells = 0;
         for (int dv = -bound; dv <= bound; dv++) {
             int runStart = Integer.MIN_VALUE;
             for (int du = -bound; du <= bound + 1; du++) {
                 boolean on = du <= bound && onRing(du, dv);
+                if (on) {
+                    int m = (onRing(du + 1, dv) ? 1 : 0) | (onRing(du - 1, dv) ? 2 : 0)
+                            | (onRing(du, dv + 1) ? 4 : 0) | (onRing(du, dv - 1) ? 8 : 0);
+                    cdu[cells] = du;
+                    cdv[cells] = dv;
+                    cmask[cells] = (byte) m;
+                    cells++;
+                }
                 if (on && runStart == Integer.MIN_VALUE) {
                     runStart = du;
                 } else if (!on && runStart != Integer.MIN_VALUE) {
-                    acc = Shapes.or(acc, runBox(runStart, du, dv, bound, span));
+                    boxes.add(runBox(runStart, du, dv, bound, span));
                     runStart = Integer.MIN_VALUE;
                 }
             }
         }
-        silhouetteCache = acc;
+        silhouetteCache = mergeBalanced(boxes, 0, boxes.size());
+        rasterDu = java.util.Arrays.copyOf(cdu, cells);
+        rasterDv = java.util.Arrays.copyOf(cdv, cells);
+        rasterMask = java.util.Arrays.copyOf(cmask, cells);
         silhouetteKey = key;
-        return acc;
+    }
+
+    /**
+     * Balanced pairwise union — {@link Shapes#or} left-folded over hundreds of run boxes is
+     * quadratic and was the visible hitch while rotating a big shape; a merge tree is cheap.
+     */
+    private static VoxelShape mergeBalanced(java.util.List<VoxelShape> boxes, int lo, int hi) {
+        if (hi - lo == 0) return Shapes.empty();
+        if (hi - lo == 1) return boxes.get(lo);
+        int mid = (lo + hi) >>> 1;
+        return Shapes.or(mergeBalanced(boxes, lo, mid), mergeBalanced(boxes, mid, hi));
+    }
+
+    /**
+     * A merged {@link VoxelShape} of the whole ring band × extrusion, anchored at
+     * {@link #silhouetteOrigin()} — its outline traces the composite shape's true edges and
+     * is submitted after translucent terrain so it reads over water.
+     */
+    public VoxelShape silhouette(boolean allowRebuild) {
+        ensureGeometry(allowRebuild);
+        return silhouetteCache;
+    }
+
+    public int rasterSize() {
+        return rasterDu.length;
+    }
+
+    public int rasterDu(int i) {
+        return rasterDu[i];
+    }
+
+    public int rasterDv(int i) {
+        return rasterDv[i];
+    }
+
+    /** 4-bit in-plane neighbor mask: bit0 +u, bit1 -u, bit2 +v, bit3 -v in the band. */
+    public int rasterMask(int i) {
+        return rasterMask[i];
     }
 
     /** World cell the silhouette shape's (0,0,0) corner sits on (matches the cached build). */

@@ -63,7 +63,7 @@ public final class NoisePlacer {
             if (!region.contains(c.getX(), c.getY(), c.getZ()) || !air.isAir(c.getX(), c.getY(), c.getZ())) continue;
             for (Direction dir : Direction.values()) {
                 BlockPos n = c.relative(dir);
-                if (!mc.level.getBlockState(n).isAir()) {
+                if (!Gradient.emptyCell(mc.level.getBlockState(n))) {
                     return new int[][]{{c.getX(), c.getY(), c.getZ()}, {n.getX(), n.getY(), n.getZ()}};
                 }
             }
