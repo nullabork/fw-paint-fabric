@@ -64,6 +64,33 @@ public final class WorldDraw {
     }
 
     /**
+     * The occluded-only counterpart of {@link #compositeOutline}: vanilla's secondary-outline
+     * pipeline draws with an INVERTED depth test, so exactly the parts hidden behind terrain
+     * render — submitted faint, it reads as a ghost of the shape through the ground.
+     */
+    /**
+     * See-through edge lines for a block-aligned box: crossed thin quads on all 12 edges,
+     * drawn with the depth-IGNORING text-background pipeline (POSITION_COLOR, textureless) —
+     * 26.2 is reversed-Z and ships no occluded-only world pipeline, so an on-top pass is how
+     * buried markers stay findable. Submitted at modest alpha it reads as a faint cage
+     * through terrain and a slight glow over the visible parts.
+     */
+    public static void boxEdgesSeeThrough(SubmitNodeCollector col, PoseStack ps, Vec3 cam,
+                                          BlockPos min, int sx, int sy, int sz, int argb) {
+        ps.pushPose();
+        ps.translate(min.getX() - cam.x, min.getY() - cam.y, min.getZ() - cam.z);
+        col.submitCustomGeometry(ps, RenderTypes.textBackgroundSeeThrough(),
+                (pose, vc) -> emitEdgesBounds(pose, vc, argb, 0x3F,
+                        -EXPAND, -EXPAND, -EXPAND, sx + EXPAND, sy + EXPAND, sz + EXPAND));
+        ps.popPose();
+    }
+
+    /** The depth-ignoring render type for see-through passes (see {@link #boxEdgesSeeThrough}). */
+    public static net.minecraft.client.renderer.rendertype.RenderType seeThrough() {
+        return RenderTypes.textBackgroundSeeThrough();
+    }
+
+    /**
      * Translucent walls of the block-aligned box from {@code min} spanning (sx, sy, sz)
      * blocks. Faces are emitted double-sided so the region also reads from inside it.
      */
@@ -110,8 +137,33 @@ public final class WorldDraw {
 
     // ---- geometry emitters (block-local coordinates) --------------------------------------
 
+    /**
+     * Masked box faces for a cell at offset (ox, oy, oz) from the pose origin. Public so a
+     * shape can batch its whole band into ONE geometry submission instead of one per cell.
+     */
+    public static void emitCellFaces(PoseStack.Pose pose, VertexConsumer vc,
+                                     float ox, float oy, float oz, int argb, int mask) {
+        emitMaskedBoxBounds(pose, vc, argb, mask,
+                ox - EXPAND, oy - EXPAND, oz - EXPAND,
+                ox + 1 + EXPAND, oy + 1 + EXPAND, oz + 1 + EXPAND);
+    }
+
+    /** Convex-edge highlight lines for a cell at offset (ox, oy, oz); see {@link #blockEdges}. */
+    public static void emitCellEdges(PoseStack.Pose pose, VertexConsumer vc,
+                                     float ox, float oy, float oz, int argb, int mask) {
+        if (Integer.bitCount(mask) < 2) return;
+        emitEdgesBounds(pose, vc, argb, mask,
+                ox - EXPAND, oy - EXPAND, oz - EXPAND,
+                ox + 1 + EXPAND, oy + 1 + EXPAND, oz + 1 + EXPAND);
+    }
+
     private static void emitEdges(PoseStack.Pose pose, VertexConsumer vc, int argb, int mask) {
-        float a = -EXPAND, b = 1 + EXPAND;
+        emitEdgesBounds(pose, vc, argb, mask, -EXPAND, -EXPAND, -EXPAND,
+                1 + EXPAND, 1 + EXPAND, 1 + EXPAND);
+    }
+
+    private static void emitEdgesBounds(PoseStack.Pose pose, VertexConsumer vc, int argb, int mask,
+                                        float ax, float ay, float az, float bx, float by, float bz) {
         float w = 0.02f;
         Direction[] dirs = Direction.values();
         for (int i = 0; i < 6; i++) {
@@ -121,9 +173,9 @@ public final class WorldDraw {
                 Direction d1 = dirs[i], d2 = dirs[j];
                 if (d1.getAxis() == d2.getAxis()) continue;
                 // The edge segment shared by the two faces, spanning the remaining axis.
-                double[] lo = {a, a, a}, hi = {b, b, b};
-                pin(lo, hi, d1, a, b);
-                pin(lo, hi, d2, a, b);
+                double[] lo = {ax, ay, az}, hi = {bx, by, bz};
+                pin(lo, hi, d1, ax, ay, az, bx, by, bz);
+                pin(lo, hi, d2, ax, ay, az, bx, by, bz);
                 Vec3 e1 = new Vec3(lo[0], lo[1], lo[2]);
                 Vec3 e2 = new Vec3(hi[0], hi[1], hi[2]);
                 // Crossed thin quads along the edge so the line reads from any angle.
@@ -136,9 +188,12 @@ public final class WorldDraw {
     }
 
     /** Clamps the edge segment to {@code d}'s side of the box on {@code d}'s axis. */
-    private static void pin(double[] lo, double[] hi, Direction d, float a, float b) {
-        double side = d.getAxisDirection().getStep() > 0 ? b : a;
+    private static void pin(double[] lo, double[] hi, Direction d,
+                            float ax, float ay, float az, float bx, float by, float bz) {
         int idx = switch (d.getAxis()) { case X -> 0; case Y -> 1; case Z -> 2; };
+        double side = d.getAxisDirection().getStep() > 0
+                ? (idx == 0 ? bx : idx == 1 ? by : bz)
+                : (idx == 0 ? ax : idx == 1 ? ay : az);
         lo[idx] = side;
         hi[idx] = side;
     }
@@ -153,13 +208,18 @@ public final class WorldDraw {
 
     /** Unit box with per-face culling; bit index = Direction.ordinal() (DOWN..EAST). */
     private static void emitMaskedBox(PoseStack.Pose pose, VertexConsumer vc, int argb, int mask) {
-        float a = -EXPAND, b = 1 + EXPAND;
-        if ((mask & 0x01) != 0) quad(vc, pose, argb, a, a, a, b, a, a, b, a, b, a, a, b); // down
-        if ((mask & 0x02) != 0) quad(vc, pose, argb, a, b, a, a, b, b, b, b, b, b, b, a); // up
-        if ((mask & 0x04) != 0) quad(vc, pose, argb, a, a, a, a, b, a, b, b, a, b, a, a); // north
-        if ((mask & 0x08) != 0) quad(vc, pose, argb, a, a, b, b, a, b, b, b, b, a, b, b); // south
-        if ((mask & 0x10) != 0) quad(vc, pose, argb, a, a, a, a, a, b, a, b, b, a, b, a); // west
-        if ((mask & 0x20) != 0) quad(vc, pose, argb, b, a, a, b, b, a, b, b, b, b, a, b); // east
+        emitMaskedBoxBounds(pose, vc, argb, mask, -EXPAND, -EXPAND, -EXPAND,
+                1 + EXPAND, 1 + EXPAND, 1 + EXPAND);
+    }
+
+    private static void emitMaskedBoxBounds(PoseStack.Pose pose, VertexConsumer vc, int argb, int mask,
+                                            float ax, float ay, float az, float bx, float by, float bz) {
+        if ((mask & 0x01) != 0) quad(vc, pose, argb, ax, ay, az, bx, ay, az, bx, ay, bz, ax, ay, bz); // down
+        if ((mask & 0x02) != 0) quad(vc, pose, argb, ax, by, az, ax, by, bz, bx, by, bz, bx, by, az); // up
+        if ((mask & 0x04) != 0) quad(vc, pose, argb, ax, ay, az, ax, by, az, bx, by, az, bx, ay, az); // north
+        if ((mask & 0x08) != 0) quad(vc, pose, argb, ax, ay, bz, bx, ay, bz, bx, by, bz, ax, by, bz); // south
+        if ((mask & 0x10) != 0) quad(vc, pose, argb, ax, ay, az, ax, ay, bz, ax, by, bz, ax, by, az); // west
+        if ((mask & 0x20) != 0) quad(vc, pose, argb, bx, ay, az, bx, by, az, bx, by, bz, bx, ay, bz); // east
     }
 
     private static void emitRegionBox(PoseStack.Pose pose, VertexConsumer vc,

@@ -41,6 +41,14 @@ public final class ShapeMarkers {
     // Ring visuals (fw-rule palette).
     private static final int RING_FILL = 0x33FFA000;        // committed ring cells (kept faint)
     private static final int RING_EDGE = 0xD8FFB830;        // bright silhouette edges on the band
+    private static final int RING_EDGE_LOOKED = 0xF0FFFFFF; // edges go white while looked at
+    // The on-top ghost pass draws through EVERYTHING (26.2 has no occluded-only pipeline), so
+    // it stays at modest alpha: a faint cage through terrain, a slight glow where visible.
+    private static final int RING_GHOST = 0x5CFFB830;       // edge cage through terrain
+    private static final int RING_GHOST_LOOKED = 0xA8FFFFFF;
+    private static final int CONTROL_GHOST = 0x6660A0FF;    // control column cage
+    private static final int CORNER_GHOST = 0x6640C860;
+    private static final int BOX_GHOST = 0x5CE0E0E0;
     private static final int RING_PREVIEW = 0x22FFA000;     // creation preview ring
     private static final int CONTROL_FILL = 0x7760A0FF;     // blue control blocks
     private static final int CONTROL_AIMED = 0x99A8CCFF;    // lighter blue when aimed
@@ -62,11 +70,12 @@ public final class ShapeMarkers {
     private static final List<RingShape> shapes = new ArrayList<>();
     private static BoxRegion box;
 
-    // Box drag state (Marker box mode).
+    // Box creation state (Marker box mode): corner A pending until right-click commits B.
     private static BlockPos boxCornerA;
     private static Direction.Axis boxAxis;
-    private static BlockPos boxHover;
-    private static boolean boxDragging;
+
+    /** The shape the crosshair is on (silhouette ray-hit — works through terrain), or null. */
+    private static RingShape lookedShape;
 
     // Ring creation state: center+normal set after click 1, ctrlA after click 2.
     private static BlockPos pendingCenter;
@@ -144,10 +153,11 @@ public final class ShapeMarkers {
     public static void clearAll() {
         shapes.clear();
         box = null;
-        clearBoxDrag();
+        clearBoxPending();
         clearPending();
         aimedShape = null;
         dragShape = null;
+        lookedShape = null;
         scrollShape = null;
         scrollGrace = 0;
         saveCurrent();
@@ -164,10 +174,11 @@ public final class ShapeMarkers {
         if (!java.util.Objects.equals(key, currentKey)) {
             currentKey = key;
             box = ShapeStore.loadInto(key, shapes); // null key (main menu) clears
-            clearBoxDrag();
+            clearBoxPending();
             clearPending();
             aimedShape = null;
             dragShape = null;
+            lookedShape = null;
             scrollShape = null;
             scrollGrace = 0;
         }
@@ -190,27 +201,32 @@ public final class ShapeMarkers {
         pendingCtrlA = null;
     }
 
-    private static void clearBoxDrag() {
+    private static void clearBoxPending() {
         boxCornerA = null;
         boxAxis = null;
-        boxHover = null;
-        boxDragging = false;
     }
 
     /**
-     * Mouse-wheel hook from the loader shells. While aiming a ring control, scrolling slides
-     * the whole shape along its extrusion axis (scroll up = positive normal). Once a scroll-
-     * grab starts it survives aim slips for a short grace window. Returns true when consumed
-     * (the shells then cancel the vanilla hotbar scroll).
+     * Mouse-wheel hook from the loader shells. While the crosshair is on a shape — any part of
+     * its band, not just a control — scrolling slides it along its extrusion axis (scroll up =
+     * positive normal). Once a scroll-grab starts it survives aim slips for a short grace
+     * window. Returns true when consumed (the shells then cancel the vanilla hotbar scroll).
      */
     public static boolean onScroll(double deltaY) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.player == null || deltaY == 0) return false;
         if (!Gradient.holdingPaintTool(mc) || mc.gui.screen() != null) return false;
         // Sticky grab first: mid-scroll aim slips don't switch shapes.
-        RingShape target = scrollGrace > 0 && scrollShape != null ? scrollShape : aimedShape;
+        RingShape target = scrollGrace > 0 && scrollShape != null ? scrollShape
+                : aimedShape != null ? aimedShape : lookedShape;
         if (target == null) return false;
-        target.moveCenterTo(RingShape.offset(target.center, target.normal, deltaY > 0 ? 1 : -1));
+        if (Gradient.clearConnectedDown()) {
+            // Modifier + scroll: extrude — up grows a layer along +normal, down shrinks it
+            // (past one layer it flips out the other side, like right-click extrude).
+            target.extrude(deltaY > 0 ? 1 : -1);
+        } else {
+            target.moveCenterTo(RingShape.offset(target.center, target.normal, deltaY > 0 ? 1 : -1));
+        }
         scrollShape = target;
         scrollGrace = SCROLL_GRACE_TICKS;
         return true;
@@ -234,16 +250,17 @@ public final class ShapeMarkers {
 
         boolean screenOpen = mc.gui.screen() != null;
         // Controls respond whenever the paint tool is in hand — the marker modes are only
-        // needed to CREATE regions (box drag, ring clicks).
+        // needed to CREATE regions (box corners, ring clicks).
         boolean handles = Gradient.holdingPaintTool(mc) && !screenOpen;
         boolean boxCreate = pm == PlacementMode.MARKER_BOX && !screenOpen;
         boolean ringCreate = ringMode(pm) && !screenOpen;
 
-        if (!boxCreate && boxDragging) clearBoxDrag(); // leaving box mode drops the half-drag
+        if (!boxCreate) clearBoxPending(); // leaving box mode drops the pending corner
         if (!ringCreate) clearPending(); // leaving the mode mid-creation drops the half-built shape
         if (!handles) {
             dragShape = null;
             aimedShape = null;
+            lookedShape = null;
             scrollShape = null;
             scrollGrace = 0;
             lastAttack = mc.options.keyAttack.isDown();
@@ -253,6 +270,7 @@ public final class ShapeMarkers {
         }
 
         updateAimedControl(mc);
+        updateLookedShape(mc);
 
         boolean attack = mc.options.keyAttack.isDown();
         boolean use = mc.options.keyUse.isDown();
@@ -269,25 +287,15 @@ public final class ShapeMarkers {
                     dragStartOffB = dragShape.offsetOf(dragShape.ctrlB);
                 }
             } else if (boxCreate) {
+                // Left click sets (or moves) corner A; its face is the gradient axis.
                 BlockHitResult hit = Raycast.aimedBlock(mc);
-                if (hit != null) {                        // anchor corner A; face = gradient axis
+                if (hit != null) {
                     boxCornerA = hit.getBlockPos().immutable();
                     boxAxis = hit.getDirection().getAxis();
-                    boxHover = boxCornerA;
-                    boxDragging = true;
+                    overlay(mc, "FW Paint — Box: right-click the opposite corner");
                 }
             } else if (ringCreate) {
                 creationClick(mc, pm);
-            }
-        }
-        if (boxDragging) {
-            BlockHitResult hit = Raycast.aimedBlock(mc);
-            if (hit != null) boxHover = hit.getBlockPos().immutable(); // sky freezes the preview
-            if (!attack) {                            // release commits wherever we last hovered
-                box = new BoxRegion(boxCornerA, boxHover, boxAxis);
-                clearBoxDrag();
-                saveCurrent();
-                overlay(mc, "FW Paint — Box marker set (start on the clicked side)");
             }
         }
         if (dragShape != null) {
@@ -298,16 +306,31 @@ public final class ShapeMarkers {
                 saveCurrent();
             }
         }
-        if (use && !lastUse && aimedShape != null) {
-            aimedShape.extrude(Gradient.clearConnectedDown() ? -1 : 1);
-            saveCurrent();
+        if (use && !lastUse) {
+            if (ringCreate && pendingCenter != null) {
+                clearPending();                // right-click cancels a part-built shape
+                overlay(mc, "FW Paint — shape cancelled");
+            } else if (boxCreate && boxCornerA != null) {
+                BlockHitResult hit = Raycast.aimedBlock(mc);
+                if (hit != null) {             // right click commits the opposite corner
+                    box = new BoxRegion(boxCornerA, hit.getBlockPos(), boxAxis);
+                    clearBoxPending();
+                    saveCurrent();
+                    overlay(mc, "FW Paint — Box marker set (start on the first corner's side)");
+                }
+            } else if (aimedShape != null) {
+                aimedShape.extrude(Gradient.clearConnectedDown() ? -1 : 1);
+                saveCurrent();
+            }
         }
-        // Middle-click removes whatever marker is aimed at, no matter the kind or mode:
-        // a shape (via its controls), the box, or a plain block marker.
-        if (pick && !lastPick && !boxDragging) {
-            if (aimedShape != null) {
-                shapes.remove(aimedShape);
-                if (scrollShape == aimedShape) scrollShape = null;
+        // Middle-click removes whatever marker is under the crosshair, no matter the kind or
+        // mode: the shape whose band (or control) is looked at, the box, or a block marker.
+        if (pick && !lastPick) {
+            RingShape target = aimedShape != null ? aimedShape : lookedShape;
+            if (target != null) {
+                shapes.remove(target);
+                if (scrollShape == target) scrollShape = null;
+                if (lookedShape == target) lookedShape = null;
                 aimedShape = null;
                 dragShape = null;
                 saveCurrent();
@@ -326,6 +349,32 @@ public final class ShapeMarkers {
         lastPick = pick;
     }
 
+    /**
+     * The shape whose band the view ray crosses (nearest first) — a precise silhouette ray
+     * test, not a world raycast, so it finds shapes buried under terrain too. While dragging,
+     * the dragged shape owns the highlight.
+     */
+    private static void updateLookedShape(Minecraft mc) {
+        if (dragShape != null) {
+            lookedShape = dragShape;
+            return;
+        }
+        lookedShape = null;
+        Vec3 eye = Raycast.eye(mc);
+        Vec3 end = eye.add(Raycast.look(mc).scale(Raycast.REACH));
+        double best = Double.MAX_VALUE;
+        for (RingShape s : shapes) {
+            var hit = s.silhouette(false).clip(eye, end, s.silhouetteOrigin());
+            if (hit != null && hit.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK) {
+                double d = hit.getLocation().distanceToSqr(eye);
+                if (d < best) {
+                    best = d;
+                    lookedShape = s;
+                }
+            }
+        }
+    }
+
     private static boolean rayHitsBox(Minecraft mc, BoxRegion b) {
         Vec3 eye = Raycast.eye(mc);
         Vec3 dir = Raycast.look(mc);
@@ -335,22 +384,6 @@ public final class ShapeMarkers {
                 mx.getX() + 1, mx.getY() + 1, mx.getZ() + 1) >= 0;
     }
 
-    /** True when the view ray crosses the shape's bounding volume ("looking at" the region). */
-    private static boolean rayHitsRing(Minecraft mc, RingShape s) {
-        Vec3 eye = Raycast.eye(mc);
-        Vec3 dir = Raycast.look(mc);
-        int b = s.scanBound();
-        BlockPos mn = RingShape.offset(RingShape.offset(RingShape.offset(
-                s.center, s.uAxis(), -b), s.vAxis(), -b), s.normal, s.layerLo());
-        int span = s.layerHi() - s.layerLo() + 1;
-        int su = 2 * b + 1;
-        double sx = s.normal == Direction.Axis.X ? span : su;
-        double sy = s.normal == Direction.Axis.Y ? span : su;
-        double sz = s.normal == Direction.Axis.Z ? span : su;
-        return ShapeMath.rayBoxIntersect(eye.x, eye.y, eye.z, dir.x, dir.y, dir.z,
-                mn.getX(), mn.getY(), mn.getZ(),
-                mn.getX() + sx, mn.getY() + sy, mn.getZ() + sz) >= 0;
-    }
 
     /** The three creation clicks: center (plane from the clicked face), radius A, radius B. */
     private static void creationClick(Minecraft mc, PlacementMode pm) {
@@ -519,14 +552,19 @@ public final class ShapeMarkers {
 
         frame++;
         for (RingShape shape : shapes) {
-            drawRing(col, ps, cam, shape, shape.layerLo(), shape.layerHi(), RING_FILL);
-            // The bright merged-silhouette outline only shows while the tool is in hand and
-            // the crosshair is on the region — the fills always render.
-            if (handles && rayHitsRing(mc, shape)) {
-                boolean allowRebuild = shape != dragShape || frame % 4 == 0;
+            // Looking at any part of the shape turns its edges white (the "selected" read) —
+            // the whole shape is then scrollable, draggable via controls, and middle-click
+            // deletable. Rebuilding the cached geometry is throttled while dragging.
+            boolean looked = handles && (shape == lookedShape || shape == aimedShape);
+            boolean allowRebuild = shape != dragShape || frame % 4 == 0;
+            drawRing(col, ps, cam, shape, shape.layerLo(), shape.layerHi(), RING_FILL,
+                    looked ? RING_EDGE_LOOKED : RING_EDGE, allowRebuild);
+            if (looked) {
                 WorldDraw.compositeOutline(col, ps, cam, shape.silhouetteOrigin(),
-                        shape.silhouette(allowRebuild), RING_EDGE);
+                        shape.silhouette(false), RING_EDGE_LOOKED);
             }
+            // Faint on-top edge cage, always visible, so a buried shape never gets lost.
+            drawRingGhost(col, ps, cam, shape, looked ? RING_GHOST_LOOKED : RING_GHOST);
             drawControl(col, ps, cam, shape, ControlKind.RADIUS_A, -1, shape.ctrlA, handles);
             drawControl(col, ps, cam, shape, ControlKind.RADIUS_B, -1, shape.ctrlB, handles);
             drawControl(col, ps, cam, shape, ControlKind.CENTER, -1, shape.center, handles);
@@ -541,15 +579,16 @@ public final class ShapeMarkers {
         if (ringCreate) renderRingCreation(col, ps, cam, mc, pm);
     }
 
-    /** The committed box (and the live drag preview) as one region with tinted start/end planes. */
+    /** The committed box (and the pending-corner preview) as one region with tinted planes. */
     private static void renderBox(SubmitNodeCollector col, PoseStack ps, Vec3 cam,
                                   Minecraft mc, boolean handles, boolean boxCreate) {
-        if (boxCreate && !boxDragging && aimedShape == null) {
-            BlockHitResult hit = Raycast.aimedBlock(mc);
-            if (hit != null) WorldDraw.filledBlock(col, ps, cam, hit.getBlockPos(), BOX_HOVER);
+        BlockHitResult hit = boxCreate ? Raycast.aimedBlock(mc) : null;
+        if (boxCreate && aimedShape == null && hit != null) {
+            WorldDraw.filledBlock(col, ps, cam, hit.getBlockPos(), BOX_HOVER);
         }
-        BoxRegion draw = boxDragging && boxCornerA != null
-                ? new BoxRegion(boxCornerA, boxHover, boxAxis)
+        boolean pending = boxCreate && boxCornerA != null;
+        BoxRegion draw = pending
+                ? new BoxRegion(boxCornerA, hit != null ? hit.getBlockPos() : boxCornerA, boxAxis)
                 : box;
         if (draw == null) return;
 
@@ -558,11 +597,12 @@ public final class ShapeMarkers {
         int sy = mx.getY() - mn.getY() + 1;
         int sz = mx.getZ() - mn.getZ() + 1;
         WorldDraw.filledRegion(col, ps, cam, mn, sx, sy, sz, BOX_WALL);
-        // The white outline only shows while the tool is in hand and the crosshair is on the
-        // box (or while it's being dragged out).
-        if (boxDragging || (handles && rayHitsBox(mc, draw))) {
+        // The white outline shows while placing the second corner, or while the tool is in
+        // hand and the crosshair is on the box; a faint ghost always reads through terrain.
+        if (pending || (handles && rayHitsBox(mc, draw))) {
             WorldDraw.regionOutline(col, ps, cam, mn, sx, sy, sz, BOX_EDGE);
         }
+        WorldDraw.boxEdgesSeeThrough(col, ps, cam, mn, sx, sy, sz, BOX_GHOST);
 
         // Start/end plane slabs (skip when the box is flat on its axis — no direction).
         int a = draw.cornerA.get(draw.axis), b = draw.cornerB.get(draw.axis);
@@ -608,14 +648,17 @@ public final class ShapeMarkers {
             }
             WorldDraw.filledBlockFaces(col, ps, cam, RingShape.offset(cell, shape.normal, k), fill, mask);
         }
+        int span = hi - lo + 1;
+        BlockPos colLo = RingShape.offset(cell, shape.normal, lo);
+        int sx = shape.normal == Direction.Axis.X ? span : 1;
+        int sy = shape.normal == Direction.Axis.Y ? span : 1;
+        int sz = shape.normal == Direction.Axis.Z ? span : 1;
         if (aimed) {
-            int span = hi - lo + 1;
-            WorldDraw.regionOutline(col, ps, cam, RingShape.offset(cell, shape.normal, lo),
-                    shape.normal == Direction.Axis.X ? span : 1,
-                    shape.normal == Direction.Axis.Y ? span : 1,
-                    shape.normal == Direction.Axis.Z ? span : 1,
-                    CONTROL_OUTLINE);
+            WorldDraw.regionOutline(col, ps, cam, colLo, sx, sy, sz, CONTROL_OUTLINE);
         }
+        // Faint on-top cage, always visible, so buried controls stay findable and targetable.
+        WorldDraw.boxEdgesSeeThrough(col, ps, cam, colLo, sx, sy, sz,
+                aimed ? CONTROL_AIMED : (corner ? CORNER_GHOST : CONTROL_GHOST));
     }
 
     /** Creation hover + live ring preview between clicks. */
@@ -638,52 +681,108 @@ public final class ShapeMarkers {
                 ? RingShape.Kind.SQUARE : RingShape.Kind.CIRCLE;
         RingShape preview = new RingShape(kind, pendingCenter, pendingNormal,
                 pendingCtrlA != null ? pendingCtrlA : onPlane, onPlane);
-        drawRing(col, ps, cam, preview, 0, 0, RING_PREVIEW);
+        drawRing(col, ps, cam, preview, 0, 0, RING_PREVIEW, 0, true);
     }
 
     /**
-     * Rasterizes the shape's ring band on every layer [hLo..hHi] along its normal. Faces
-     * shared with a neighboring ring cell (sideways within the band, or up/down between
-     * layers) are culled, so only the outer surface of the donut/tube is drawn.
+     * The shape's ring band on every layer [hLo..hHi] along its normal, batched into ONE
+     * geometry submission from the shape's cached raster (no per-frame membership trig, no
+     * per-cell submits). Faces shared with a neighboring ring cell — sideways within the band,
+     * or up/down between layers — are culled, so only the outer surface of the donut/tube is
+     * drawn; {@code edgeArgb} lines every convex edge where two visible faces meet.
      */
-    private static void drawRing(SubmitNodeCollector col, PoseStack ps, Vec3 cam,
-                                 RingShape shape, int hLo, int hHi, int argb) {
-        int bound = shape.scanBound(); // rotated square corners reach past rMax
-        Direction.Axis uAxis = shape.uAxis(), vAxis = shape.vAxis();
-        for (int du = -bound; du <= bound; du++) {
-            for (int dv = -bound; dv <= bound; dv++) {
-                if (!shape.onRing(du, dv)) continue;
+    private static void drawRing(SubmitNodeCollector col, PoseStack ps, Vec3 cam, RingShape shape,
+                                 int hLo, int hHi, int fillArgb, int edgeArgb, boolean allowRebuild) {
+        shape.ensureGeometry(allowRebuild);
+        int n = shape.rasterSize();
+        if (n == 0) return;
+        Direction.Axis normal = shape.normal;
+        Direction.Axis uAxis = shape.uAxis();
+        BlockPos c = shape.center;
+        ps.pushPose();
+        ps.translate(c.getX() - cam.x, c.getY() - cam.y, c.getZ() - cam.z);
+        col.submitCustomGeometry(ps, net.minecraft.client.renderer.rendertype.RenderTypes.debugFilledBox(),
+                (pose, vc) -> {
+                    for (int i = 0; i < n; i++) {
+                        int du = shape.rasterDu(i), dv = shape.rasterDv(i), m4 = shape.rasterMask(i);
+                        for (int k = hLo; k <= hHi; k++) {
+                            int mask = 0;
+                            for (Direction d : Direction.values()) {
+                                int step = d.getAxisDirection().getStep();
+                                boolean neighbor;
+                                if (d.getAxis() == normal) {
+                                    int kk = k + step;
+                                    neighbor = kk >= hLo && kk <= hHi;
+                                } else if (d.getAxis() == uAxis) {
+                                    neighbor = (m4 & (step > 0 ? 1 : 2)) != 0;
+                                } else {
+                                    neighbor = (m4 & (step > 0 ? 4 : 8)) != 0;
+                                }
+                                if (!neighbor) mask |= 1 << d.ordinal();
+                            }
+                            if (mask == 0) continue;
+                            float ox = cellOffset(Direction.Axis.X, normal, uAxis, k, du, dv);
+                            float oy = cellOffset(Direction.Axis.Y, normal, uAxis, k, du, dv);
+                            float oz = cellOffset(Direction.Axis.Z, normal, uAxis, k, du, dv);
+                            WorldDraw.emitCellFaces(pose, vc, ox, oy, oz, fillArgb, mask);
+                            if (edgeArgb != 0) {
+                                WorldDraw.emitCellEdges(pose, vc, ox, oy, oz, edgeArgb, mask);
+                            }
+                        }
+                    }
+                });
+        ps.popPose();
+    }
+
+    /** The world-axis offset of a raster cell: k along the normal, (du, dv) in-plane. */
+    private static float cellOffset(Direction.Axis axis, Direction.Axis normal,
+                                    Direction.Axis uAxis, int k, int du, int dv) {
+        if (axis == normal) return k;
+        return axis == uAxis ? du : dv;
+    }
+
+    /**
+     * The band's convex-edge lines re-emitted through the depth-ignoring see-through pipeline:
+     * one batched submission tracing the shape's cage over terrain, so it never gets lost
+     * underground. Uses the cached raster; visible-face masks mirror {@link #drawRing}.
+     */
+    private static void drawRingGhost(SubmitNodeCollector col, PoseStack ps, Vec3 cam,
+                                      RingShape shape, int argb) {
+        shape.ensureGeometry(false);
+        int n = shape.rasterSize();
+        if (n == 0) return;
+        int hLo = shape.layerLo(), hHi = shape.layerHi();
+        Direction.Axis normal = shape.normal;
+        Direction.Axis uAxis = shape.uAxis();
+        BlockPos c = shape.center;
+        ps.pushPose();
+        ps.translate(c.getX() - cam.x, c.getY() - cam.y, c.getZ() - cam.z);
+        col.submitCustomGeometry(ps, WorldDraw.seeThrough(), (pose, vc) -> {
+            for (int i = 0; i < n; i++) {
+                int du = shape.rasterDu(i), dv = shape.rasterDv(i), m4 = shape.rasterMask(i);
                 for (int k = hLo; k <= hHi; k++) {
                     int mask = 0;
                     for (Direction d : Direction.values()) {
                         int step = d.getAxisDirection().getStep();
-                        boolean neighborInShape;
-                        if (d.getAxis() == shape.normal) {
+                        boolean neighbor;
+                        if (d.getAxis() == normal) {
                             int kk = k + step;
-                            neighborInShape = kk >= hLo && kk <= hHi;
+                            neighbor = kk >= hLo && kk <= hHi;
                         } else if (d.getAxis() == uAxis) {
-                            neighborInShape = shape.onRing(du + step, dv);
+                            neighbor = (m4 & (step > 0 ? 1 : 2)) != 0;
                         } else {
-                            neighborInShape = shape.onRing(du, dv + step);
+                            neighbor = (m4 & (step > 0 ? 4 : 8)) != 0;
                         }
-                        if (!neighborInShape) mask |= 1 << d.ordinal();
+                        if (!neighbor) mask |= 1 << d.ordinal();
                     }
-                    BlockPos cell = cellAt(shape.center, shape.normal, k, uAxis, du, vAxis, dv);
-                    WorldDraw.filledBlockFaces(col, ps, cam, cell, argb, mask);
-                    // Bright lines wherever two visible faces meet: the band's outer/inner
-                    // rims and jagged steps — keeps the silhouette readable through fills.
-                    if (argb == RING_FILL) WorldDraw.blockEdges(col, ps, cam, cell, RING_EDGE, mask);
+                    if (mask == 0) continue;
+                    float ox = cellOffset(Direction.Axis.X, normal, uAxis, k, du, dv);
+                    float oy = cellOffset(Direction.Axis.Y, normal, uAxis, k, du, dv);
+                    float oz = cellOffset(Direction.Axis.Z, normal, uAxis, k, du, dv);
+                    WorldDraw.emitCellEdges(pose, vc, ox, oy, oz, argb, mask);
                 }
             }
-        }
-    }
-
-    private static BlockPos cellAt(BlockPos center, Direction.Axis normal, int k,
-                                   Direction.Axis uAxis, int du, Direction.Axis vAxis, int dv) {
-        int x = center.getX(), y = center.getY(), z = center.getZ();
-        x += normal == Direction.Axis.X ? k : (uAxis == Direction.Axis.X ? du : dv);
-        y += normal == Direction.Axis.Y ? k : (uAxis == Direction.Axis.Y ? du : dv);
-        z += normal == Direction.Axis.Z ? k : (vAxis == Direction.Axis.Z ? dv : du);
-        return new BlockPos(x, y, z);
+        });
+        ps.popPose();
     }
 }

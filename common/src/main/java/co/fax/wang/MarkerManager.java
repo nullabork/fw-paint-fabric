@@ -295,7 +295,7 @@ public final class MarkerManager {
         int max = maxEndDistance();
         for (int k = 1; k <= max; k++) {
             BlockPos p = start.relative(face, k);
-            if (!mc.level.getBlockState(p).isAir()) {
+            if (!Gradient.emptyCell(mc.level.getBlockState(p))) {
                 endMarkers.add(p);
                 return;
             }

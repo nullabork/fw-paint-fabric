@@ -167,6 +167,33 @@ public final class HelpPanel {
 
     private static final List<Topic> TOPICS = List.of(
 
+        t("How do I use this?", "The 60-second version: one tool item, one wheel, right-click.",
+            List.of(
+                "Two ideas run the whole mod. One: nothing happens unless you hold your chosen "
+                    + "paint tool item (a stick is traditional), so your hands stay safe for "
+                    + "normal play. Two: everything you'd ever switch lives on one radial menu "
+                    + "- hold {wheel}, hover a wedge to fan it out, click an option, release. "
+                    + "WHAT you paint (Solid, Gradient, Noise, Pattern) and WHERE blocks go "
+                    + "(single blocks, whole faces, 3D fills) are two independent wheel "
+                    + "choices, and the helper text in the top-left always shows what's "
+                    + "active.",
+                "1. Press {open}, go to Settings, click Paint tool, pick any item.  "
+                    + "2. Hold that item. Hold {wheel}, hover Paint, click Solid.  "
+                    + "3. Still on the wheel: hover Palette, then Select block, and click a "
+                    + "block from your inventory.  "
+                    + "4. Release {wheel}, aim at any block face, right-click. You're painting "
+                    + "- hold to keep going.",
+                "Every input: {open} opens this screen. {wheel} (held) is the selector wheel - "
+                    + "everything is on it. {palette} cycles your saved palettes. {clear} is "
+                    + "the modifier key (clear connected markers, reverse extrude, +scroll "
+                    + "extrudes shapes). Right-click paints, left-click places markers and "
+                    + "drags shape controls, middle-click removes any marker, and scrolling "
+                    + "while looking at a shape slides it along its axis. Rebind everything "
+                    + "under Options > Controls > Key Binds > FW Paint.",
+                "From here it deepens as far as you like - palettes blend gradients and noise, "
+                    + "patterns paint drawings, markers and shape regions aim and bound "
+                    + "everything. The topics below cover each piece.")),
+
         t("Getting started", "Assign a tool item, build a palette, paint.", List.of(
             "1. On the Settings tab, click \"Paint tool\" and pick any item (a stick works well). "
                 + "FW Paint only does anything while you hold that item.",
@@ -188,21 +215,26 @@ public final class HelpPanel {
                 + "Anything selected but no longer available shows red (a crossed-out block, "
                 + "or a palette missing its blocks). Long lists become a "
                 + "scrolling carousel: step with the < > arrows or the mouse wheel. Click an "
-                + "option to choose (set several in one hold), release {wheel} when done. The Paint "
-                + "tab ({open} lands on it) has buttons for all of these too. Any paint type "
+                + "option to choose (set several in one hold), release {wheel} when done - or "
+                + "click a tab on the bar along the top to jump into that settings page (it "
+                + "stays open when you let go). Any paint type "
                 + "works with any placement mode, with or without markers. The helper text in "
                 + "the top-left always shows both, plus the active palette or pattern.",
             "4. Aim at a block face and right-click to paint (hold to keep going). Markers are "
                 + "optional - they bound what you paint and anchor Automatic segments.",
             "{open} opens and closes this screen. All keys are rebindable under "
-                + "Options > Controls > Key Binds > Misc (this manual always shows the current "
-                + "bindings). Placement is done with normal block-place actions the server "
-                + "validates, so everything works in multiplayer.")),
+                + "Options > Controls > Key Binds > FW Paint (this manual always shows the "
+                + "current bindings). Placement is done with normal block-place actions the "
+                + "server validates, so everything works in multiplayer.")),
 
         t("Placement modes", "Single, Face, and 3D Fill - where blocks go (pick on the {wheel} wheel).",
             List.of(
                 "The green face tint and arrow show exactly which faces the next click will grow "
                     + "from, and in which direction.",
+                "Fluids count as empty space: paint under water or lava - columns grow through "
+                    + "liquid, fills flood it, scans see past it, and blocks place into it just "
+                    + "like placing by hand (anything hand placement replaces, like tall grass "
+                    + "or snow layers, gets painted over too).",
                 "A tap places one layer; holding pauses for a beat after the first layer, then "
                     + "keeps going at full speed - release during the beat to stop at exactly "
                     + "one.",
@@ -263,11 +295,11 @@ public final class HelpPanel {
                     + "plane, instead of one at a time.",
                 "Markers are remembered per world and dimension. The Clear Markers button on the "
                     + "Settings tab removes them all."),
-            t("Marker box", "Drag once to mark a whole region as one box.", List.of(
-                "Press left-click on a block to anchor the first corner - the face you press on "
-                    + "sets the gradient direction, and that side of the box is the START. Drag "
-                    + "to the opposite corner (the box preview follows your aim) and release to "
-                    + "commit. One box at a time; a new drag replaces it.",
+            t("Marker box", "Two clicks mark a whole region as one box.", List.of(
+                "Left-click a block for the first corner - the face you click sets the gradient "
+                    + "direction, and that side of the box is the START. The box preview follows "
+                    + "your aim; right-click the opposite corner to commit. Left-click again "
+                    + "moves the first corner. One box at a time; a new one replaces it.",
                 "The box is a single region, not a pile of markers: the start plane tints "
                     + "turquoise and the end plane amber. Gradients inside it run from the start "
                     + "plane to the end plane, and painting that begins inside the box stays "
@@ -286,11 +318,17 @@ public final class HelpPanel {
                     + "square freely. Controls respond whenever the tool is in hand - just aim "
                     + "at one; no need to switch modes. The bright outline lights up while "
                     + "you're looking at a region with the tool held.",
+                "Look at any part of a shape and its edges turn white: it can then be scrolled "
+                    + "along its axis, middle-clicked away, or edited via its controls. A faint "
+                    + "ghost outline always shows through terrain, so a shape moved underground "
+                    + "stays findable and targetable - controls included.",
                 "Right-click a control to extrude the shape one layer along its plane's normal "
-                    + "(hold {clear} to extrude the other way); scroll while aiming a control to "
-                    + "slide the whole shape along that axis. Middle-click removes whatever "
-                    + "marker you're aiming at - a shape, the box, or a plain block marker - in "
-                    + "any mode. Multiple shapes can exist at once.",
+                    + "(hold {clear} to extrude the other way); scroll while looking at the "
+                    + "shape to slide it along that axis, or hold {clear} and scroll to "
+                    + "extrude up / unextrude down a layer per notch. Right-click cancels a "
+                    + "part-placed shape. Middle-click removes whatever marker you're aiming "
+                    + "at - a shape, the box, or a plain block marker - in any mode. Multiple "
+                    + "shapes can exist at once.",
                 "Painting into a shape is restricted to its band: Face mode click inside the "
                     + "ring selects exactly the ring's faces, columns stop at the extrusion's "
                     + "far end, and gradients run from the base plane (start) to the far side "
