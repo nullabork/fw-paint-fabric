@@ -10,7 +10,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,14 +41,16 @@ public final class Gradient {
 
     /** Build the (vanilla) key mappings; each loader entry registers them its own way. */
     public static void createKeyMappings() {
-        openKey = new KeyMapping("key.gradient.open", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_K, KEY_CATEGORY);
-        wheelKey = new KeyMapping("key.gradient.wheel", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_G, KEY_CATEGORY);
-        cyclePaletteKey = new KeyMapping("key.gradient.cycle_palette", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_B, KEY_CATEGORY);
-        clearConnectedKey = new KeyMapping("key.gradient.clear_connected", InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_LEFT_CONTROL, KEY_CATEGORY);
+        // 26.3 dropped GLFW for SDL — key codes come from vanilla's own InputConstants now,
+        // and Type.KEYSYM/SCANCODE collapsed into Type.KEYBOARD.
+        openKey = new KeyMapping("key.gradient.open", InputConstants.Type.KEYBOARD,
+                InputConstants.KEY_K, KEY_CATEGORY);
+        wheelKey = new KeyMapping("key.gradient.wheel", InputConstants.Type.KEYBOARD,
+                InputConstants.KEY_G, KEY_CATEGORY);
+        cyclePaletteKey = new KeyMapping("key.gradient.cycle_palette", InputConstants.Type.KEYBOARD,
+                InputConstants.KEY_B, KEY_CATEGORY);
+        clearConnectedKey = new KeyMapping("key.gradient.clear_connected", InputConstants.Type.KEYBOARD,
+                InputConstants.KEY_LCONTROL, KEY_CATEGORY);
     }
 
     /** Physical state of {@link #wheelKey} last tick (edge detection for hold-to-open). */

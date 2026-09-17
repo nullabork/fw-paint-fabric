@@ -1,6 +1,7 @@
 package co.fax.wang;
 
 import co.fax.wang.palette.AutoMode;
+import com.mojang.blaze3d.platform.InputConstants;
 import co.fax.wang.palette.Palette;
 import co.fax.wang.palette.PaletteMath;
 import co.fax.wang.palette.PaletteOrder;
@@ -22,7 +23,8 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.cursor.CursorType;
+import com.mojang.blaze3d.platform.cursor.CursorTypes;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -153,8 +155,6 @@ public class PaletteEditScreen extends Screen {
     private Screen pendingExit;
 
     // OS cursor shape management (move / vertical-resize on the right hovers).
-    private static final Map<Integer, Long> CURSORS = new HashMap<>();
-    private int cursorShape;
 
     public PaletteEditScreen(Palette source) {
         super(Component.literal("FW Paint — Palette editor"));
@@ -725,14 +725,14 @@ public class PaletteEditScreen extends Screen {
             return handleDiscardClick(mx, my, event.button());
         }
         if (expandedPreview != 0) {
-            if (event.button() == 0) {
+            if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
                 if (inCloseX(mx, my)) expandedPreview = 0;
                 else if (expandedPreview == 2) dragFace = faceAt(mx, my, true);
             }
             return true;
         }
         // Title bar: switching tabs leaves the editor (confirming unsaved changes).
-        if (my < BAR_H && event.button() == 0) {
+        if (my < BAR_H && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             int[] xs = tabXs();
             String[] names = GradientScreen.barTabNames();
             for (int i = 0; i < names.length; i++) {
@@ -743,7 +743,7 @@ public class PaletteEditScreen extends Screen {
             }
         }
         // Circled-? icons show their popup immediately (it hides again on mouse-away).
-        if (event.button() == 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             for (HelpSpot h : helpSpots) {
                 int hy = h.baseY() - scroll;
                 if (mx >= h.x() + h.w() + 2 && mx <= h.x() + h.w() + 13
@@ -756,7 +756,7 @@ public class PaletteEditScreen extends Screen {
         if (super.mouseClicked(event, doubled)) return true;
 
         // Stop handles.
-        if (event.button() == 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             int h = stopHandleAt(mx, my);
             if (h >= 0) {
                 beginStopDrag(h);
@@ -764,7 +764,7 @@ public class PaletteEditScreen extends Screen {
             }
         }
         // Segment body: press begins a potential drag; release without movement selects.
-        if (event.button() == 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             int seg = segmentAt(mx, my);
             if (seg >= 0) {
                 dragSeg = seg;
@@ -778,7 +778,7 @@ public class PaletteEditScreen extends Screen {
             }
         }
         // Noise-preview pan (collapsed, right half).
-        if (event.button() == 0 && !editing.segments.isEmpty()) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && !editing.segments.isEmpty()) {
             int[] nb = previewHalf(true);
             int ny = nb[1] - scroll;
             if (mx >= nb[0] && mx <= nb[0] + nb[2] && my >= ny && my <= ny + nb[3]) {
@@ -799,13 +799,13 @@ public class PaletteEditScreen extends Screen {
         if (idx < 0 || idx >= leftRows.size()) return true;
         LRow row = leftRows.get(idx);
         String key = row.auto() != null ? "auto:" + row.auto() : row.id();
-        if (button == 1 && row.auto() == null) {
+        if (button == InputConstants.MOUSE_BUTTON_RIGHT && row.auto() == null) {
             // Right-click: ban/unban from Automatic segments (saved on the palette).
             if (!editing.autoExclude.remove(row.id())) editing.autoExclude.add(row.id());
             dirty = true;
             return true;
         }
-        if (button == 0) {
+        if (button == InputConstants.MOUSE_BUTTON_LEFT) {
             long now = System.currentTimeMillis();
             boolean dbl = doubled || (key.equals(lastRowClickId) && now - lastRowClickMs < 400);
             lastRowClickId = dbl ? null : key;
@@ -846,7 +846,7 @@ public class PaletteEditScreen extends Screen {
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
         double mx = event.x(), my = event.y();
-        if (event.button() == 0 && dragStop >= 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && dragStop >= 0) {
             int count = editing.segments.size();
             if (editing.stops.size() == count - 1 && dragStop < editing.stops.size()) {
                 double v = (my - stripY()) / (double) STRIP_H;
@@ -858,7 +858,7 @@ public class PaletteEditScreen extends Screen {
             }
             return true;
         }
-        if (event.button() == 0 && paneDragIdx >= 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && paneDragIdx >= 0) {
             paneDragX = mx;
             paneDragY = my;
             if (!paneDragging && (Math.abs(mx - panePressX) > 4 || Math.abs(my - panePressY) > 4)) {
@@ -866,7 +866,7 @@ public class PaletteEditScreen extends Screen {
             }
             return true;
         }
-        if (event.button() == 0 && dragSeg >= 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && dragSeg >= 0) {
             dragMouseX = mx;
             dragMouseY = my;
             if (!dragSegMoved && (Math.abs(mx - pressX) > 3 || Math.abs(my - (stripEdges(editing.segments.size())[dragSeg] + grabOffset)) > 3)) {
@@ -897,7 +897,7 @@ public class PaletteEditScreen extends Screen {
             }
             return true;
         }
-        if (event.button() == 0 && dragFace != null) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && dragFace != null) {
             double mdx = -dragX, mdy = -dragY;
             switch (dragFace) {
                 case TOP -> {
@@ -922,11 +922,11 @@ public class PaletteEditScreen extends Screen {
 
     @Override
     public boolean mouseReleased(MouseButtonEvent event) {
-        if (event.button() == 0 && dragStop >= 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && dragStop >= 0) {
             dragStop = -1;
             return true;
         }
-        if (event.button() == 0 && paneDragIdx >= 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && paneDragIdx >= 0) {
             if (paneDragging && paneDragX >= stripX() - HANDLE_W - 4
                     && paneDragX <= stripX() + STRIP_W + 8) {
                 insertSegmentAt(insertIndexAt(paneDragY), rowSegment(leftRows.get(paneDragIdx)));
@@ -935,7 +935,7 @@ public class PaletteEditScreen extends Screen {
             paneDragging = false;
             return true;
         }
-        if (event.button() == 0 && dragSeg >= 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && dragSeg >= 0) {
             if (dragOut && dragSegMoved) {
                 removeSegment(dragSeg);
             } else if (!dragSegMoved) {
@@ -945,7 +945,7 @@ public class PaletteEditScreen extends Screen {
             dragOut = false;
             return true;
         }
-        if (event.button() == 0 && dragFace != null) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && dragFace != null) {
             dragFace = null;
             return true;
         }
@@ -1052,7 +1052,7 @@ public class PaletteEditScreen extends Screen {
     }
 
     private boolean handleDiscardClick(double mx, double my, int button) {
-        if (button != 0) return true;
+        if (button != InputConstants.MOUSE_BUTTON_LEFT) return true;
         if (inRect(confirmBtn(true), mx, my)) {
             Screen to = pendingExit;
             pendingExit = null;
@@ -1085,58 +1085,31 @@ public class PaletteEditScreen extends Screen {
         attemptExit(backToList());
     }
 
-    @Override
-    public void removed() {
-        applyCursor(0); // never leak a move/resize cursor to the rest of the game
-        super.removed();
-    }
-
     // ---- OS cursor ------------------------------------------------------------------------------
 
-    /** 0 = default arrow; otherwise a GLFW standard cursor shape. Set only on change. */
-    private void applyCursor(int shape) {
-        if (shape == cursorShape || this.minecraft == null) return;
-        cursorShape = shape;
-        long win = this.minecraft.getWindow().handle();
-        if (shape == 0) {
-            GLFW.glfwSetCursor(win, 0L);
-        } else {
-            long cur = CURSORS.computeIfAbsent(shape, GLFW::glfwCreateStandardCursor);
-            GLFW.glfwSetCursor(win, cur);
-        }
+    /**
+     * Move cursor over draggables (segments, pane rows), NS-resize over stop handles. 26.3's
+     * cursor API is per-frame: request the shape during rendering and the frame applies it
+     * (nothing requested = the default arrow), so there is no state to cache or reset.
+     */
+    private void updateCursor(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        CursorType cursor = cursorFor(mouseX, mouseY);
+        if (cursor != null) g.requestCursor(cursor);
     }
 
-    /** Move cursor over draggables (segments, pane rows), NS-resize over stop handles. */
-    private void updateCursor(int mouseX, int mouseY) {
-        if (pendingExit != null || expandedPreview != 0) {
-            applyCursor(0);
-            return;
-        }
-        if (dragStop >= 0) {
-            applyCursor(GLFW.GLFW_RESIZE_NS_CURSOR);
-            return;
-        }
-        if (dragSeg >= 0 || paneDragging) {
-            applyCursor(GLFW.GLFW_RESIZE_ALL_CURSOR);
-            return;
-        }
-        if (stopHandleAt(mouseX, mouseY) >= 0) {
-            applyCursor(GLFW.GLFW_RESIZE_NS_CURSOR);
-            return;
-        }
-        if (segmentAt(mouseX, mouseY) >= 0) {
-            applyCursor(GLFW.GLFW_RESIZE_ALL_CURSOR);
-            return;
-        }
+    /** The cursor the pointer position wants, or null for the default arrow. */
+    private CursorType cursorFor(int mouseX, int mouseY) {
+        if (pendingExit != null || expandedPreview != 0) return null;
+        if (dragStop >= 0) return CursorTypes.RESIZE_NS;
+        if (dragSeg >= 0 || paneDragging) return CursorTypes.RESIZE_ALL;
+        if (stopHandleAt(mouseX, mouseY) >= 0) return CursorTypes.RESIZE_NS;
+        if (segmentAt(mouseX, mouseY) >= 0) return CursorTypes.RESIZE_ALL;
         int cx = paneX(), ly = COL_TOP + 24 - scroll;
         if (mouseX >= cx && mouseX <= cx + paneW() && mouseY >= ly && mouseY <= ly + LIST_H) {
             int idx = leftScroll + (int) ((mouseY - ly) / 18.0);
-            if (idx >= 0 && idx < leftRows.size()) {
-                applyCursor(GLFW.GLFW_RESIZE_ALL_CURSOR);
-                return;
-            }
+            if (idx >= 0 && idx < leftRows.size()) return CursorTypes.RESIZE_ALL;
         }
-        applyCursor(0);
+        return null;
     }
 
     // ---- rendering ------------------------------------------------------------------------------
@@ -1178,7 +1151,7 @@ public class PaletteEditScreen extends Screen {
         renderHelpPopup(g, mouseX, mouseY);
         if (expandedPreview != 0) renderExpandedOverlay(g, mouseX, mouseY);
         if (pendingExit != null) renderDiscardConfirm(g, mouseX, mouseY);
-        updateCursor(mouseX, mouseY);
+        updateCursor(g, mouseX, mouseY);
     }
 
     private void updateToggleStates() {

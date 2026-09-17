@@ -211,8 +211,8 @@ Every placeable block in the game ranked by colour — discover blocks beyond yo
 
 ## Requirements
 
-- **Minecraft 26.2** · **Java 25** · pick your loader's file:
-  - **Fabric** — Fabric Loader 0.19.3+ and **Fabric API** for 26.2
+- **Minecraft 26.3** · **Java 25** · pick your loader's file:
+  - **Fabric** — Fabric Loader 0.19.5+ and **Fabric API** for 26.3
   - **NeoForge** — no other dependency
 - Client-side only — nothing to install on the server.
 - Placement sends normal "use block" interactions the server validates (Litematica-style); an
