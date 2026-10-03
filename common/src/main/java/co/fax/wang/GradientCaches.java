@@ -121,10 +121,10 @@ public final class GradientCaches {
         lastPlaceMs = System.currentTimeMillis();
     }
 
-    /** The 3D fill {@code pos} was placed by, or null. */
+    /** The 3D fill {@code pos} was placed by (or is the centre block of), or null. */
     public static Fill3D fillContaining(BlockPos pos) {
         for (Fill3D f : fills) {
-            if (f.placed.contains(pos)) return f;
+            if (f.center.equals(pos) || f.placed.contains(pos)) return f;
         }
         return null;
     }

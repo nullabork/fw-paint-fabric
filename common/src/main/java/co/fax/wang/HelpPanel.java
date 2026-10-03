@@ -272,8 +272,9 @@ public final class HelpPanel {
                     + "selected - never the whole marker plane.",
                 "Works with every paint type - solid lines, gradient runs, noise streaks, or "
                     + "pattern strips.")),
-            t("3D Fill", "A blob of blocks growing out of the clicked face.", List.of(
-                "Tap right-click to place the first shell, hold to grow the fill layer by layer. "
+            t("3D Fill", "A blob of blocks growing around the clicked block.", List.of(
+                "The block you click is the centre: tap right-click to wrap its open sides in the "
+                    + "first shell, hold to grow the fill layer by layer. "
                     + "It only spreads through connected air, so walls, end markers, and "
                     + "start-marker space contain it.",
                 "Works with all three paint types: Solid fills with one block, Gradient makes a "
@@ -534,7 +535,7 @@ public final class HelpPanel {
                     + "Clicking a FINISHED gradient starts a new one on top rather than doing "
                     + "nothing. Changing a pattern's variance does NOT reset an in-progress "
                     + "pattern - only new cells roll the new variance.",
-                "3D fills remember their centre: click a block that belongs to one and it keeps "
+                "3D fills remember their centre: click its centre block or a block that belongs to it and it keeps "
                     + "growing the same sphere from the original middle; click elsewhere to start "
                     + "a new one."))),
 
