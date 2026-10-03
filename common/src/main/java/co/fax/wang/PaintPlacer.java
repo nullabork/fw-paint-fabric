@@ -592,15 +592,22 @@ public final class PaintPlacer {
     // ---- 3D fill ------------------------------------------------------------------------------------
 
     private static void startFill3D(Minecraft mc, BlockPos clicked) {
+        // The clicked block itself is the centre: the fill grows around it from all its open
+        // faces (the clicked face only has to be open so there's somewhere to start).
         BlockPos seed = clicked.relative(dir);
-        center = seed;
+        center = clicked.immutable();
+        boolean resuming = false;
         maxRadius = MAX_RADIUS;
         if (type == PaintType.GRADIENT) {
             // Clicking a block that belongs to a cached fill continues it from its original
             // centre; any other block starts a new fill (and a new cache entry).
             GradientCaches.Fill3D f = GradientCaches.fillContaining(clicked);
-            if (f != null) center = f.center;
-            else f = GradientCaches.newFill(seed);
+            if (f != null) {
+                center = f.center;
+                resuming = !center.equals(clicked);
+            } else {
+                f = GradientCaches.newFill(center);
+            }
             activeFill = f;
             // 3D knows its whole range up front: start anchor = the clicked block; the end is
             // static (prepare enforces it), so no end anchor is needed.
@@ -623,10 +630,13 @@ public final class PaintPlacer {
                 || co.fax.wang.shape.ShapeMarkers.any();
         startedInSpace = spaceConstrained && inSpace(seed);
         visited.add(center);
-        if (!seed.equals(center)) visited.add(seed); // resuming: grow outward from the click too
-        radius = (int) Math.ceil(Math.sqrt(seed.distSqr(center)));
-        if (Gradient.emptyCell(mc.level.getBlockState(seed))) {
+        if (resuming) {
+            // Grow outward from the click too, picking up at the click's distance.
+            visited.add(seed);
+            radius = (int) Math.ceil(Math.sqrt(seed.distSqr(center)));
             queue.add(new Pending(seed, gradCtx3d(seed), 0));
+        } else {
+            radius = 0; // the first grow places the shell touching the centre block
         }
         active = true;
         grow(mc);
@@ -635,7 +645,7 @@ public final class PaintPlacer {
     private static void tickFill(Minecraft mc) {
         if (--growCooldown > 0) return;
         growCooldown = GROW_INTERVAL;
-        if (radius < maxRadius) grow(mc);
+        if (radius < maxRadius + 1) grow(mc); // +1: the centre block itself isn't painted
     }
 
     /**
@@ -669,10 +679,14 @@ public final class PaintPlacer {
         }
     }
 
-    /** 3D gradient: t = distance from the fill centre over the step count (start inside, end out). */
+    /**
+     * 3D gradient: t = distance out from the centre block's shell over the step count (start
+     * inside, end out). The centre is the clicked block, so the touching shell (distance 1) is t=0.
+     */
     private static GradCtx gradCtx3d(BlockPos cell) {
         if (type != PaintType.GRADIENT) return null;
-        double t = Math.min(1.0, Math.sqrt(cell.distSqr(center)) / Math.max(1, maxRadius));
+        double d = Math.max(0, Math.sqrt(cell.distSqr(center)) - 1);
+        double t = Math.min(1.0, d / Math.max(1, maxRadius));
         return new GradCtx(t, center, ramp3d, -1);
     }
 

@@ -125,7 +125,7 @@ the next click grows from, and rides the advancing fronts while you hold.
 - **Face perp** — a 1-block-wide run through the clicked block crossing your view (perpendicular to your look),
   snapped to 45° or 90° (the **Perp snap** setting) — diagonal stair-stepped lines included.
   Inside markers only the marked blocks along the run are selected.
-- **3D Fill** — a connected blob out of the clicked face; tap for the first shell, hold to grow.
+- **3D Fill** — a connected blob centred on the clicked block; tap for the first shell, hold to grow.
   Contained by walls, end markers, and start-marker space.
 - Everywhere: an **end marker stops a column or fill even floating in air**, and a finished column
   never resumes past it.
@@ -169,7 +169,7 @@ The active palette blended along your build — between markers or free-hand.
   mode. **Paint memory** continues a half-finished gradient when re-clicked (cleared when you
   switch or edit palettes, or after the Settings idle timer); a *finished* gradient starts a
   fresh one on top.
-- **3D gradients**: sphere-ish blends from the centre out; each fill remembers its centre. 3D
+- **3D gradients**: sphere-ish blends out from the clicked block; each fill remembers its centre. 3D
   needs the strip to end in a real block (Auto at the start is fine).
 - Honest ramps: running out of a palette block stops the paint with an "out of X" message — no
   silent substitutions.
