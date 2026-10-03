@@ -1,6 +1,7 @@
 package co.fax.wang;
 
 import co.fax.wang.palette.Palette;
+import com.mojang.blaze3d.platform.InputConstants;
 import co.fax.wang.palette.PaletteKind;
 import co.fax.wang.palette.PaletteStore;
 import co.fax.wang.palette.PatternTiling;
@@ -379,11 +380,11 @@ public class PatternEditScreen extends Screen {
         double mx = event.x(), my = event.y();
         if (pendingExit != null) return handleDiscardClick(mx, my, event.button());
         if (previewExpanded) {
-            if (event.button() == 0 && inCloseX(mx, my)) previewExpanded = false;
+            if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && inCloseX(mx, my)) previewExpanded = false;
             return true; // the editor beneath is covered — swallow everything
         }
         if (confirmClear) {
-            if (event.button() == 0 && inRect(confirmBtn(true), mx, my)) {
+            if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && inRect(confirmBtn(true), mx, my)) {
                 java.util.Arrays.fill(buffer, null);
                 editing.startU = -1;
                 editing.startV = -1;
@@ -393,7 +394,7 @@ public class PatternEditScreen extends Screen {
             return true;
         }
 
-        if (my < BAR_H && event.button() == 0) {
+        if (my < BAR_H && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             int[] xs = tabXs();
             String[] names = GradientScreen.barTabNames();
             for (int i = 0; i < names.length; i++) {
@@ -403,7 +404,7 @@ public class PatternEditScreen extends Screen {
                 }
             }
         }
-        if (event.button() == 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             for (HelpSpot h : helpSpots) {
                 int hy = h.baseY() - scroll;
                 if (mx >= h.x() + h.w() + 2 && mx <= h.x() + h.w() + 13
@@ -420,26 +421,26 @@ public class PatternEditScreen extends Screen {
         int[] c = cellAt(mx, my);
         if (c != null) {
             // Shift+press: start a straight/45° line from this cell (committed on release).
-            if (event.button() == 0 && event.hasShiftDown() && !event.hasControlDown()
+            if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && event.hasShiftDown() && !event.hasControlDown()
                     && (eraserSelected || !selectedId.isEmpty())) {
                 lineActive = true;
                 lineU0 = lineU1 = c[0];
                 lineV0 = lineV1 = c[1];
                 return true;
             }
-            if (event.button() == 0 && !event.hasControlDown()
+            if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && !event.hasControlDown()
                     && (eraserSelected || !selectedId.isEmpty())) {
                 erasing = eraserSelected || selectedId.equals(cell(c[0], c[1]));
                 drawing = true;
                 applyCell(c[0], c[1]);
                 return true;
             }
-            if (event.button() == 1 && (eraserSelected || !selectedId.isEmpty())) {
+            if (event.button() == InputConstants.MOUSE_BUTTON_RIGHT && (eraserSelected || !selectedId.isEmpty())) {
                 floodFill(c[0], c[1]);
                 return true;
             }
             // Ctrl+click: toggle the placement-origin plus (one per grid).
-            if (event.button() == 0 && event.hasControlDown()) {
+            if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && event.hasControlDown()) {
                 if (editing.startU == c[0] && editing.startV == c[1]) {
                     editing.startU = -1;
                     editing.startV = -1;
@@ -452,7 +453,7 @@ public class PatternEditScreen extends Screen {
             }
             // Middle-click: eyedropper — pick the cell's block (empty cell picks the eraser)
             // and show it selected in the left list, scrolled into view.
-            if (event.button() == 2) {
+            if (event.button() == InputConstants.MOUSE_BUTTON_MIDDLE) {
                 String id = cell(c[0], c[1]);
                 if (id == null) {
                     eraserSelected = true;
@@ -479,7 +480,7 @@ public class PatternEditScreen extends Screen {
         }
         // Left list: left-click selects the drawing block (row 0 = the eraser).
         int cx = contentX(), ly = COL_TOP + 24 - scroll;
-        if (event.button() == 0 && mx >= cx && mx <= cx + paneW() && my >= ly && my <= ly + LIST_H) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && mx >= cx && mx <= cx + paneW() && my >= ly && my <= ly + LIST_H) {
             int idx = leftScroll + (int) ((my - ly) / 18);
             if (idx == 0) {
                 eraserSelected = true;
@@ -532,13 +533,13 @@ public class PatternEditScreen extends Screen {
 
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
-        if (event.button() == 0 && lineActive) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && lineActive) {
             int[] c = clampedCellAt(event.x(), event.y());
             lineU1 = c[0];
             lineV1 = c[1];
             return true;
         }
-        if (event.button() == 0 && drawing) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && drawing) {
             int[] c = cellAt(event.x(), event.y());
             if (c != null) applyCell(c[0], c[1]);
             return true;
@@ -548,7 +549,7 @@ public class PatternEditScreen extends Screen {
 
     @Override
     public boolean mouseReleased(MouseButtonEvent event) {
-        if (event.button() == 0 && lineActive) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && lineActive) {
             // Commit: the line overwrites whatever it crosses with the current tool.
             for (int[] c : lineCells()) {
                 setCell(c[0], c[1], eraserSelected ? null : selectedId);
@@ -556,7 +557,7 @@ public class PatternEditScreen extends Screen {
             lineActive = false;
             return true;
         }
-        if (event.button() == 0 && drawing) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && drawing) {
             drawing = false;
             erasing = false;
             return true;
@@ -690,7 +691,7 @@ public class PatternEditScreen extends Screen {
     }
 
     private boolean handleDiscardClick(double mx, double my, int button) {
-        if (button != 0) return true;
+        if (button != InputConstants.MOUSE_BUTTON_LEFT) return true;
         if (inRect(confirmBtn(true), mx, my)) {
             Screen to = pendingExit;
             pendingExit = null;

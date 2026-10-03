@@ -15,13 +15,13 @@ Paint block gradients and 3D-noise fills from your inventory — ordered by colo
 [[dependencies.gradient]]
 modId="neoforge"
 type="required"
-versionRange="[26.2,)"
+versionRange="[26.3,)"
 ordering="NONE"
 side="CLIENT"
 
 [[dependencies.gradient]]
 modId="minecraft"
 type="required"
-versionRange="[26.2]"
+versionRange="[26.3]"
 ordering="NONE"
 side="CLIENT"

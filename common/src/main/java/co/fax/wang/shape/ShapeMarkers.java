@@ -726,7 +726,7 @@ public final class ShapeMarkers {
                             float oz = cellOffset(Direction.Axis.Z, normal, uAxis, k, du, dv);
                             WorldDraw.emitCellFaces(pose, vc, ox, oy, oz, fillArgb, mask);
                             if (edgeArgb != 0) {
-                                WorldDraw.emitCellEdges(pose, vc, ox, oy, oz, edgeArgb, mask);
+                                WorldDraw.emitCellEdges(pose, vc, ox, oy, oz, edgeArgb, mask, false);
                             }
                         }
                     }
@@ -779,7 +779,7 @@ public final class ShapeMarkers {
                     float ox = cellOffset(Direction.Axis.X, normal, uAxis, k, du, dv);
                     float oy = cellOffset(Direction.Axis.Y, normal, uAxis, k, du, dv);
                     float oz = cellOffset(Direction.Axis.Z, normal, uAxis, k, du, dv);
-                    WorldDraw.emitCellEdges(pose, vc, ox, oy, oz, argb, mask);
+                    WorldDraw.emitCellEdges(pose, vc, ox, oy, oz, argb, mask, true);
                 }
             }
         });

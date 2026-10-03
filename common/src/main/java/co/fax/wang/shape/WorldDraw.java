@@ -64,30 +64,31 @@ public final class WorldDraw {
     }
 
     /**
-     * The occluded-only counterpart of {@link #compositeOutline}: vanilla's secondary-outline
-     * pipeline draws with an INVERTED depth test, so exactly the parts hidden behind terrain
-     * render — submitted faint, it reads as a ghost of the shape through the ground.
-     */
-    /**
      * See-through edge lines for a block-aligned box: crossed thin quads on all 12 edges,
-     * drawn with the depth-IGNORING text-background pipeline (POSITION_COLOR, textureless) —
-     * 26.2 is reversed-Z and ships no occluded-only world pipeline, so an on-top pass is how
-     * buried markers stay findable. Submitted at modest alpha it reads as a faint cage
-     * through terrain and a slight glow over the visible parts.
+     * drawn with the depth-IGNORING see-through text pipeline over the mod's own plain white
+     * texture (26.3 removed the textureless text-background variant; text pipelines are the
+     * only depth-free channel, so vertices carry a centered UV into the white texel). MC is
+     * reversed-Z with no occluded-only world pipeline, so an on-top pass is how buried
+     * markers stay findable. Submitted at modest alpha it reads as a faint cage through
+     * terrain and a slight glow over the visible parts.
      */
     public static void boxEdgesSeeThrough(SubmitNodeCollector col, PoseStack ps, Vec3 cam,
                                           BlockPos min, int sx, int sy, int sz, int argb) {
         ps.pushPose();
         ps.translate(min.getX() - cam.x, min.getY() - cam.y, min.getZ() - cam.z);
-        col.submitCustomGeometry(ps, RenderTypes.textBackgroundSeeThrough(),
-                (pose, vc) -> emitEdgesBounds(pose, vc, argb, 0x3F,
+        col.submitCustomGeometry(ps, seeThrough(),
+                (pose, vc) -> emitEdgesBounds(pose, vc, argb, 0x3F, true,
                         -EXPAND, -EXPAND, -EXPAND, sx + EXPAND, sy + EXPAND, sz + EXPAND));
         ps.popPose();
     }
 
+    /** The mod's 4x4 plain white texture backing the see-through pipeline. */
+    private static final net.minecraft.resources.Identifier WHITE_TEXTURE =
+            net.minecraft.resources.Identifier.fromNamespaceAndPath("gradient", "textures/misc/white.png");
+
     /** The depth-ignoring render type for see-through passes (see {@link #boxEdgesSeeThrough}). */
     public static net.minecraft.client.renderer.rendertype.RenderType seeThrough() {
-        return RenderTypes.textBackgroundSeeThrough();
+        return RenderTypes.textSeeThrough(WHITE_TEXTURE);
     }
 
     /**
@@ -148,21 +149,26 @@ public final class WorldDraw {
                 ox + 1 + EXPAND, oy + 1 + EXPAND, oz + 1 + EXPAND);
     }
 
-    /** Convex-edge highlight lines for a cell at offset (ox, oy, oz); see {@link #blockEdges}. */
+    /**
+     * Convex-edge highlight lines for a cell at offset (ox, oy, oz); see {@link #blockEdges}.
+     * {@code uv} adds the white-texel UV each vertex of the see-through pipeline's
+     * POSITION_TEX_COLOR format requires; pass false for the plain position-color pipelines.
+     */
     public static void emitCellEdges(PoseStack.Pose pose, VertexConsumer vc,
-                                     float ox, float oy, float oz, int argb, int mask) {
+                                     float ox, float oy, float oz, int argb, int mask, boolean uv) {
         if (Integer.bitCount(mask) < 2) return;
-        emitEdgesBounds(pose, vc, argb, mask,
+        emitEdgesBounds(pose, vc, argb, mask, uv,
                 ox - EXPAND, oy - EXPAND, oz - EXPAND,
                 ox + 1 + EXPAND, oy + 1 + EXPAND, oz + 1 + EXPAND);
     }
 
     private static void emitEdges(PoseStack.Pose pose, VertexConsumer vc, int argb, int mask) {
-        emitEdgesBounds(pose, vc, argb, mask, -EXPAND, -EXPAND, -EXPAND,
+        emitEdgesBounds(pose, vc, argb, mask, false, -EXPAND, -EXPAND, -EXPAND,
                 1 + EXPAND, 1 + EXPAND, 1 + EXPAND);
     }
 
     private static void emitEdgesBounds(PoseStack.Pose pose, VertexConsumer vc, int argb, int mask,
+                                        boolean uv,
                                         float ax, float ay, float az, float bx, float by, float bz) {
         float w = 0.02f;
         Direction[] dirs = Direction.values();
@@ -181,8 +187,8 @@ public final class WorldDraw {
                 // Crossed thin quads along the edge so the line reads from any angle.
                 Vec3 u = axisUnit(d1.getAxis()).scale(w);
                 Vec3 v = axisUnit(d2.getAxis()).scale(w);
-                quadDS(vc, pose, argb, e1.subtract(u), e2.subtract(u), e2.add(u), e1.add(u));
-                quadDS(vc, pose, argb, e1.subtract(v), e2.subtract(v), e2.add(v), e1.add(v));
+                quadDS(vc, pose, argb, uv, e1.subtract(u), e2.subtract(u), e2.add(u), e1.add(u));
+                quadDS(vc, pose, argb, uv, e1.subtract(v), e2.subtract(v), e2.add(v), e1.add(v));
             }
         }
     }
@@ -249,16 +255,24 @@ public final class WorldDraw {
     }
 
     /** Double-sided quad from Vec3 corners (emitted once per winding so it shows from both sides). */
-    private static void quadDS(VertexConsumer vc, PoseStack.Pose pose, int argb, Vec3 a, Vec3 b, Vec3 c, Vec3 d) {
-        quadV(vc, pose, argb, a, b, c, d);
-        quadV(vc, pose, argb, d, c, b, a);
+    private static void quadDS(VertexConsumer vc, PoseStack.Pose pose, int argb, boolean uv,
+                               Vec3 a, Vec3 b, Vec3 c, Vec3 d) {
+        quadV(vc, pose, argb, uv, a, b, c, d);
+        quadV(vc, pose, argb, uv, d, c, b, a);
     }
 
-    private static void quadV(VertexConsumer vc, PoseStack.Pose pose, int argb, Vec3 a, Vec3 b, Vec3 c, Vec3 d) {
-        vc.addVertex(pose, (float) a.x, (float) a.y, (float) a.z).setColor(argb);
-        vc.addVertex(pose, (float) b.x, (float) b.y, (float) b.z).setColor(argb);
-        vc.addVertex(pose, (float) c.x, (float) c.y, (float) c.z).setColor(argb);
-        vc.addVertex(pose, (float) d.x, (float) d.y, (float) d.z).setColor(argb);
+    private static void quadV(VertexConsumer vc, PoseStack.Pose pose, int argb, boolean uv,
+                              Vec3 a, Vec3 b, Vec3 c, Vec3 d) {
+        vertex(vc, pose, argb, uv, a);
+        vertex(vc, pose, argb, uv, b);
+        vertex(vc, pose, argb, uv, c);
+        vertex(vc, pose, argb, uv, d);
+    }
+
+    private static void vertex(VertexConsumer vc, PoseStack.Pose pose, int argb, boolean uv, Vec3 p) {
+        VertexConsumer v = vc.addVertex(pose, (float) p.x, (float) p.y, (float) p.z);
+        if (uv) v = v.setUv(0.5f, 0.5f); // center of the plain white texel
+        v.setColor(argb);
     }
 
     private static void quad(VertexConsumer vc, PoseStack.Pose pose, int argb,

@@ -1,6 +1,7 @@
 package co.fax.wang.wheel;
 
 import co.fax.wang.BlockTextures;
+import com.mojang.blaze3d.platform.InputConstants;
 import co.fax.wang.ColorOrder;
 import co.fax.wang.Gradient;
 import co.fax.wang.GradientMode;
@@ -406,7 +407,7 @@ public class WheelScreen extends Screen {
     public boolean mouseClicked(MouseButtonEvent event, boolean doubled) {
         // Title bar: clicking a tab opens the full FW Paint screen there — a quick shortcut
         // out of the wheel. The new screen stays open when the wheel key is released.
-        if (event.button() == 0 && event.y() < BAR_H) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && event.y() < BAR_H) {
             int[] xs = tabXs();
             String[] names = co.fax.wang.GradientScreen.barTabNames();
             for (int i = 0; i < names.length; i++) {
@@ -417,7 +418,7 @@ public class WheelScreen extends Screen {
             }
             return true;
         }
-        if (event.button() == 0) {
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             Hit hit = hitAt(event.x(), event.y());
             if (hit != null) {
                 ExpandedRing ring = hit.ring() == 1 ? expanded1 : hit.ring() == 2 ? expanded2 : null;

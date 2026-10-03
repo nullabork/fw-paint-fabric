@@ -1,6 +1,7 @@
 package co.fax.wang;
 
 import co.fax.wang.config.ConfigManager;
+import com.mojang.blaze3d.platform.InputConstants;
 import co.fax.wang.config.GradientConfig;
 import co.fax.wang.palette.MissingBlockPolicy;
 import co.fax.wang.palette.Palette;
@@ -407,7 +408,7 @@ public class GradientScreen extends Screen {
 
     /** Modal click handling; swallows everything while the confirmation is up. */
     private boolean handleDeleteConfirmClick(double mx, double my, int button) {
-        if (button == 0 && inRect(confirmBtn(true), mx, my)) {
+        if (button == InputConstants.MOUSE_BUTTON_LEFT && inRect(confirmBtn(true), mx, my)) {
             PaletteStore.delete(confirmDeleteId);
             paletteList.setActiveId(PaletteStore.activeId());
             if (paletteList.selectedId().equals(confirmDeleteId)) {
@@ -480,10 +481,10 @@ public class GradientScreen extends Screen {
     /** Left-click toggles the selection; right-click toggles exclusion (closest-match modes). */
     private boolean handleSolidRowClick(String id, int button) {
         GradientConfig cfg = ConfigManager.get();
-        if (button == 0) {
+        if (button == InputConstants.MOUSE_BUTTON_LEFT) {
             cfg.solidExcludedBlocks.remove(id); // selecting an excluded block un-excludes it
             cfg.solidBlock = id.equals(cfg.solidBlock) ? "" : id;
-        } else if (button == 1) {
+        } else if (button == InputConstants.MOUSE_BUTTON_RIGHT) {
             if (!cfg.solidExcludedBlocks.remove(id)) {
                 cfg.solidExcludedBlocks.add(id);
                 if (id.equals(cfg.solidBlock)) cfg.solidBlock = "";
@@ -900,7 +901,7 @@ public class GradientScreen extends Screen {
         if (tab == Tab.PALETTE && confirmDeleteId != null) {
             return handleDeleteConfirmClick(event.x(), event.y(), event.button());
         }
-        if (event.y() < BAR_H && event.button() == 0) {
+        if (event.y() < BAR_H && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             int[] xs = tabXs();
             for (int i = 0; i < BAR_ORDER.length; i++) {
                 if (event.x() >= xs[i * 2] && event.x() <= xs[i * 2] + xs[i * 2 + 1]) {
@@ -910,28 +911,28 @@ public class GradientScreen extends Screen {
             }
         }
         if (super.mouseClicked(event, doubled)) return true;
-        if ((tab == Tab.SOLID || tab == Tab.SETTINGS) && event.button() == 0
+        if ((tab == Tab.SOLID || tab == Tab.SETTINGS) && event.button() == InputConstants.MOUSE_BUTTON_LEFT
                 && handleHelpIconClick(event.x(), event.y())) {
             return true;
         }
-        if (tab == Tab.HELP && event.button() == 0 && help != null
+        if (tab == Tab.HELP && event.button() == InputConstants.MOUSE_BUTTON_LEFT && help != null
                 && help.mouseClicked(event.x(), event.y())) {
             return true;
         }
-        if (tab == Tab.SOLID && (event.button() == 0 || event.button() == 1)) {
+        if (tab == Tab.SOLID && (event.button() == InputConstants.MOUSE_BUTTON_LEFT || event.button() == InputConstants.MOUSE_BUTTON_RIGHT)) {
             String id = solidRowIdAt(event.x(), event.y());
             if (id != null) return handleSolidRowClick(id, event.button());
         }
-        if (tab == Tab.PALETTE && event.button() == 0 && paletteList != null
+        if (tab == Tab.PALETTE && event.button() == InputConstants.MOUSE_BUTTON_LEFT && paletteList != null
                 && paletteList.click(event.x(), event.y())) {
             paletteSelectedId = paletteList.selectedId();
             paletteExpandId = paletteList.expandedId();
             return true;
         }
-        if (tab == Tab.FINDER && event.button() == 0 && handleFinderClick(event.x(), event.y())) {
+        if (tab == Tab.FINDER && event.button() == InputConstants.MOUSE_BUTTON_LEFT && handleFinderClick(event.x(), event.y())) {
             return true;
         }
-        if (tab == Tab.SETTINGS && event.button() == 0) {
+        if (tab == Tab.SETTINGS && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             int idx = toolRowAt(event.x(), event.y());
             if (idx >= 0 && assigningTool) {
                 ConfigManager.get().paintTool = matches.get(idx).id();
@@ -968,7 +969,7 @@ public class GradientScreen extends Screen {
 
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
-        if (tab == Tab.FINDER && event.button() == 0) {
+        if (tab == Tab.FINDER && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             if (finderList != null && finderList.mouseDragged(event.y())) return true;
             if (finderField != null && finderField.contains(event.x(), event.y())) {
                 double[] hs = finderField.pick(event.x(), event.y());

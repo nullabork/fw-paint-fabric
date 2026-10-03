@@ -88,10 +88,10 @@ jobs:
             cat > RELEASE_BODY.md <<'EOF'
           **FW Paint** — a client-side mod for painting blocks: solid extrude/fill, gradients, and noise.
 
-          Targets: Minecraft **26.2** · Java **25** · Fabric (Loader 0.19.3+ with Fabric API) or NeoForge.
+          Targets: Minecraft **26.3** · Java **25** · Fabric (Loader 0.19.5+ with Fabric API) or NeoForge.
 
           Install: drop the jar matching your loader (`fw-paint-fabric` or `fw-paint-neoforge`) into a
-          26.2 instance's `mods/` folder (Fabric also needs Fabric API for 26.2).
+          26.3 instance's `mods/` folder (Fabric also needs Fabric API for 26.3).
           EOF
           fi
 
@@ -100,7 +100,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.reltag.outputs.tag }}
-          name: FW Paint ${{ steps.reltag.outputs.tag }} (Minecraft 26.2)
+          name: FW Paint ${{ steps.reltag.outputs.tag }} (Minecraft 26.3)
           files: |
             fabric/build/libs/fw-paint-fabric-*.jar
             neoforge/build/libs/fw-paint-neoforge-*.jar

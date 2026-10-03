@@ -1,6 +1,6 @@
 # FW Paint (fw-paint-fabric)
 
-A client-side mod for **Minecraft 26.2** — for **Fabric and NeoForge** — that paints with blocks:
+A client-side mod for **Minecraft 26.3** — for **Fabric and NeoForge** — that paints with blocks:
 solid extrude/fill, colour/brightness gradients, and 3D noise patterns. This README is the
 **developer/build guide**; user-facing documentation lives in
 [`docs/curseforge-description.md`](docs/curseforge-description.md).
@@ -9,12 +9,12 @@ solid extrude/fill, colour/brightness gradients, and 3D noise patterns. This REA
 
 | What | Version | Notes |
 |---|---|---|
-| JDK | **25** (Temurin recommended) | Minecraft 26.2 requires Java 25 |
-| Minecraft | 26.2 | pinned in `gradle.properties` |
+| JDK | **25** (Temurin recommended) | Minecraft 26.3 requires Java 25 |
+| Minecraft | 26.3 | pinned in `gradle.properties` |
 | Fabric Loader | 0.19.3+ | pinned in `gradle.properties` |
-| Fabric API | 0.152.0+26.2 | compile dep; also needed in any Fabric instance running the jar |
-| Fabric Loom | 1.17-SNAPSHOT | Gradle plugin; 26.2 ships unobfuscated, Loom runs non-remapping |
-| NeoForge | 26.2.0.11-beta | pinned in `gradle.properties` (`neo_version`) |
+| Fabric API | 0.160.6+26.3 | compile dep; also needed in any Fabric instance running the jar |
+| Fabric Loom | 1.17-SNAPSHOT | Gradle plugin; 26.x ships unobfuscated, Loom runs non-remapping |
+| NeoForge | 26.3.0.3-beta | pinned in `gradle.properties` (`neo_version`) |
 | ModDevGradle | 2.0.141 | NeoForge's Gradle plugin (`moddev_version`) |
 | Gradle | — | none needed; the wrapper (`gradlew`) downloads itself |
 
@@ -57,7 +57,7 @@ gradlew.bat build
 ./gradlew :neoforge:runClient   # NeoForge
 ```
 
-Launches Minecraft 26.2 with the mod loaded (offline dev session; Realms/auth warnings in the log
+Launches Minecraft 26.3 with the mod loaded (offline dev session; Realms/auth warnings in the log
 are normal). Each loader keeps its own world/config under `fabric/run/` and `neoforge/run/`.
 
 ## Tests
@@ -78,7 +78,7 @@ not tests.
 Copy the jar matching the instance's loader into its `mods/` folder:
 
 - **Fabric**: `fw-paint-fabric-<version>.jar` — the instance must also contain **Fabric API**
-  for 26.2.
+  for 26.3.
 - **NeoForge**: `fw-paint-neoforge-<version>.jar` — no other dependency.
 
 The mod is client-side only; servers need nothing.
@@ -126,7 +126,7 @@ fabric-26.2-mod-starter.md   26.2 API migration notes (worth reading before touc
 
 ## Gotchas
 
-- **26.2 is unobfuscated** — no mappings/remapping; Loom runs in non-remapping mode and NeoForge
+- **26.x is unobfuscated** — no mappings/remapping; Loom runs in non-remapping mode and NeoForge
   uses the same Mojang names, which is what makes the shared `common/` module possible. Don't add
   mapping-dependent tooling.
 - 26.2 renamed/replaced several APIs (`GuiGraphics` → `GuiGraphicsExtractor`, `setScreen` →
