@@ -108,6 +108,7 @@ public class WheelScreen extends Screen {
         }
         WheelItem blocks = WheelItem.category("Blocks",
                 modeLeaf(PlacementMode.SINGLE), modeLeaf(PlacementMode.FACE),
+                modeLeaf(PlacementMode.FACE_TARGET),
                 modeLeaf(PlacementMode.FACE_PERP), modeLeaf(PlacementMode.FILL3D));
         WheelItem markers = WheelItem.category("Markers",
                 modeLeaf(PlacementMode.MARKER), modeLeaf(PlacementMode.MARKER_DRAW));
