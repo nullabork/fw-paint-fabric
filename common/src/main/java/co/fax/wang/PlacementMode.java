@@ -16,7 +16,9 @@ public enum PlacementMode {
     MARKER_CIRCLE("Marker circle", "Active: Marker circle", 0xFFFF8A3C),    // orange — donut ring region
     MARKER_SQUARE("Marker square", "Active: Marker square", 0xFF7BD88A),    // green — square ring region
     SINGLE("Single", "Active: Single", 0xFF55FF55),     // green
-    FACE("Face", "Active: Face", 0xFF55FFFF),           // aqua
+    // Persisted by enum name: FACE keeps its name so saved configs stay on it (label only changed).
+    FACE("Face any", "Active: Face any", 0xFF55FFFF),   // aqua — every exposed face on the plane
+    FACE_TARGET("Face target", "Active: Face target", 0xFF4DD9C0), // teal — only the clicked block's type
     FACE_PERP("Face perp", "Active: Face perp", 0xFF7FDBFF), // light blue — 1-wide snapped run
     FILL3D("3D Fill", "Active: 3D Fill", 0xFFFF55FF),   // magenta
     DISABLED("Disabled", "Disabled", 0xFFAAAAAA);       // grey
@@ -31,12 +33,12 @@ public enum PlacementMode {
         this.color = color;
     }
 
-    /** Bare mode name (for buttons: "Placement: Face"). */
+    /** Bare mode name (for buttons: "Placement: Face any"). */
     public String shortName() {
         return shortName;
     }
 
-    /** HUD line ("Active: Face"). */
+    /** HUD line ("Active: Face any"). */
     public String displayName() {
         return displayName;
     }
@@ -48,7 +50,12 @@ public enum PlacementMode {
 
     /** True for the modes that place paint (not markers, not disabled). */
     public boolean places() {
-        return this == SINGLE || this == FACE || this == FACE_PERP || this == FILL3D;
+        return this == SINGLE || isFace() || this == FACE_PERP || this == FILL3D;
+    }
+
+    /** Face any / Face target: the whole connected surface extrudes as columns. */
+    public boolean isFace() {
+        return this == FACE || this == FACE_TARGET;
     }
 
     /** True for the marker-selection modes (drag lines, box, freehand, shape regions). */

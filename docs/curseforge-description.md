@@ -55,7 +55,7 @@ Keys are rebindable under Options → Controls → Key Binds → **FW Paint**.
 ## The selector wheel
 
 Hover a wedge to fan out its options; click only to choose. **Paint** fans the paint types
-(Solid / Gradient / Pattern / Noise); **Place** fans **Blocks** (Single / Face / Face perp /
+(Solid / Gradient / Pattern / Noise); **Place** fans **Blocks** (Single / Face any / Face target / Face perp /
 3D Fill), **Markers** (Marker / Marker draw), and **Shape markers** (Marker box / circle /
 square) onto a third ring; **Palette** follows the paint type (palettes, patterns, or — with
 Solid paint — the match modes, with **Select block** fanning your inventory's blocks in colour
@@ -119,9 +119,11 @@ Where blocks go, shared by all three paints. The **green face tint + arrow** pre
 the next click grows from, and rides the advancing fronts while you hold.
 
 - **Single** — one column out of the clicked face; re-clicking continues from its first air gap.
-- **Face** — the whole connected plane extrudes together: click a wall's top to raise it, its side
+- **Face any** — the whole connected plane extrudes together: click a wall's top to raise it, its side
   to thicken it. A start marker behind the clicked column selects the connected marker group
   instead. **Fill voids first** (Settings) levels the lowest columns before stacking new layers.
+- **Face target** — like Face any, but only blocks of the clicked block's type are selected and
+  grow (click a stone floor: the stone extrudes, the grass beside it doesn't).
 - **Face perp** — a 1-block-wide run through the clicked block crossing your view (perpendicular to your look),
   snapped to 45° or 90° (the **Perp snap** setting) — diagonal stair-stepped lines included.
   Inside markers only the marked blocks along the run are selected.

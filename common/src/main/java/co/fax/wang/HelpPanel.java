@@ -204,7 +204,7 @@ public final class HelpPanel {
             "3. Hold the tool, then hold {wheel} to open the selector wheel. Hover a wedge to "
                 + "fan out its options (clicks are only for choosing): Paint picks what the "
                 + "tool paints (Solid, Gradient, Pattern, Noise); Place fans out Blocks "
-                + "(Single, Face, Face perp, 3D Fill), Markers (Marker, Marker draw), and "
+                + "(Single, Face any, Face target, Face perp, 3D Fill), Markers (Marker, Marker draw), and "
                 + "Shape markers (Marker box, circle, square) on a third ring. The Palette "
                 + "wedge follows the paint type: your gradient palettes (or patterns under "
                 + "Pattern paint), or - with Solid paint - the match modes, where hovering "
@@ -227,7 +227,7 @@ public final class HelpPanel {
                 + "current bindings). Placement is done with normal block-place actions the "
                 + "server validates, so everything works in multiplayer.")),
 
-        t("Placement modes", "Single, Face, and 3D Fill - where blocks go (pick on the {wheel} wheel).",
+        t("Placement modes", "Single, Face, Face perp, and 3D Fill - where blocks go (pick on the {wheel} wheel).",
             List.of(
                 "The green face tint and arrow show exactly which faces the next click will grow "
                     + "from, and in which direction.",
@@ -247,7 +247,7 @@ public final class HelpPanel {
                     + "marker, or the edge of your reach).",
                 "Re-clicking a half-built column continues it from its first air gap. A column "
                     + "that already reached its end marker stays finished.")),
-            t("Face", "The whole connected surface grows at once.", List.of(
+            t("Face any", "The whole connected surface grows at once.", List.of(
                 "Click a face and every connected, reachable block on the same plane with an "
                     + "exposed face extrudes together - click the top of a wall to make it taller, "
                     + "its side to make it thicker. Each column shows a green face + arrow first, "
@@ -260,6 +260,13 @@ public final class HelpPanel {
                     + "together. It's about keeping things even, so only columns within your "
                     + "reach count - a void you can't reach never holds the rest up. Turn it off "
                     + "to advance every column at once.")),
+            t("Face target", "Face any, limited to the block type you click.", List.of(
+                "Works like Face any, but the selection only spreads across blocks of the same "
+                    + "type as the one you click - click a stone floor and only the stone gets "
+                    + "the green preview and grows; dirt, grass, or planks beside it are left "
+                    + "alone.",
+                "With a start marker behind the clicked column the marker group decides the "
+                    + "selection, exactly like Face any.")),
             t("Face perpendicular", "A 1-block-wide run, snapped to 45 degrees.", List.of(
                 "Like Face, but instead of the whole surface it selects a single-block-wide "
                     + "line through the block you click, crossing your view - perpendicular to where you're "

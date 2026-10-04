@@ -349,13 +349,13 @@ public final class PaintPlacer {
     private static void startColumns(Minecraft mc, BlockPos clicked) {
         List<BlockPos> bases;
         markerDriven = false;
-        if (mode == PlacementMode.FACE) {
+        if (mode.isFace()) {
             BlockPos seed = findMarkerBehind(clicked, dir);
             if (seed != null) {
                 bases = planeMarkers(seed, dir);
                 markerDriven = true;
             } else {
-                bases = floodFaces(mc, clicked, dir);
+                bases = floodFaces(mc, clicked, dir, mode == PlacementMode.FACE_TARGET);
             }
         } else if (mode == PlacementMode.FACE_PERP) {
             BlockPos seed = findMarkerBehind(clicked, dir);
@@ -418,7 +418,7 @@ public final class PaintPlacer {
      * fill advances only the most-behind columns until every front is level.
      */
     private static void enqueueLayer(Minecraft mc) {
-        boolean level = markerDriven && mode == PlacementMode.FACE && ConfigManager.get().faceFillVoids;
+        boolean level = markerDriven && mode.isFace() && ConfigManager.get().faceFillVoids;
         int minNext = Integer.MAX_VALUE;
         if (level) {
             // Fill-voids only levels what the player can actually fill: a void column whose front
@@ -550,9 +550,10 @@ public final class PaintPlacer {
     /**
      * Outside markers, Face mode: every interconnected, reachable block on the clicked face's
      * plane whose face is exposed. Spreads over the 8 in-plane neighbours; a block that is
-     * already a step ahead (its face isn't on this plane any more) is left out.
+     * already a step ahead (its face isn't on this plane any more) is left out. With
+     * {@code sameType} (Face target) it only spreads across blocks of the clicked block's type.
      */
-    private static List<BlockPos> floodFaces(Minecraft mc, BlockPos clicked, Direction dir) {
+    private static List<BlockPos> floodFaces(Minecraft mc, BlockPos clicked, Direction dir, boolean sameType) {
         Direction.Axis axis = dir.getAxis();
         // The two axes spanning the face plane.
         int ux = axis == Direction.Axis.X ? 0 : 1, uy = axis == Direction.Axis.X ? 1 : 0;
@@ -565,6 +566,7 @@ public final class PaintPlacer {
         // Clicking into a shape/box region keeps the flood inside it: on a donut band that
         // selects exactly the ring's faces, so the cylinder wall paints as one.
         boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(clicked.relative(dir));
+        Block target = mc.level.getBlockState(clicked).getBlock();
         bfs.add(clicked);
         seen.add(clicked);
         while (!bfs.isEmpty() && out.size() < MAX_FACES) {
@@ -575,7 +577,9 @@ public final class PaintPlacer {
                     if (du == 0 && dv == 0) continue;
                     BlockPos n = p.offset(du * ux, du * uy + dv * vy, dv * vz);
                     if (seen.contains(n)) continue;
-                    if (Gradient.emptyCell(mc.level.getBlockState(n))) continue; // needs a block to grow from
+                    var ns = mc.level.getBlockState(n);
+                    if (Gradient.emptyCell(ns)) continue; // needs a block to grow from
+                    if (sameType && ns.getBlock() != target) continue; // Face target: like blocks only
                     BlockPos front = n.relative(dir);
                     if (!Gradient.emptyCell(mc.level.getBlockState(front))) continue; // face not exposed on this plane
                     if (MarkerManager.endMarkers.contains(front)) continue;   // marker right on the face
@@ -890,7 +894,7 @@ public final class PaintPlacer {
         // preview must not wander with the crosshair. Column faces advance with each column's
         // front; a 3D fill keeps its press-time faces; sourcing lines stay as at press.
         if (active && mc.options.keyUse.isDown()) {
-            if (mode == PlacementMode.SINGLE || mode == PlacementMode.FACE) {
+            if (mode == PlacementMode.SINGLE || mode.isFace()) {
                 previewPos.clear();
                 previewDir.clear();
                 for (Column c : columns) addFrontPreview(mc, c.base, dir);
@@ -916,9 +920,10 @@ public final class PaintPlacer {
             Direction d = hit.getDirection();
             switch (pm) {
                 case SINGLE -> addFrontPreview(mc, b, d);
-                case FACE -> {
+                case FACE, FACE_TARGET -> {
                     BlockPos seed = findMarkerBehind(b, d);
-                    List<BlockPos> bases = (seed != null) ? planeMarkers(seed, d) : floodFaces(mc, b, d);
+                    List<BlockPos> bases = (seed != null) ? planeMarkers(seed, d)
+                            : floodFaces(mc, b, d, pm == PlacementMode.FACE_TARGET);
                     for (BlockPos base : bases) addFrontPreview(mc, base, d);
                 }
                 case FACE_PERP -> {
@@ -944,11 +949,11 @@ public final class PaintPlacer {
                 default -> { }
             }
             if (cfg.activePaintType == PaintType.GRADIENT
-                    && (pm == PlacementMode.SINGLE || pm == PlacementMode.FACE || pm == PlacementMode.FACE_PERP)) {
+                    && (pm == PlacementMode.SINGLE || pm.isFace() || pm == PlacementMode.FACE_PERP)) {
                 src.addAll(gradientSourcingAt(mc, cfg, b, d));
             }
         } else if (cfg.activePaintType == PaintType.GRADIENT
-                && (pm == PlacementMode.SINGLE || pm == PlacementMode.FACE || pm == PlacementMode.FACE_PERP)) {
+                && (pm == PlacementMode.SINGLE || pm.isFace() || pm == PlacementMode.FACE_PERP)) {
             src.add("Selected from palette");
         }
         sourcing = src;
