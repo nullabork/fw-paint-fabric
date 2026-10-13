@@ -162,4 +162,43 @@ class LineShapeTest {
         assertFalse(LineProfile.STAR.inside(-4.2, 0, 4));    // notch between the bottom two points
         assertTrue(LineProfile.STAR.inside(0, 0, 4));
     }
+
+    private static int exposedFaces(it.unimi.dsi.fastutil.longs.Long2FloatOpenHashMap cells) {
+        int n = 0;
+        for (long k : cells.keySet()) {
+            for (var d : net.minecraft.core.Direction.values()) {
+                if (!cells.containsKey(BlockPos.offset(k, d))) n++;
+            }
+        }
+        return n;
+    }
+
+    @Test
+    void mergedFacesCoverExactlyTheExposedCellFaces() {
+        for (LineProfile prof : new LineProfile[]{LineProfile.CIRCLE, LineProfile.STAR, LineProfile.SQUARE}) {
+            LineCurve c = new LineCurve(new Vec3(0.5, 10.5, 0.5), new Vec3(20.5, 14.5, 6.5));
+            c.nodes.get(0).out = new Vec3(4, 8, 0);
+            TubeBuild.Result r = TubeBuild.build(new TubeBuild.Params(c, prof, false, 4, 2, 0, 1));
+            double area = 0;
+            float[] f = r.faces();
+            for (int q = 0; q < f.length; q += 12) {
+                Vec3 a = new Vec3(f[q], f[q + 1], f[q + 2]), b = new Vec3(f[q + 3], f[q + 4], f[q + 5]),
+                        d = new Vec3(f[q + 9], f[q + 10], f[q + 11]);
+                double w = b.distanceTo(a) - 2 * TubeBuild.EXPAND, h = d.distanceTo(a) - 2 * TubeBuild.EXPAND;
+                area += Math.round(w) * Math.round(h);
+            }
+            assertEquals(exposedFaces(r.cells()), area, 1e-6, prof + ": merged faces must tile the exposed faces");
+        }
+    }
+
+    @Test
+    void straightSquareTubeMergesToFewQuads() {
+        TubeBuild.Result r = TubeBuild.build(new TubeBuild.Params(
+                new LineCurve(new Vec3(0.5, 10.5, 0.5), new Vec3(40.5, 10.5, 0.5)),
+                LineProfile.SQUARE, true, 4, 4, 0, 0));
+        int quads = r.faces().length / 12;
+        assertTrue(quads <= 6 * 2, "a straight solid square tube should be ~6 rectangles, got " + quads);
+        int edgeQuads = r.edges().length / 12;
+        assertTrue(edgeQuads <= 12 * 2, "its 12 edges should merge into runs, got " + edgeQuads + " quads");
+    }
 }

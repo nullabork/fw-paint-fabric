@@ -144,6 +144,19 @@ public final class LineMarkers {
      */
     static boolean tick(Minecraft mc, PlacementMode pm, boolean handles,
                         boolean attack, boolean attackEdge, boolean useEdge, boolean pickEdge) {
+        long perfT0 = PERF ? System.nanoTime() : 0;
+        try {
+            return tickInner(mc, pm, handles, attack, attackEdge, useEdge, pickEdge);
+        } finally {
+            if (PERF) {
+                perfTicks++;
+                perfTickNanos += System.nanoTime() - perfT0;
+            }
+        }
+    }
+
+    private static boolean tickInner(Minecraft mc, PlacementMode pm, boolean handles,
+                                     boolean attack, boolean attackEdge, boolean useEdge, boolean pickEdge) {
         boolean create = pm == PlacementMode.MARKER_LINE;
         if (!create) pendingStart = null;
         if (!handles) {
@@ -158,7 +171,9 @@ public final class LineMarkers {
         boolean consumed = false;
 
         if (dragLine != null) {
-            if (attack) {
+            if (debugHold) {
+                return true; // dev bench drag: the bench moves the node itself
+            } else if (attack) {
                 applyDrag(mc);
             } else {
                 snapOnRelease(dragLine);
@@ -582,15 +597,57 @@ public final class LineMarkers {
 
     // ---- rendering ----------------------------------------------------------------------------
 
+    // Dev perf log (FWPAINT_PERF): once a second, what the line work cost.
+    private static final boolean PERF = System.getenv("FWPAINT_PERF") != null;
+    private static long perfLastMs, perfFrames, perfEmitNanos, perfTicks, perfTickNanos;
+    private static final org.slf4j.Logger PERF_LOG = org.slf4j.LoggerFactory.getLogger("fwpaint/perf");
+
+    private static void perfReport() {
+        long now = System.currentTimeMillis();
+        if (now - perfLastMs < 1000) return;
+        int cells = 0, faceV = 0, edgeV = 0;
+        for (LineShape l : lines) {
+            cells += l.cellCount();
+            faceV += l.faceVerts().length / 3;
+            edgeV += l.edgeVerts().length / 3;
+        }
+        PERF_LOG.info("frames={} ticks={} | rebuilds={} ({} forced by contains) {} ms | resamples={} {} ms"
+                        + " | tube emit {} ms | tick {} ms | cells={} faceVerts={} edgeVerts={}",
+                perfFrames, perfTicks, LineShape.perfRebuilds, LineShape.perfForced,
+                LineShape.perfRebuildNanos / 1_000_000, LineShape.perfSamples, LineShape.perfSampleNanos / 1_000_000,
+                perfEmitNanos / 1_000_000, perfTickNanos / 1_000_000, cells, faceV, edgeV);
+        perfLastMs = now;
+        perfFrames = perfTicks = perfEmitNanos = perfTickNanos = 0;
+        LineShape.perfRebuilds = LineShape.perfRebuildNanos = LineShape.perfSamples = 0;
+        LineShape.perfSampleNanos = LineShape.perfForced = 0;
+    }
+
+    /** Dev bench: pretend the selected line's end node is being dragged in a small circle. */
+    private static boolean debugHold; // dev bench is "holding" a drag: never release / save
+
+    public static void debugWiggle(int tick) {
+        if (selected == null) return;
+        debugHold = true;
+        dragLine = selected;
+        dragKind = Kind.NODE;
+        dragIndex = selected.curve.nodes.size() - 1;
+        LineCurve.Node n = selected.curve.nodes.get(dragIndex);
+        n.p = n.p.add(Math.cos(tick * 0.2) * 0.3, Math.sin(tick * 0.2) * 0.3, 0);
+        selected.markDirty();
+    }
+
     static void render(SubmitNodeCollector col, Vec3 cam, boolean handles, PlacementMode pm) {
         Minecraft mc = Minecraft.getInstance();
         frame++;
+        if (PERF) {
+            perfFrames++;
+            perfReport();
+        }
         Vec3[] axes = cameraAxes(mc);
         PoseStack ps = new PoseStack();
         for (LineShape l : lines) {
             boolean sel = handles && l == selected;
-            boolean dragging = l == dragLine;
-            l.ensureCells(!dragging || frame % 4 == 0);
+            l.ensureCells(false); // stale tubes rebuild in the background; the last one keeps drawing
             drawTube(col, ps, cam, l, sel ? TUBE_EDGE_SELECTED : TUBE_EDGE, sel ? TUBE_GHOST_SELECTED : TUBE_GHOST);
             // Twice: depth-tested (weaves through terrain), then a faint on-top ghost so the
             // line and its controls stay readable — and grabbable — behind blocks.
@@ -663,31 +720,37 @@ public final class LineMarkers {
         return aimed != null && aimed.line == l && aimed.kind == k && aimed.index == i;
     }
 
-    /** The selected cells as one batched submission: exposed faces + their convex edges. */
+    /**
+     * The tube from its precomputed vertex arrays (see LineShape#buildRenderCache): one depth-
+     * tested submission of faces + edges, and a faint on-top edge cage so its course stays
+     * visible through terrain. Vertices are offset by (origin − camera) directly, identity pose.
+     */
     private static void drawTube(SubmitNodeCollector col, PoseStack ps, Vec3 cam, LineShape l, int edge, int ghost) {
-        int n = l.renderSize();
-        if (n == 0) return;
+        float[] fv = l.faceVerts(), ev = l.edgeVerts();
+        if (fv.length == 0 && ev.length == 0) return;
         var o = l.renderOrigin();
-        ps.pushPose();
-        ps.translate(o.getX() - cam.x, o.getY() - cam.y, o.getZ() - cam.z);
+        float ox = (float) (o.getX() - cam.x), oy = (float) (o.getY() - cam.y), oz = (float) (o.getZ() - cam.z);
         col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(), (pose, vc) -> {
-            for (int i = 0; i < n; i++) {
-                int mask = l.renderMask(i);
-                if (mask == 0) continue;
-                float x = l.renderX(i), y = l.renderY(i), z = l.renderZ(i);
-                WorldDraw.emitCellFaces(pose, vc, x, y, z, TUBE_FILL, mask);
-                WorldDraw.emitCellEdges(pose, vc, x, y, z, edge, mask, false);
-            }
+            long t0 = PERF ? System.nanoTime() : 0;
+            for (int i = 0; i < fv.length; i += 3) vc.addVertex(fv[i] + ox, fv[i + 1] + oy, fv[i + 2] + oz).setColor(TUBE_FILL);
+            for (int i = 0; i < ev.length; i += 3) vc.addVertex(ev[i] + ox, ev[i + 1] + oy, ev[i + 2] + oz).setColor(edge);
+            if (PERF) perfEmitNanos += System.nanoTime() - t0;
         });
-        // Faint on-top edge cage: the tube's course stays visible through terrain.
         col.submitCustomGeometry(ps, WorldDraw.seeThrough(), (pose, vc) -> {
-            for (int i = 0; i < n; i++) {
-                int mask = l.renderMask(i);
-                if (mask == 0) continue;
-                WorldDraw.emitCellEdges(pose, vc, l.renderX(i), l.renderY(i), l.renderZ(i), ghost, mask, true);
+            long t0 = PERF ? System.nanoTime() : 0;
+            // The see-through pipeline culls, so each quad goes in both windings (+ texel UV).
+            for (int q = 0; q < ev.length; q += 12) {
+                for (int k = 0; k < 4; k++) {
+                    int i = q + k * 3;
+                    vc.addVertex(ev[i] + ox, ev[i + 1] + oy, ev[i + 2] + oz).setUv(0.5f, 0.5f).setColor(ghost);
+                }
+                for (int k = 3; k >= 0; k--) {
+                    int i = q + k * 3;
+                    vc.addVertex(ev[i] + ox, ev[i + 1] + oy, ev[i + 2] + oz).setUv(0.5f, 0.5f).setColor(ghost);
+                }
             }
+            if (PERF) perfEmitNanos += System.nanoTime() - t0;
         });
-        ps.popPose();
     }
 
     /** Camera-facing buttons drawn on top of everything (see-through pipeline). */

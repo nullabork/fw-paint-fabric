@@ -60,14 +60,27 @@ Floating **billboard buttons** sit above the start end (offset so they never cov
 always face the camera, and draw on top of terrain. Buttons: **circle, square, triangle, star**
 (click the active one again to remove the profile) and **Shell / Solid**.
 
-The tube is the profile swept along the curve:
+The tube is the profile swept along the curve, built slice by slice (`TubeBuild`):
 
-- For each candidate cell, find the closest point on the curve (parameter *s*), build the
-  rotation-minimising frame (T, N, B) there, rotate by the interpolated twist, and test the cell
-  centre's (u, v) against the profile at the interpolated radius. This is a distance-field
-  sweep: tight bends merge naturally instead of leaving gaps between stacked slices.
-- Ends are cut flat (cells beyond an end along the tangent are outside).
+- Each curve sample (every 0.5 blocks) owns a thin slab across the curve: its normal plane ± half
+  the gap to its neighbours *measured at the profile's rim*, so slabs meet even on the outside
+  of tight bends. The end slabs stop half a block past the ends (flat caps).
+- Candidate cells come from a 0.7-spaced grid laid across each slab (≤ √½, so every cell a slice
+  cuts gets a point). A cell is in when its centre lies in some sample's slab and inside the
+  profile there, in that sample's rotation-minimising frame turned by the interpolated twist, at
+  the interpolated radius. A union of slices: bends merge, nothing is missed.
 - **Shell** (default) keeps inside cells with an outside 6-neighbour; **Solid** keeps them all.
+
+Performance (measured with `FWPAINT_PERF`, see `DebugRender`):
+
+- Builds run from an immutable snapshot on a background thread whenever the line changes; the
+  previous result keeps drawing until the new one lands, so dragging a node on a huge tube never
+  stalls a frame. Painting (`contains` / `segmentFor`) builds synchronously so it always sees the
+  current shape.
+- Draw geometry is precomputed per build: exposed faces greedy-merged into rectangles per
+  plane, convex edges merged into straight runs and drawn as one strip set across the corner.
+  A frame only copies floats out. (A 5k-cell tube went from ~6.6 ms/frame + 12 ms per rebuild on
+  the render thread to ~1 ms/frame with rebuilds off-thread.)
 
 ### End controls (once a profile exists)
 

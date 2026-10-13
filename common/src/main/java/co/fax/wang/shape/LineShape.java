@@ -4,28 +4,22 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.ArrayList;
-import java.util.HashMap;
+import it.unimi.dsi.fastutil.longs.LongSet;
+
 import java.util.List;
-import java.util.Map;
 
 /**
  * One line marker: its {@link LineCurve}, the profile swept along it (with per-end radius and
  * twist), and the block cells that sweep selects — the region painting is constrained to.
  *
- * <p>The tube is built as a distance-field sweep (see docs/design/line-marker.md): every
- * candidate cell is matched to its closest curve sample, expressed in that sample's
- * rotation-minimising frame (rotated by the interpolated twist), and tested against the profile
- * at the interpolated radius. Tight bends merge instead of leaving gaps between slices; the ends
- * are cut flat. Shell mode keeps the cells with an outside neighbour, Solid keeps them all. A
- * bare line (profile NONE) selects the 6-connected chain of cells the curve passes through.
+ * <p>The cells and their draw geometry are built by {@link TubeBuild} from a snapshot of this
+ * line — synchronously when painting needs them, on a worker thread while the line is being
+ * edited (the previous result keeps drawing until the new one lands).
  */
 public final class LineShape {
 
-    /** Sample spacing along the curve (blocks). */
+    /** Sample spacing along the curve for controls, picking and drawing the line (blocks). */
     static final double STEP = 0.25;
-    /** Safety cap on selected cells so a huge tube can't stall the client. */
-    static final int MAX_CELLS = 250_000;
 
     public final LineCurve curve;
     public LineProfile profile = LineProfile.NONE;
@@ -35,15 +29,21 @@ public final class LineShape {
     /** Profile twist (radians) at the start / end (interpolated along the line). */
     public double tw0, tw1;
 
+    /** Dev perf counters (read + reset by LineMarkers' FWPAINT_PERF log). */
+    static long perfRebuilds, perfRebuildNanos, perfSamples, perfSampleNanos, perfForced;
+
     private List<LineCurve.Sample> samples;
     private double length;
-    private boolean samplesDirty = true, cellsDirty = true;
+    private boolean samplesDirty = true;
 
-    /** Selected cells → fraction along the line (0 start … 1 end) for gradients. */
-    private Map<Long, Float> cells = Map.of();
-    // Render cache: cells relative to `origin` with their exposed-face masks.
-    private BlockPos origin = BlockPos.ZERO;
-    private int[] rx = new int[0], ry = new int[0], rz = new int[0], rmask = new int[0];
+    /** Edit counter: every markDirty bumps it; a build result is current when it matches. */
+    private long version = 1, builtVersion;
+    /** The last applied build: cells (→ fraction along the line) and merged draw geometry. */
+    private TubeBuild.Result built = TubeBuild.Result.EMPTY;
+    // Background build hand-off (written by the worker, read on the client thread).
+    private volatile TubeBuild.Result finished;
+    private volatile long finishedVersion;
+    private volatile boolean inFlight;
 
     public LineShape(LineCurve curve) {
         this.curve = curve;
@@ -52,12 +52,15 @@ public final class LineShape {
     /** The curve or a parameter changed: samples and cells must be rebuilt. */
     public void markDirty() {
         samplesDirty = true;
-        cellsDirty = true;
+        version++;
     }
 
     public List<LineCurve.Sample> samples() {
         if (samplesDirty) {
+            long t0 = System.nanoTime();
             samples = curve.sample(STEP);
+            perfSamples++;
+            perfSampleNanos += System.nanoTime() - t0;
             length = samples.isEmpty() ? 0 : samples.get(samples.size() - 1).s();
             samplesDirty = false;
         }
@@ -94,140 +97,75 @@ public final class LineShape {
 
     // ---- cells ------------------------------------------------------------------------------
 
-    /** Rebuild the selected cells if stale ({@code allowRebuild} false = keep the old ones). */
-    public void ensureCells(boolean allowRebuild) {
-        if (!cellsDirty || !allowRebuild) return;
-        cellsDirty = false;
-        List<LineCurve.Sample> ss = samples();
-        Map<Long, Float> sel = profile == LineProfile.NONE ? pathCells(ss) : tubeCells(ss);
-        cells = sel;
-        buildRenderCache();
+    /** One worker for every line's background tube builds (daemon: never blocks shutdown). */
+    private static final java.util.concurrent.ExecutorService BUILDER =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "FW Paint tube builder");
+                t.setDaemon(true);
+                return t;
+            });
+
+    private TubeBuild.Params snapshot() {
+        return new TubeBuild.Params(curve.copy(), profile, solid, r0, r1, tw0, tw1);
     }
 
-    private Map<Long, Float> pathCells(List<LineCurve.Sample> ss) {
-        Map<Long, Float> out = new HashMap<>();
-        BlockPos prev = null;
-        for (int i = 0; i < ss.size(); i++) {
-            BlockPos c = BlockPos.containing(ss.get(i).pos());
-            float f = (float) frac(i);
-            if (prev != null && !prev.equals(c)) {
-                // Step one axis at a time so the chain stays 6-connected (no diagonal gaps).
-                BlockPos walk = prev;
-                for (Direction.Axis ax : Direction.Axis.values()) {
-                    int d = c.get(ax) - walk.get(ax);
-                    if (d == 0) continue;
-                    walk = walk.relative(ax, Integer.signum(d));
-                    if (!walk.equals(c)) out.putIfAbsent(walk.asLong(), f);
-                }
-            }
-            out.putIfAbsent(c.asLong(), f);
-            prev = c;
-        }
-        return out;
+    private void apply(TubeBuild.Result r, long forVersion) {
+        built = r;
+        builtVersion = forVersion;
+        perfRebuilds++;
+        perfRebuildNanos += r.nanos();
     }
 
-    private Map<Long, Float> tubeCells(List<LineCurve.Sample> ss) {
-        // Pass 1: stamp each sample's neighbourhood, keeping the closest sample per cell.
-        Map<Long, double[]> best = new HashMap<>(); // cell → {dist², sample index}
-        for (int i = 0; i < ss.size(); i++) {
-            Vec3 p = ss.get(i).pos();
-            // Far enough for a square's corners (√2 × its half-width), not just a circle.
-            double reach = (radiusAt(frac(i)) + 0.5) * Math.sqrt(2) + 1;
-            int lx = (int) Math.floor(p.x - reach), hx = (int) Math.floor(p.x + reach);
-            int ly = (int) Math.floor(p.y - reach), hy = (int) Math.floor(p.y + reach);
-            int lz = (int) Math.floor(p.z - reach), hz = (int) Math.floor(p.z + reach);
-            double reach2 = reach * reach;
-            for (int x = lx; x <= hx; x++) {
-                double dx = x + 0.5 - p.x;
-                for (int y = ly; y <= hy; y++) {
-                    double dy = y + 0.5 - p.y;
-                    for (int z = lz; z <= hz; z++) {
-                        double dz = z + 0.5 - p.z;
-                        double d2 = dx * dx + dy * dy + dz * dz;
-                        if (d2 > reach2) continue;
-                        long key = BlockPos.asLong(x, y, z);
-                        double[] cur = best.get(key);
-                        if (cur == null) {
-                            if (best.size() >= MAX_CELLS * 4) continue;
-                            best.put(key, new double[]{d2, i});
-                        } else if (d2 < cur[0]) {
-                            cur[0] = d2;
-                            cur[1] = i;
-                        }
-                    }
+    /**
+     * Bring the cells up to date. {@code sync} builds right here (painting, tests — they must see
+     * the current shape). Otherwise (rendering) a stale shape is rebuilt on the worker thread
+     * while the previous result keeps drawing, so dragging a node on a huge tube never stalls a
+     * frame; the newest finished build is swapped in on a later call.
+     */
+    public void ensureCells(boolean sync) {
+        TubeBuild.Result done = finished;
+        if (done != null && finishedVersion > builtVersion) {
+            finished = null;
+            apply(done, finishedVersion);
+        }
+        if (builtVersion == version) return;
+        if (sync) {
+            apply(TubeBuild.build(snapshot()), version);
+            return;
+        }
+        if (inFlight) return; // the running build will be followed by another if still stale
+        inFlight = true;
+        long v = version;
+        TubeBuild.Params p = snapshot();
+        BUILDER.execute(() -> {
+            try {
+                TubeBuild.Result r = TubeBuild.build(p);
+                if (v > finishedVersion) {
+                    finishedVersion = v;
+                    finished = r;
                 }
+            } finally {
+                inFlight = false;
             }
-        }
-        // Pass 2: test each cell against the profile in its closest sample's frame.
-        Map<Long, Float> inside = new HashMap<>();
-        int last = ss.size() - 1;
-        for (Map.Entry<Long, double[]> e : best.entrySet()) {
-            int i = (int) e.getValue()[1];
-            LineCurve.Sample s = ss.get(i);
-            long key = e.getKey();
-            Vec3 c = new Vec3(BlockPos.getX(key) + 0.5, BlockPos.getY(key) + 0.5, BlockPos.getZ(key) + 0.5);
-            Vec3 d = c.subtract(s.pos());
-            double along = d.dot(s.tan());
-            if ((i == 0 && along < -0.5) || (i == last && along > 0.5)) continue; // flat end caps
-            Vec3[] f = rotatedFrame(i);
-            double fr = frac(i);
-            if (profile.inside(d.dot(f[0]), d.dot(f[1]), radiusAt(fr))) {
-                inside.put(key, (float) fr);
-                if (inside.size() >= MAX_CELLS) break;
-            }
-        }
-        if (solid) return inside;
-        // Shell: only the cells with an outside face neighbour.
-        Map<Long, Float> shell = new HashMap<>();
-        for (Map.Entry<Long, Float> e : inside.entrySet()) {
-            long k = e.getKey();
-            for (Direction dir : Direction.values()) {
-                if (!inside.containsKey(BlockPos.offset(k, dir))) {
-                    shell.put(k, e.getValue());
-                    break;
-                }
-            }
-        }
-        return shell;
+        });
     }
 
-    private void buildRenderCache() {
-        int n = cells.size();
-        int mnx = Integer.MAX_VALUE, mny = Integer.MAX_VALUE, mnz = Integer.MAX_VALUE;
-        for (long k : cells.keySet()) {
-            mnx = Math.min(mnx, BlockPos.getX(k));
-            mny = Math.min(mny, BlockPos.getY(k));
-            mnz = Math.min(mnz, BlockPos.getZ(k));
-        }
-        origin = n == 0 ? BlockPos.ZERO : new BlockPos(mnx, mny, mnz);
-        rx = new int[n];
-        ry = new int[n];
-        rz = new int[n];
-        rmask = new int[n];
-        int i = 0;
-        for (long k : cells.keySet()) {
-            int mask = 0;
-            for (Direction d : Direction.values()) {
-                if (!cells.containsKey(BlockPos.offset(k, d))) mask |= 1 << d.ordinal();
-            }
-            rx[i] = BlockPos.getX(k) - origin.getX();
-            ry[i] = BlockPos.getY(k) - origin.getY();
-            rz[i] = BlockPos.getZ(k) - origin.getZ();
-            rmask[i] = mask;
-            i++;
-        }
+    /** True while the drawn tube lags the line (a rebuild is pending or running). */
+    public boolean cellsDirty() {
+        return builtVersion != version;
     }
 
     public boolean contains(BlockPos cell) {
+        if (builtVersion != version) perfForced++;
         ensureCells(true);
-        return cells.containsKey(cell.asLong());
+        return built.cells().containsKey(cell.asLong());
     }
 
     /** Fraction along the line (0 … 1) of a selected cell, or -1. */
     public double fracOf(BlockPos cell) {
         ensureCells(true);
-        Float f = cells.get(cell.asLong());
-        return f == null ? -1 : f;
+        long k = cell.asLong();
+        return built.cells().containsKey(k) ? built.cells().get(k) : -1;
     }
 
     /** Gradient segment for a selected cell: start → end along the curve, by arc length. */
@@ -241,30 +179,29 @@ public final class LineShape {
                 BlockPos.containing(ns.get(ns.size() - 1).p), idx, len);
     }
 
+    /** Cells of the last finished build (may lag the line while it's being edited). */
     public int cellCount() {
-        return cells.size();
+        return built.cells().size();
     }
 
     public BlockPos renderOrigin() {
-        return origin;
+        return built.origin();
     }
 
-    public int renderSize() {
-        return rmask.length;
+    /** Merged face quads, xyz per vertex (4 per quad), relative to {@link #renderOrigin()}. */
+    public float[] faceVerts() {
+        return built.faces();
     }
 
-    public int renderX(int i) { return rx[i]; }
+    /** Merged edge-highlight quads, same layout as {@link #faceVerts()}. */
+    public float[] edgeVerts() {
+        return built.edges();
+    }
 
-    public int renderY(int i) { return ry[i]; }
-
-    public int renderZ(int i) { return rz[i]; }
-
-    public int renderMask(int i) { return rmask[i]; }
-
-    /** All selected cells (a copy-free view for flood fills). */
-    public java.util.Set<Long> cellKeys() {
+    /** All selected cells, up to date (a copy-free view for flood fills). */
+    public LongSet cellKeys() {
         ensureCells(true);
-        return cells.keySet();
+        return built.cells().keySet();
     }
 
     // ---- control positions ------------------------------------------------------------------

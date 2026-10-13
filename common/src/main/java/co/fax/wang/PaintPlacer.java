@@ -812,7 +812,7 @@ public final class PaintPlacer {
             }
         }
         dir = Direction.UP; // orientation for blocks placed into open air
-        java.util.Set<Long> tube = line.cellKeys();
+        it.unimi.dsi.fastutil.longs.LongSet tube = line.cellKeys();
         ArrayDeque<BlockPos> bfs = new ArrayDeque<>();
         Set<BlockPos> seen = new HashSet<>();
         bfs.add(seedOut[0]);
