@@ -95,6 +95,11 @@ public final class LineMarkers {
     private static Kind dragKind;
     private static int dragIndex;
     private static Vec3 grabOffset; // control position minus the aim point at the grab
+    private static Vec3 dragOrigin; // where the dragged control was when grabbed
+    /** Alt axis lock for node / move drags: the world axis it slides along, or null. */
+    private static net.minecraft.core.Direction.Axis lockAxis;
+    private static final double LOCK_PICK = 0.3; // movement needed before Alt picks an axis
+    private static final double GUIDE_LEN = 96;  // half-length of the axis guide line
     private static long lastBodyClickMs;
     private static LineShape lastBodyLine;
     private static long frame;
@@ -284,6 +289,8 @@ public final class LineMarkers {
         dragIndex = a.index;
         Vec3 hit = planeHit(mc, target);
         grabOffset = hit == null ? Vec3.ZERO : target.subtract(hit);
+        dragOrigin = target;
+        lockAxis = null;
     }
 
     /**
@@ -294,7 +301,25 @@ public final class LineMarkers {
     private static void applyDrag(Minecraft mc) {
         Vec3 hit = planeHit(mc, controlPos(dragLine, dragKind, dragIndex));
         if (hit == null) return;
-        applyTarget(dragLine, hit.add(grabOffset));
+        Vec3 target = hit.add(grabOffset);
+        if ((dragKind == Kind.NODE || dragKind == Kind.MOVE) && altDown()) {
+            // Alt: slide along the world axis the drag mostly moves on (picked once, kept until
+            // Alt is released), following the point on that axis nearest the view ray.
+            if (lockAxis == null) {
+                Vec3 d = target.subtract(dragOrigin);
+                if (d.length() < LOCK_PICK) return;
+                double ax = Math.abs(d.x), ay = Math.abs(d.y), az = Math.abs(d.z);
+                lockAxis = ax >= ay && ax >= az ? net.minecraft.core.Direction.Axis.X
+                        : ay >= az ? net.minecraft.core.Direction.Axis.Y : net.minecraft.core.Direction.Axis.Z;
+            }
+            Vec3 u = axisUnit(lockAxis);
+            Vec3 a = dragOrigin.subtract(u.scale(Raycast.REACH)), b = dragOrigin.add(u.scale(Raycast.REACH));
+            double s = LineCurve.segmentRayClosest(a, b, Raycast.eye(mc), Raycast.look(mc))[0];
+            target = a.add(b.subtract(a).scale(s));
+        } else {
+            lockAxis = null;
+        }
+        applyTarget(dragLine, target);
     }
 
     /** Move the dragged control to {@code target} (each kind interprets it its own way). */
@@ -357,6 +382,14 @@ public final class LineMarkers {
         double t = anchor.subtract(eye).dot(normal) / den;
         if (t < 0 || t > Raycast.REACH) return null;
         return eye.add(dir.scale(t));
+    }
+
+    private static Vec3 axisUnit(net.minecraft.core.Direction.Axis a) {
+        return switch (a) {
+            case X -> new Vec3(1, 0, 0);
+            case Y -> new Vec3(0, 1, 0);
+            case Z -> new Vec3(0, 0, 1);
+        };
     }
 
     private static boolean altDown() {
@@ -527,6 +560,20 @@ public final class LineMarkers {
             col.submitCustomGeometry(ps, WorldDraw.seeThrough(),
                     (pose, vc) -> drawParts(new Em(pose, vc, cam, true), l, sel));
             if (sel) drawButtons(col, ps, cam, l, axes);
+        }
+        if (dragLine != null && lockAxis != null && dragOrigin != null) {
+            // Alt axis lock: the track the dragged node slides on, coloured by axis.
+            Vec3 u = axisUnit(lockAxis);
+            Vec3 a = dragOrigin.subtract(u.scale(GUIDE_LEN)), b = dragOrigin.add(u.scale(GUIDE_LEN));
+            int c = switch (lockAxis) {
+                case X -> 0xE0FF5555;
+                case Y -> 0xE055FF55;
+                case Z -> 0xE05599FF;
+            };
+            for (boolean ghost : new boolean[]{false, true}) {
+                col.submitCustomGeometry(ps, ghost ? WorldDraw.seeThrough() : RenderTypes.debugFilledBox(),
+                        (pose, vc) -> segmentRibbon(new Em(pose, vc, cam, ghost), a, b, 0.025, c));
+            }
         }
         if (pm == PlacementMode.MARKER_LINE && handles && dragLine == null) {
             Vec3 p = aimPoint(mc);

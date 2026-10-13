@@ -355,7 +355,9 @@ public final class HelpPanel {
                     + "that corner sharp again. Hold Alt while dragging a handle to mirror the "
                     + "opposite handle - a smooth corner. A dragged point stays the same distance "
                     + "from you as you sweep the crosshair (walk around it to drag it another "
-                    + "way); scroll while dragging to push it further away or pull it nearer.",
+                    + "way); scroll while dragging to push it further away or pull it nearer. "
+                    + "Hold Alt while dragging a node (or the move node) to lock it to the axis "
+                    + "it's mostly moving along - a coloured guide line shows the track.",
                 "Double-click the line (in Marker line mode) to add a node there without "
                     + "changing its shape. Middle-click a middle node to remove it; middle-click "
                     + "anything else on the line to delete the whole line.",

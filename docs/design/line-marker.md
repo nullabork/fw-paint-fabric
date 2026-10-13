@@ -37,6 +37,9 @@ handles. A fresh line is two nodes with zero handles = a straight line.
   perpendicular to the line from the eye to that point. The plane is rebuilt every tick, so
   turning on the spot doesn't tilt it but walking around the point does. **Scroll while
   dragging** pushes the point a block further away / nearer along that eye → point line.
+- **Alt + drag** a main node or the move node locks it to the world axis it's mostly moving
+  along (picked after ~0.3 blocks, kept until Alt is released); it follows the point on that
+  axis nearest the view ray, and a long axis-coloured guide line shows the track.
 - A handle dragged within ~0.35 blocks of its node **snaps** onto it (zero length → sharp corner).
 - **Alt + drag** a handle mirrors the opposite handle through the node (smooth corner).
 - **Double-click** the line inserts a node at the point on the curve closest to the view ray. The
