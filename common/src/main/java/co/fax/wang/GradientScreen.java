@@ -677,6 +677,13 @@ public class GradientScreen extends Screen {
                 : "Off: every column advances at once"));
         y += 24;
 
+        cycleButton(rx, y, cw, () -> Component.literal("Place in air: " + (ConfigManager.get().placeInAir ? "On" : "Off")),
+                () -> ConfigManager.get().placeInAir = !ConfigManager.get().placeInAir);
+        helpSpots.add(new HelpSpot(rx, y, cw, 20, () -> ConfigManager.get().placeInAir
+                ? "On: blocks with nothing next to them are placed straight into the air"
+                : "Off: a block waits until a neighbour is placed (for strict anti-cheat servers)"));
+        y += 24;
+
         addRenderableWidget(new ConfigSlider(rx, y, cw, secsToSlider(cfg.gradientCacheSeconds),
                 v -> "Paint memory: " + secsLabel(sliderToSecs(v)),
                 v -> ConfigManager.get().gradientCacheSeconds = sliderToSecs(v)));

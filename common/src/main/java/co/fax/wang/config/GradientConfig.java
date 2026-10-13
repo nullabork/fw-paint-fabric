@@ -77,6 +77,14 @@ public class GradientConfig {
     public boolean faceFillVoids = true;
 
     /**
+     * Place in air: a cell with no solid neighbour to click against is placed by "clicking" the
+     * air cell itself (the server places into a replaceable clicked cell, so no support block is
+     * needed). Off = such cells wait until a neighbour lands, as before. Some anti-cheat plugins
+     * flag supportless placement, hence the toggle.
+     */
+    public boolean placeInAir = true;
+
+    /**
      * "Paint memory": idle seconds before free-hand paint progress is forgotten — gradient
      * columns, 3D fills, AND pattern placements all share this timer (the session caches drop
      * and the next click starts fresh). Also cleared when the active palette/pattern changes.

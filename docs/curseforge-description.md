@@ -207,7 +207,8 @@ Every placeable block in the game ranked by colour — discover blocks beyond yo
 ## Settings
 
 - **Placement**, **Marker dist**, **Auto end marker**, **Fill voids first**, **Paint memory**
-  — see above. **Missing blocks**: refuse to paint or skip absent segments. **Color match**:
+  — see above. **Place in air** (on by default): blocks with nothing next to them go straight into
+  the air, no scaffolding needed; turn it off for servers whose anti-cheat flags that. **Missing blocks**: refuse to paint or skip absent segments. **Color match**:
   Perceptual (Oklab) or Classic.
 - **Move helper text…** repositions the HUD lines with a live preview.
 

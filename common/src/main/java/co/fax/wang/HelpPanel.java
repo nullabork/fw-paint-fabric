@@ -238,6 +238,10 @@ public final class HelpPanel {
                 "A tap places one layer; holding pauses for a beat after the first layer, then "
                     + "keeps going at full speed - release during the beat to stop at exactly "
                     + "one.",
+                "Place in air (Settings, on by default): blocks with nothing next to them go "
+                    + "straight into the air, so fills and tubes in open sky don't need "
+                    + "scaffolding. Turn it off on servers whose anti-cheat flags that - blocks "
+                    + "then wait until a neighbour is placed.",
                 "Markers never block painting - they only constrain it: columns stop at end "
                     + "markers (even ones floating in air), and 3D fills that start inside marker "
                     + "space stay inside it."),

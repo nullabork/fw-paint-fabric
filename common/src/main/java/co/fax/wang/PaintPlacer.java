@@ -762,7 +762,10 @@ public final class PaintPlacer {
 
     // ---- placement ----------------------------------------------------------------------------------
 
-    /** Place queued cells, a few per tick; a cell with no solid neighbour yet is retried later. */
+    /**
+     * Place queued cells, a few per tick. A cell with no solid neighbour goes straight into the
+     * air (Place in air), or with that off is retried later once a neighbour lands.
+     */
     private static void drain(Minecraft mc) {
         LocalPlayer player = mc.player;
         GradientConfig cfg = ConfigManager.get();
@@ -772,7 +775,7 @@ public final class PaintPlacer {
             Pending p = queue.poll();
             if (!Gradient.emptyCell(mc.level.getBlockState(p.cell()))) continue;
             BlockPos support = findSupport(mc, p.cell());
-            if (support == null) {
+            if (support == null && !cfg.placeInAir) {
                 if (p.tries() + 1 < MAX_TRIES) queue.add(new Pending(p.cell(), p.g(), p.tries() + 1));
                 continue;
             }
@@ -829,10 +832,15 @@ public final class PaintPlacer {
                 return;
             }
             if (slot < 0) continue;
-            Direction face = Direction.getNearest(
-                    p.cell().getX() - support.getX(), p.cell().getY() - support.getY(),
-                    p.cell().getZ() - support.getZ(), Direction.UP);
-            BlockPlacement.place(mc, player, slot, support, face);
+            if (support != null) {
+                Direction face = Direction.getNearest(
+                        p.cell().getX() - support.getX(), p.cell().getY() - support.getY(),
+                        p.cell().getZ() - support.getZ(), Direction.UP);
+                BlockPlacement.place(mc, player, slot, support, face);
+            } else {
+                // Nothing to click against: place straight into the air cell (Place in air).
+                BlockPlacement.placeInAir(mc, player, slot, p.cell(), dir != null ? dir : Direction.UP);
+            }
             placed++;
             if (type == PaintType.GRADIENT && p.g() != null) {
                 if (p.g().step() >= 0) GradientCaches.recordColumn(mode, p.cell(), p.g().step(), dir);
