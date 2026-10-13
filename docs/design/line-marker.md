@@ -14,6 +14,9 @@ centre. Same packet Litematica's Easy Place uses.
 - Settings toggle **Place in air**, default **On**. Off restores the old behaviour (cells wait
   for a neighbour) for servers whose anti-cheat flags supportless placement.
 - Cells with a real neighbour still click against it (natural orientation, least surprising).
+- A click that hits nothing places **one block** in the cell at the edge of block reach along the
+  view (a green cell previews it), facing the player. Gradient/Noise use the palette's first
+  colour; Solid needs a ✓ block (nothing to match); Pattern anchors its corner there.
 
 ## Line
 
@@ -103,7 +106,10 @@ Performance (measured with `FWPAINT_PERF`, see `DebugRender`):
 ### Painting
 
 The tube is a region like boxes and rings: `ShapeMarkers.contains` and `segmentFor` include it.
-Gradients run **start → end along the curve** (segment index from arc length). **3D Fill aimed
+Gradients use one ramp per line; each line picks its direction (`LineGradient`, second button
+row): **Across** (default — cells projected on the view direction at the click, near side = 0),
+**Along** (arc-length fraction start → end), **Inside out** / **Outside in** (distance to the
+nearest curve sample over the local radius). **3D Fill aimed
 into a tube floods the whole tube** for every paint type; with Place in air on, no scaffolding
 is needed.
 

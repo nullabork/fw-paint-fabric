@@ -41,7 +41,7 @@ final class TubeBuild {
     /** Safety cap on selected cells so a huge tube can't stall the client. */
     static final int MAX_CELLS = 400_000;
     static final float EXPAND = 0.005f; // lift off surfaces (matches WorldDraw)
-    static final float EDGE_W = 0.02f;  // half-width of the edge highlight quads
+    static final float EDGE_W = 0.01f;  // half-width of the edge highlight quads
 
     /** Everything a build reads, copied so the worker never sees a half-edited line. */
     record Params(LineCurve curve, LineProfile profile, boolean solid, double r0, double r1,

@@ -691,7 +691,7 @@ public class GradientScreen extends Screen {
         cycleButton(rx, y, cw, () -> Component.literal("Place in air: " + (ConfigManager.get().placeInAir ? "On" : "Off")),
                 () -> ConfigManager.get().placeInAir = !ConfigManager.get().placeInAir);
         helpSpots.add(new HelpSpot(rx, y, cw, 20, () -> ConfigManager.get().placeInAir
-                ? "On: blocks with nothing next to them are placed straight into the air"
+                ? "On: blocks with nothing next to them are placed straight into the air; aim at the sky to place one at reach"
                 : "Off: a block waits until a neighbour is placed (for strict anti-cheat servers)"));
         y += 24;
 

@@ -270,8 +270,9 @@ public final class HelpPanel {
                     + "one.",
                 "Place in air (Settings, on by default): blocks with nothing next to them go "
                     + "straight into the air, so fills and tubes in open sky don't need "
-                    + "scaffolding. Turn it off on servers whose anti-cheat flags that - blocks "
-                    + "then wait until a neighbour is placed.",
+                    + "scaffolding. Aim at open sky and a green cell shows at the edge of your "
+                    + "reach: click to put one block there. Turn it off on servers whose "
+                    + "anti-cheat flags that - blocks then wait until a neighbour is placed.",
                 "Markers never block painting - they only constrain it: columns stop at end "
                     + "markers (even ones floating in air), and 3D fills that start inside marker "
                     + "space stay inside it."),
@@ -382,7 +383,7 @@ public final class HelpPanel {
                 "2. Click a block face for the start, another for the end. Right-click cancels.",
                 "3. Drag the cubes to move the line. Drag the pink balls to bend it.",
                 "4. Click a shape in the floating buttons over either end. Glowing blocks = what "
-                    + "gets painted.",
+                    + "gets painted. The row under it picks which way a gradient runs.",
                 "5. Switch to 3D Fill, aim into the tube, right-click. Done.",
                 "Stuck? The ? button over each end of a line opens this page."),
                 t("Controls cheat sheet", "Every click and key, one line each.", List.of(
@@ -412,7 +413,10 @@ public final class HelpPanel {
                 t("Painting it", "Fill the tube in one click.", List.of(
                     "3D Fill aimed into the tube fills the whole thing - Solid, Gradient or "
                         + "Noise (not Pattern).",
-                    "Gradients run from the line's start (turquoise cube) to its end (amber).",
+                    "Which way a Gradient runs: the second row of buttons. Across (default): "
+                        + "from the side you aim into to the far side. Along: start (turquoise "
+                        + "cube) to end (amber). Inside out: line to skin. Outside in: skin to "
+                        + "line. Hover a button to see its name.",
                     "Place in air (Settings, on by default) means a tube floating in the sky "
                         + "needs no scaffolding.",
                     "Face and Single modes respect the tube too, like any shape marker.")),

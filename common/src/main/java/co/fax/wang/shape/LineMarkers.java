@@ -7,6 +7,7 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -52,8 +53,8 @@ public final class LineMarkers {
     private static final int TWIST = 0xD05599FF;
     private static final int MOVE = 0xD0E0E0E0;
     private static final int TUBE_FILL = 0x33FFA000;
-    private static final int TUBE_EDGE = 0xD8FFB830;
-    private static final int TUBE_EDGE_SELECTED = 0xF0FFFFFF;
+    private static final int TUBE_EDGE = 0xB0FFB830;
+    private static final int TUBE_EDGE_SELECTED = 0xC0FFFFFF;
     // The on-top ghost pass draws through everything, so it stays faint (same as ring ghosts).
     private static final int TUBE_GHOST = 0x5CFFB830;
     private static final int TUBE_GHOST_SELECTED = 0xA8FFFFFF;
@@ -83,9 +84,23 @@ public final class LineMarkers {
     /** Floating buttons, left to right. */
     private static final LineProfile[] BUTTON_PROFILES = {
             LineProfile.CIRCLE, LineProfile.SQUARE, LineProfile.TRIANGLE, LineProfile.STAR};
-    /** Buttons per row: the profiles, shell/solid, help. One row floats above each end. */
-    private static final int BUTTON_COUNT = BUTTON_PROFILES.length + 2;
+    /**
+     * Buttons per end: a top row (the profiles, shell/solid, help) and under it the gradient
+     * directions. One set floats above each end.
+     */
+    private static final int TOP_ROW = BUTTON_PROFILES.length + 2;
+    private static final LineGradient[] BUTTON_GRADIENTS = LineGradient.values();
+    private static final int BUTTON_COUNT = TOP_ROW + BUTTON_GRADIENTS.length;
     private static final int SLOT_SOLID = BUTTON_PROFILES.length, SLOT_HELP = BUTTON_PROFILES.length + 1;
+    /**
+     * Gradient button glyphs, 7×5: '1'…'4' are faint → full, '4' marking where the gradient
+     * starts (across: the near side, drawn at the top; along: the start node, on the left).
+     */
+    private static final String[][] GRADIENT_GLYPHS = {
+            {"4444444", "3333333", "2222222", "1111111", "1111111"},   // ACROSS
+            {"4433211", "4433211", "4433211", "4433211", "4433211"},   // ALONG
+            {"1111111", "1233321", "1234321", "1233321", "1111111"},   // INSIDE_OUT
+            {"4444444", "4322234", "4321234", "4322234", "4444444"}};  // OUTSIDE_IN
     /** The "?" glyph as a 3×6 pixel grid (rows top to bottom). */
     private static final String[] QUESTION = {"XXX", "..X", ".XX", ".X.", "...", ".X."};
 
@@ -308,6 +323,13 @@ public final class LineMarkers {
 
     private static void pressButton(Minecraft mc, LineShape l, int index) {
         int slot = index % BUTTON_COUNT;
+        if (slot >= TOP_ROW) {
+            // Only changes how a later Gradient fill runs — the tube itself is unchanged.
+            l.gradient = BUTTON_GRADIENTS[slot - TOP_ROW];
+            ShapeMarkers.saveLines();
+            overlay(mc, "Line gradient: " + l.gradient.label);
+            return;
+        }
         if (slot == SLOT_HELP) {
             mc.setScreenAndShow(co.fax.wang.GradientScreen.atHelpTopic("Marker line"));
             return;
@@ -622,6 +644,12 @@ public final class LineMarkers {
                 }
             }
         }
+        // Newly hovered button: say what it does (once per hover, not every tick).
+        boolean onButton = best != null && best.kind == Kind.BUTTON;
+        if (onButton && (aimed == null || aimed.kind != Kind.BUTTON
+                || aimed.line != best.line || aimed.index != best.index)) {
+            overlay(mc, buttonLabel(best.line, best.index));
+        }
         aimed = best;
     }
 
@@ -653,11 +681,38 @@ public final class LineMarkers {
         return new Vec3[]{right, up, f};
     }
 
-    /** Button {@code k}: row k / BUTTON_COUNT (0 above the start, 1 above the end), slot k % BUTTON_COUNT. */
+    /**
+     * Button {@code k}: set k / BUTTON_COUNT (0 above the start, 1 above the end), slot
+     * k % BUTTON_COUNT — the top row, then the gradient row centred under it.
+     */
     private static Vec3 buttonCenter(LineShape l, int k, Vec3[] cam) {
-        double width = BUTTON_COUNT * BTN + (BUTTON_COUNT - 1) * BTN_GAP;
-        double x = -width / 2 + BTN / 2 + (k % BUTTON_COUNT) * (BTN + BTN_GAP);
-        return l.buttonAnchor(k >= BUTTON_COUNT).add(cam[0].scale(x));
+        int slot = k % BUTTON_COUNT;
+        boolean top = slot < TOP_ROW;
+        int n = top ? TOP_ROW : BUTTON_COUNT - TOP_ROW, i = top ? slot : slot - TOP_ROW;
+        double width = n * BTN + (n - 1) * BTN_GAP;
+        double x = -width / 2 + BTN / 2 + i * (BTN + BTN_GAP);
+        Vec3 c = l.buttonAnchor(k >= BUTTON_COUNT).add(cam[0].scale(x));
+        return top ? c : c.subtract(cam[1].scale(BTN + BTN_GAP));
+    }
+
+    /** What a button does, shown above the hotbar while it's hovered. */
+    private static String buttonLabel(LineShape l, int k) {
+        int slot = k % BUTTON_COUNT;
+        if (slot >= TOP_ROW) {
+            LineGradient g = BUTTON_GRADIENTS[slot - TOP_ROW];
+            String what = switch (g) {
+                case ACROSS -> "from the side you aim into, across to the far side";
+                case ALONG -> "from the start (turquoise) to the end (amber)";
+                case INSIDE_OUT -> "from the line out to the skin";
+                case OUTSIDE_IN -> "from the skin in to the line";
+            };
+            return "Gradient " + g.label.toLowerCase() + ": " + what + (l.gradient == g ? " (on)" : "");
+        }
+        if (slot == SLOT_HELP) return "Help: how lines work";
+        if (slot == SLOT_SOLID) return l.solid ? "Solid tube (click for shell)" : "Shell tube (click for solid)";
+        LineProfile p = BUTTON_PROFILES[slot];
+        String name = p.name().charAt(0) + p.name().substring(1).toLowerCase();
+        return l.profile == p ? name + " (click for a bare line)" : name + " tube";
     }
 
     /** Ray distance to a camera-facing button quad, or -1. */
@@ -726,11 +781,15 @@ public final class LineMarkers {
         }
         Vec3[] axes = cameraAxes(mc);
         PoseStack ps = new PoseStack();
+        LineShape lookedTube = handles ? tubeLookedInto(mc) : null;
         for (LineShape l : lines) {
             boolean editing = handles && pm == PlacementMode.MARKER_LINE;
             boolean sel = editing && l == selected;
             l.ensureCells(false); // stale tubes rebuild in the background; the last one keeps drawing
-            drawTube(col, ps, cam, l, sel ? TUBE_EDGE_SELECTED : TUBE_EDGE, sel ? TUBE_GHOST_SELECTED : TUBE_GHOST);
+            // The tube's edges go white only while it's looked at (crosshair in it, or on one of
+            // its parts) — a selected line elsewhere in view keeps the plain amber edges.
+            boolean looked = l == lookedTube || (handles && aimed != null && aimed.line == l);
+            drawTube(col, ps, cam, l, looked ? TUBE_EDGE_SELECTED : TUBE_EDGE, looked ? TUBE_GHOST_SELECTED : TUBE_GHOST);
             // Twice: depth-tested (weaves through terrain), then a faint on-top ghost so the
             // line and its controls stay readable — and grabbable — behind blocks.
             col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(),
@@ -767,6 +826,26 @@ public final class LineMarkers {
                 });
             }
         }
+    }
+
+    /**
+     * The tube the crosshair runs into first (built cells only, so it never forces a rebuild),
+     * stopping at terrain; null when none.
+     */
+    private static LineShape tubeLookedInto(Minecraft mc) {
+        if (lines.isEmpty() || mc.level == null) return null;
+        Vec3 eye = Raycast.eye(mc), dir = Raycast.look(mc);
+        BlockPos last = null;
+        for (double d = 0; d <= Raycast.REACH; d += 0.1) {
+            BlockPos c = BlockPos.containing(eye.add(dir.scale(d)));
+            if (c.equals(last)) continue;
+            last = c;
+            for (LineShape l : lines) {
+                if (l.containsBuilt(c)) return l;
+            }
+            if (!Gradient.emptyCell(mc.level.getBlockState(c))) return null;
+        }
+        return null;
     }
 
     /** The curve, nodes, and (selected) handles + end controls into one pass. */
@@ -842,7 +921,8 @@ public final class LineMarkers {
             for (int k = 0; k < 2 * BUTTON_COUNT; k++) {
                 int slot = k % BUTTON_COUNT;
                 Vec3 c = buttonCenter(l, k, ax);
-                boolean active = slot < BUTTON_PROFILES.length && l.profile == BUTTON_PROFILES[slot];
+                boolean active = slot < BUTTON_PROFILES.length ? l.profile == BUTTON_PROFILES[slot]
+                        : slot >= TOP_ROW && l.gradient == BUTTON_GRADIENTS[slot - TOP_ROW];
                 boolean hover = isAimed(l, Kind.BUTTON, k);
                 int bg = active ? BTN_ACTIVE : hover ? BTN_HOVER : BTN_BG;
                 billboardQuad(pose, vc, cam, c, ax, BTN / 2, BTN / 2, bg);
@@ -852,6 +932,8 @@ public final class LineMarkers {
                 double r = BTN * 0.32;
                 if (slot < BUTTON_PROFILES.length) {
                     fan(pose, vc, cam, ic, ax, BUTTON_PROFILES[slot].outline(r), fg);
+                } else if (slot >= TOP_ROW) {
+                    pixelGlyph(pose, vc, cam, ic, ax, GRADIENT_GLYPHS[slot - TOP_ROW], BTN * 0.08, fg);
                 } else if (slot == SLOT_HELP) {
                     pixelGlyph(pose, vc, cam, ic, ax, QUESTION, BTN * 0.11, fg);
                 } else if (l.solid) {
@@ -967,15 +1049,21 @@ public final class LineMarkers {
         }
     }
 
-    /** A tiny pixel-art glyph (rows of 'X'), centred, each pixel a billboard square. */
+    /**
+     * A tiny pixel-art glyph, centred, each pixel a billboard square: 'X' is solid, '1'…'4' are
+     * faint → full alpha (gradient icons), anything else is empty.
+     */
     private static void pixelGlyph(PoseStack.Pose pose, VertexConsumer vc, Vec3 cam, Vec3 c, Vec3[] ax,
                                    String[] rows, double px, int argb) {
         int cols = rows[0].length();
         for (int ry = 0; ry < rows.length; ry++) {
             for (int rx = 0; rx < cols; rx++) {
-                if (rows[ry].charAt(rx) != 'X') continue;
+                char ch = rows[ry].charAt(rx);
+                int a = ch == 'X' || ch == '4' ? 0xFF : ch == '3' ? 0xB0 : ch == '2' ? 0x70 : ch == '1' ? 0x38 : 0;
+                if (a == 0) continue;
+                int shade = (((argb >>> 24) * a / 0xFF) << 24) | (argb & 0xFFFFFF);
                 double ox = (rx - (cols - 1) / 2.0) * px, oy = ((rows.length - 1) / 2.0 - ry) * px;
-                billboardQuad(pose, vc, cam, c.add(ax[0].scale(ox)).add(ax[1].scale(oy)), ax, px / 2, px / 2, argb);
+                billboardQuad(pose, vc, cam, c.add(ax[0].scale(ox)).add(ax[1].scale(oy)), ax, px / 2, px / 2, shade);
             }
         }
     }

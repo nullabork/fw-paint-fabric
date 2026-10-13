@@ -24,6 +24,8 @@ public final class LineShape {
     public final LineCurve curve;
     public LineProfile profile = LineProfile.NONE;
     public boolean solid;
+    /** Which way a Gradient fill runs through the tube. */
+    public LineGradient gradient = LineGradient.ACROSS;
     /** Profile radius at the start / end (interpolated along the line). */
     public double r0 = 2, r1 = 2;
     /** Profile twist (radians) at the start / end (interpolated along the line). */
@@ -161,6 +163,11 @@ public final class LineShape {
         return built.cells().containsKey(cell.asLong());
     }
 
+    /** {@link #contains} against the last finished build — never forces a rebuild (rendering). */
+    public boolean containsBuilt(BlockPos cell) {
+        return built.cells().containsKey(cell.asLong());
+    }
+
     /** Fraction along the line (0 … 1) of a selected cell, or -1. */
     public double fracOf(BlockPos cell) {
         ensureCells(true);
@@ -177,6 +184,26 @@ public final class LineShape {
         int idx = (int) Math.max(0, Math.min(len, Math.round(f * len)));
         return new RingShape.Segment(BlockPos.containing(ns.get(0).p),
                 BlockPos.containing(ns.get(ns.size() - 1).p), idx, len);
+    }
+
+    /**
+     * Distance from {@code cell}'s centre to the line, as a fraction of the tube radius there
+     * (0 on the line, about 1 at the skin; clamped to 0 … 1). A bare line counts as radius 1.
+     */
+    public double radialFrac(BlockPos cell) {
+        List<LineCurve.Sample> ss = samples();
+        Vec3 c = net.minecraft.world.phys.Vec3.atCenterOf(cell);
+        int best = 0;
+        double bestD = Double.MAX_VALUE;
+        for (int i = 0; i < ss.size(); i++) {
+            double d = ss.get(i).pos().distanceToSqr(c);
+            if (d < bestD) {
+                bestD = d;
+                best = i;
+            }
+        }
+        double r = profile == LineProfile.NONE ? 1 : Math.max(0.5, radiusAt(frac(best)));
+        return Math.min(1, Math.sqrt(bestD) / r);
     }
 
     /** Cells of the last finished build (may lag the line while it's being edited). */

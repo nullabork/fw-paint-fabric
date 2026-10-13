@@ -40,8 +40,8 @@ public final class ShapeMarkers {
 
     // Ring visuals (fw-rule palette).
     private static final int RING_FILL = 0x33FFA000;        // committed ring cells (kept faint)
-    private static final int RING_EDGE = 0xD8FFB830;        // bright silhouette edges on the band
-    private static final int RING_EDGE_LOOKED = 0xF0FFFFFF; // edges go white while looked at
+    private static final int RING_EDGE = 0xB0FFB830;        // bright silhouette edges on the band
+    private static final int RING_EDGE_LOOKED = 0xC0FFFFFF; // edges go white while looked at
     // The on-top ghost pass draws through EVERYTHING (26.2 has no occluded-only pipeline), so
     // it stays at modest alpha: a faint cage through terrain, a slight glow where visible.
     private static final int RING_GHOST = 0x5CFFB830;       // edge cage through terrain
@@ -54,13 +54,13 @@ public final class ShapeMarkers {
     private static final int CONTROL_AIMED = 0x99A8CCFF;    // lighter blue when aimed
     private static final int CORNER_FILL = 0x7740C860;      // green square-corner nodes
     private static final int CORNER_AIMED = 0x99A0F0B0;     // lighter green when aimed
-    private static final int CONTROL_OUTLINE = 0xFFFFFFFF;  // white 1px edges when aimed
+    private static final int CONTROL_OUTLINE = 0xC0FFFFFF;  // white 1px edges when aimed
     private static final int HOVER_CENTER = 0x5560A0FF;     // creation hover: pick center
     private static final int HOVER_RADIUS = 0x66FFA000;     // creation hover: pick radii
 
     // Box visuals: neutral walls; start/end planes tinted with the marker colours.
     private static final int BOX_WALL = 0x2260A0FF;
-    private static final int BOX_EDGE = 0xFFE0E0E0;
+    private static final int BOX_EDGE = 0xC0E0E0E0;
     private static final int BOX_START = 0x4440E0D0;        // turquoise — gradient start plane
     private static final int BOX_END = 0x44FFB000;          // amber — gradient end plane
     private static final int BOX_HOVER = 0x5560A0FF;        // box mode: aimed anchor block

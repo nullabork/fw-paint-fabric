@@ -163,7 +163,8 @@ at sight range — far beyond block reach. Saved per world and dimension; **Clea
   both ends (with a **?** for the in-game guide) sweep a **circle, square, triangle or star** along the curve — Shell or Solid — and each end
   gets a size node (taper it into a tentacle — Ctrl sizes both ends together) and a twist node, plus a node to move the whole
   thing. Everything shows faintly through terrain and stays grabbable behind blocks. **3D Fill
-  aimed into the tube fills it** in one go, gradients running start → end.
+  aimed into the tube fills it** in one go; a second button row picks the gradient direction —
+  across from the side you aim in (default), along start → end, inside out, or outside in.
 - **Middle-click removes whatever marker you're aiming at** — a shape, the box, or a plain
   block marker — in any mode, tool in hand.
 - Clicking a marked block toggles it off in any marker mode; **Ctrl** clears its connected plane.
@@ -217,7 +218,7 @@ Every placeable block in the game ranked by colour — discover blocks beyond yo
 
 - **Placement**, **Marker dist**, **Auto end marker**, **Fill voids first**, **Paint memory**
   — see above. **Place in air** (on by default): blocks with nothing next to them go straight into
-  the air, no scaffolding needed; turn it off for servers whose anti-cheat flags that. **Missing blocks**: refuse to paint or skip absent segments. **Color match**:
+  the air, no scaffolding needed (aim at the sky to drop one block at reach); turn it off for servers whose anti-cheat flags that. **Missing blocks**: refuse to paint or skip absent segments. **Color match**:
   Perceptual (Oklab) or Classic.
 - **Move helper text…** repositions the HUD lines with a live preview.
 

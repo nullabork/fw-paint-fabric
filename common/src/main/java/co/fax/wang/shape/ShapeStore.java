@@ -54,6 +54,7 @@ public final class ShapeStore {
         double[][] nodes;
         String profile;
         boolean solid;
+        String gradient;
         double r0, r1, tw0, tw1;
     }
 
@@ -105,6 +106,9 @@ public final class ShapeStore {
                     LineShape l = new LineShape(c);
                     l.profile = LineProfile.valueOf(sl.profile);
                     l.solid = sl.solid;
+                    for (LineGradient g : LineGradient.values()) {
+                        if (g.name().equals(sl.gradient)) l.gradient = g; // unknown/missing → default
+                    }
                     l.r0 = sl.r0;
                     l.r1 = sl.r1;
                     l.tw0 = sl.tw0;
@@ -169,6 +173,7 @@ public final class ShapeStore {
                 }
                 sl.profile = l.profile.name();
                 sl.solid = l.solid;
+                sl.gradient = l.gradient.name();
                 sl.r0 = l.r0;
                 sl.r1 = l.r1;
                 sl.tw0 = l.tw0;

@@ -26,7 +26,7 @@ public final class WorldDraw {
      * texture — the inset shell stays visible from inside (e.g. a hollow room), and vice versa.
      */
     private static final float REGION_INSET = 0.06f;
-    private static final float LINE_WIDTH = 2.0f;
+    private static final float LINE_WIDTH = 1.0f;
 
     private WorldDraw() {}
 
@@ -170,7 +170,7 @@ public final class WorldDraw {
     private static void emitEdgesBounds(PoseStack.Pose pose, VertexConsumer vc, int argb, int mask,
                                         boolean uv,
                                         float ax, float ay, float az, float bx, float by, float bz) {
-        float w = 0.02f;
+        float w = 0.01f; // half-width of each edge quad
         Direction[] dirs = Direction.values();
         for (int i = 0; i < 6; i++) {
             if ((mask & (1 << i)) == 0) continue;
