@@ -92,7 +92,9 @@ public final class HelpPanel {
         return s.replace("{open}", Gradient.boundKey("open"))
                 .replace("{wheel}", Gradient.boundKey("wheel"))
                 .replace("{palette}", Gradient.boundKey("palette"))
-                .replace("{clear}", Gradient.boundKey("clear"));
+                .replace("{clear}", Gradient.boundKey("clear"))
+                .replace("{link}", Gradient.boundKey("link"))
+                .replace("{axis}", Gradient.boundKey("axis"));
     }
 
     private List<String> wrap(String text, int indent) {
@@ -347,19 +349,23 @@ public final class HelpPanel {
                     + "(end) - so a tall extruded circle paints as a giant gradient cylinder "
                     + "with exactly the wall thickness you drew.")),
             t("Marker line", "A curve you can sweep a shape along - tubes, arches, tentacles.", List.of(
-                "In Marker line mode, left-click a spot on a block for the start and another for "
-                    + "the end (aim at the sky to put a point 16 blocks out). Points sit exactly "
-                    + "where you aim - not on the block grid. Right-click cancels a half-made line.",
-                "Drag the cubes (nodes) to move them. Drag a pink sphere (curve handle) out of "
-                    + "a node to bend the line on that side; drag it back onto its node to make "
-                    + "that corner sharp again. Hold Alt while dragging a handle to mirror the "
-                    + "opposite handle - a smooth corner. A dragged point stays the same distance "
-                    + "from you as you sweep the crosshair (walk around it to drag it another "
-                    + "way); scroll while dragging to push it further away or pull it nearer. "
-                    + "Hold Alt while dragging a node (or the move node) to lock it to the axis "
-                    + "it's mostly moving along - a coloured guide line shows the track.",
-                "Double-click the line (in Marker line mode) to add a node there without "
-                    + "changing its shape. Middle-click a middle node to remove it; middle-click "
+                "In Marker line mode, left-click a block face for the start and another for "
+                    + "the end (aim at the sky to put a point 16 blocks out). Points go in the "
+                    + "middle of the grid cell in front of the face - where a block placed there "
+                    + "would sit - so straight lines are easy. Right-click cancels a half-made line.",
+                "Drag the cubes (nodes) to move them; a node snaps back onto the block grid "
+                    + "when you let go. Drag a pink sphere (curve handle) out of a node to bend "
+                    + "the line on that side; drag it back onto its node to make that corner "
+                    + "sharp again. A dragged point stays the same distance from you as you "
+                    + "sweep the crosshair (walk around it to drag it another way); scroll while "
+                    + "dragging to push it further away or pull it nearer.",
+                "Two modifiers (both rebindable under Controls): hold {axis} while dragging a "
+                    + "node, handle or the move node to lock it to the axis it's mostly moving "
+                    + "along - a coloured guide line shows the track. Hold {link} while dragging "
+                    + "a handle to mirror the opposite one (a smooth corner), a size node to "
+                    + "make both ends the same size, or a twist node to turn both ends together.",
+                "Double-click the line (in Marker line mode) to add a node there (on the grid, "
+                    + "keeping the curve's bend). Middle-click a middle node to remove it; middle-click "
                     + "anything else on the line to delete the whole line.",
                 "Floating buttons above the line pick a shape to sweep along it: circle, "
                     + "square, triangle or star (click the active one again to remove it), plus "

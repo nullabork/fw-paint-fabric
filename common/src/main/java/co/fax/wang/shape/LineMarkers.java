@@ -2,7 +2,6 @@ package co.fax.wang.shape;
 
 import co.fax.wang.Gradient;
 import co.fax.wang.PlacementMode;
-import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
@@ -162,6 +161,7 @@ public final class LineMarkers {
             if (attack) {
                 applyDrag(mc);
             } else {
+                snapOnRelease(dragLine);
                 dragLine = null;
                 saveNeeded = true;
             }
@@ -249,11 +249,14 @@ public final class LineMarkers {
         overlay(mc, "FW Paint — line set: drag nodes, double-click to add one, pick a shape above it");
     }
 
-    /** The exact aimed surface point, or {@link #DEFAULT_DIST} out along the view at the sky. */
+    /**
+     * Where a new point goes: the centre of the grid cell in front of the aimed face (where a
+     * block placed there would sit), or of the cell {@link #DEFAULT_DIST} out at the sky.
+     */
     private static Vec3 aimPoint(Minecraft mc) {
         BlockHitResult hit = Raycast.aimedBlock(mc);
-        if (hit != null) return hit.getLocation();
-        return Raycast.eye(mc).add(Raycast.look(mc).scale(DEFAULT_DIST));
+        if (hit != null) return Vec3.atCenterOf(hit.getBlockPos().relative(hit.getDirection()));
+        return gridCenter(Raycast.eye(mc).add(Raycast.look(mc).scale(DEFAULT_DIST)));
     }
 
     private static void pressButton(LineShape l, int index) {
@@ -275,7 +278,9 @@ public final class LineMarkers {
         double ta = a.seg() == seg ? a.t() : 0;
         double t = ta + (b.t() - ta) * hit.frac();
         if (t <= 1e-3 || t >= 1 - 1e-3) return; // on an existing node already
-        l.curve.insertNode(seg, t);
+        int idx = l.curve.insertNode(seg, t);
+        LineCurve.Node n = l.curve.nodes.get(idx);
+        n.p = gridCenter(n.p); // on the grid like every main node (handles keep the split's shape)
         l.markDirty();
     }
 
@@ -302,8 +307,10 @@ public final class LineMarkers {
         Vec3 hit = planeHit(mc, controlPos(dragLine, dragKind, dragIndex));
         if (hit == null) return;
         Vec3 target = hit.add(grabOffset);
-        if ((dragKind == Kind.NODE || dragKind == Kind.MOVE) && altDown()) {
-            // Alt: slide along the world axis the drag mostly moves on (picked once, kept until
+        boolean lockable = dragKind == Kind.NODE || dragKind == Kind.MOVE
+                || dragKind == Kind.HANDLE_IN || dragKind == Kind.HANDLE_OUT;
+        if (lockable && co.fax.wang.Gradient.axisLockDown()) {
+            // Axis lock: slide along the world axis the drag mostly moves on (picked once, kept until
             // Alt is released), following the point on that axis nearest the view ray.
             if (lockAxis == null) {
                 Vec3 d = target.subtract(dragOrigin);
@@ -334,7 +341,7 @@ public final class LineMarkers {
                 boolean in = dragKind == Kind.HANDLE_IN;
                 if (in) n.in = h;
                 else n.out = h;
-                if (altDown()) {
+                if (co.fax.wang.Gradient.lineLinkDown()) { // link: the opposite handle mirrors
                     if (in) n.out = h.scale(-1);
                     else n.in = h.scale(-1);
                 }
@@ -345,8 +352,14 @@ public final class LineMarkers {
                 Vec3 d = target.subtract(s.pos());
                 Vec3 inPlane = d.subtract(s.tan().scale(d.dot(s.tan())));
                 double r = Math.max(0.5, Math.min(64, inPlane.length() - 0.5));
-                if (end) l.r1 = r;
-                else l.r0 = r;
+                if (co.fax.wang.Gradient.lineLinkDown()) { // link: both ends the same size
+                    l.r0 = r;
+                    l.r1 = r;
+                } else if (end) {
+                    l.r1 = r;
+                } else {
+                    l.r0 = r;
+                }
             }
             case TWIST_START, TWIST_END -> {
                 boolean end = dragKind == Kind.TWIST_END;
@@ -354,8 +367,14 @@ public final class LineMarkers {
                 Vec3 d = target.subtract(s.pos());
                 // The twist node sits a quarter turn (+b') from the profile's +n' direction.
                 double angle = Math.atan2(d.dot(s.b()), d.dot(s.n())) - Math.PI / 2;
-                if (end) l.tw1 = angle;
-                else l.tw0 = angle;
+                if (co.fax.wang.Gradient.lineLinkDown()) { // link: both ends turn together
+                    l.tw0 = angle;
+                    l.tw1 = angle;
+                } else if (end) {
+                    l.tw1 = angle;
+                } else {
+                    l.tw0 = angle;
+                }
             }
             case MOVE -> l.curve.translate(target.subtract(l.moveNode()));
             default -> { }
@@ -392,8 +411,28 @@ public final class LineMarkers {
         };
     }
 
-    private static boolean altDown() {
-        return InputConstants.isKeyDown(InputConstants.KEY_LALT) || InputConstants.isKeyDown(InputConstants.KEY_RALT);
+    /** The centre of the block-grid cell containing {@code p}. */
+    static Vec3 gridCenter(Vec3 p) {
+        return new Vec3(Math.floor(p.x) + 0.5, Math.floor(p.y) + 0.5, Math.floor(p.z) + 0.5);
+    }
+
+    /**
+     * Main nodes live on the block grid: a released node drag snaps that node to its cell centre,
+     * a released move drag shifts the whole line so its start lands on one (the rest keep their
+     * offsets). Handles and end controls stay free.
+     */
+    private static void snapOnRelease(LineShape l) {
+        List<LineCurve.Node> ns = l.curve.nodes;
+        if (dragKind == Kind.NODE) {
+            LineCurve.Node n = ns.get(dragIndex);
+            n.p = gridCenter(n.p);
+        } else if (dragKind == Kind.MOVE) {
+            Vec3 p0 = ns.get(0).p;
+            l.curve.translate(gridCenter(p0).subtract(p0));
+        } else {
+            return;
+        }
+        l.markDirty();
     }
 
     // ---- aiming -------------------------------------------------------------------------------

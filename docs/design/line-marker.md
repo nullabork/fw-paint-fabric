@@ -23,8 +23,11 @@ handles. A fresh line is two nodes with zero handles = a straight line.
 
 ### Creating
 
-1. In Marker line mode, left-click sets the start: the exact point the crosshair hits on a block
-   (not grid-snapped); aiming at sky puts it 16 blocks out.
+1. In Marker line mode, left-click sets the start: the centre of the grid cell in front of the
+   aimed face (where a block placed there would sit); aiming at sky puts it in the cell 16
+   blocks out. Main nodes always live on grid-cell centres — new points, double-click-inserted
+   nodes, and released node / move drags snap there (handles and end controls stay free) — so
+   straight lines are easy.
 2. A live straight preview follows the aim; the second left-click sets the end.
    Right-click cancels a half-made line.
 
@@ -37,11 +40,16 @@ handles. A fresh line is two nodes with zero handles = a straight line.
   perpendicular to the line from the eye to that point. The plane is rebuilt every tick, so
   turning on the spot doesn't tilt it but walking around the point does. **Scroll while
   dragging** pushes the point a block further away / nearer along that eye → point line.
-- **Alt + drag** a main node or the move node locks it to the world axis it's mostly moving
-  along (picked after ~0.3 blocks, kept until Alt is released); it follows the point on that
-  axis nearest the view ray, and a long axis-coloured guide line shows the track.
+- Two rebindable modifiers (Controls → FW Paint):
+  - **Axis lock** (default Alt) + drag a main node, handle or the move node: locks it to the
+    world axis it's mostly moving along (picked after ~0.3 blocks, kept until released); it
+    follows the point on that axis nearest the view ray, and a long axis-coloured guide line
+    shows the track.
+  - **Link** (default Ctrl) + drag a handle: mirrors the opposite handle through the node
+    (smooth corner); + a size node: both ends get the same radius; + a twist node: both ends
+    get the same twist. It shares Ctrl with clear-connected by default (26.3 keeps a list of
+    mappings per key, so both report held).
 - A handle dragged within ~0.35 blocks of its node **snaps** onto it (zero length → sharp corner).
-- **Alt + drag** a handle mirrors the opposite handle through the node (smooth corner).
 - **Double-click** the line inserts a node at the point on the curve closest to the view ray. The
   segment is split with de Casteljau, so the curve's shape is unchanged.
 - **Middle-click** a middle node removes it; middle-click anywhere else on the line deletes the line.

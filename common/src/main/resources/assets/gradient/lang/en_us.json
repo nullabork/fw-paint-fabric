@@ -3,5 +3,7 @@
   "key.gradient.open": "Open FW Paint screen",
   "key.gradient.wheel": "Quick selector",
   "key.gradient.cycle_palette": "Cycle active palette",
-  "key.gradient.clear_connected": "Clear connected markers (hold + click)"
+  "key.gradient.clear_connected": "Clear connected markers (hold + click)",
+  "key.gradient.line_link": "Line: mirror handles / link both ends (hold while dragging)",
+  "key.gradient.axis_lock": "Line: lock drag to an axis (hold while dragging)"
 }

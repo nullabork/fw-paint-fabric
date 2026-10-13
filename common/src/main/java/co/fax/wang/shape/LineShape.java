@@ -131,7 +131,8 @@ public final class LineShape {
         Map<Long, double[]> best = new HashMap<>(); // cell → {dist², sample index}
         for (int i = 0; i < ss.size(); i++) {
             Vec3 p = ss.get(i).pos();
-            double reach = radiusAt(frac(i)) * 1.0 + 1.5;
+            // Far enough for a square's corners (√2 × its half-width), not just a circle.
+            double reach = (radiusAt(frac(i)) + 0.5) * Math.sqrt(2) + 1;
             int lx = (int) Math.floor(p.x - reach), hx = (int) Math.floor(p.x + reach);
             int ly = (int) Math.floor(p.y - reach), hy = (int) Math.floor(p.y + reach);
             int lz = (int) Math.floor(p.z - reach), hz = (int) Math.floor(p.z + reach);

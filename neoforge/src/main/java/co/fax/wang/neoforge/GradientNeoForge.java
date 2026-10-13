@@ -39,6 +39,8 @@ public class GradientNeoForge {
         event.register(Gradient.wheelKey);
         event.register(Gradient.cyclePaletteKey);
         event.register(Gradient.clearConnectedKey);
+        event.register(Gradient.lineLinkKey);
+        event.register(Gradient.axisLockKey);
     }
 
     @SubscribeEvent

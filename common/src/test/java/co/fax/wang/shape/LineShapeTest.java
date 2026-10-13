@@ -97,6 +97,16 @@ class LineShapeTest {
     }
 
     @Test
+    void bigSquareKeepsSharpCorners() {
+        LineShape l = straight(10);
+        l.profile = LineProfile.SQUARE;
+        l.r0 = l.r1 = 8;
+        // Corner of the square's cross-section at the middle of the line: 8 out on both axes.
+        assertTrue(l.contains(new BlockPos(5, 18, 8)), "square corner got rounded off");
+        assertTrue(l.contains(new BlockPos(5, 2, -8)), "square corner got rounded off");
+    }
+
+    @Test
     void tubeEndsAreCutFlat() {
         LineShape l = straight(10);
         l.profile = LineProfile.SQUARE;
