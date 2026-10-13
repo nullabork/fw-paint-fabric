@@ -156,21 +156,10 @@ public final class ShapeMarkers {
         return aimedShape != null || LineMarkers.controlAimed();
     }
 
-    /** The line tube the crosshair points into (first selected cell along the view), or null. */
-    public static LineShape lineAimedInto(Minecraft mc, BlockPos[] seedOut) {
-        Vec3 eye = Raycast.eye(mc), dir = Raycast.look(mc);
-        BlockPos last = null;
-        for (double d = 0; d <= Raycast.REACH; d += 0.1) {
-            BlockPos c = BlockPos.containing(eye.add(dir.scale(d)));
-            if (c.equals(last)) continue;
-            last = c;
-            for (LineShape l : LineMarkers.lines) {
-                if (l.contains(c)) {
-                    seedOut[0] = c;
-                    return l;
-                }
-            }
-            if (!Gradient.emptyCell(mc.level.getBlockState(c))) return null; // terrain blocks the view
+    /** The line whose tube holds {@code cell}, or null. */
+    public static LineShape lineContaining(BlockPos cell) {
+        for (LineShape l : LineMarkers.lines) {
+            if (l.contains(cell)) return l;
         }
         return null;
     }

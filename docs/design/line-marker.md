@@ -109,9 +109,11 @@ The tube is a region like boxes and rings: `ShapeMarkers.contains` and `segmentF
 Gradients use one ramp per line; each line picks its direction (`LineGradient`, second button
 row): **Across** (default — cells projected on the view direction at the click, near side = 0),
 **Along** (arc-length fraction start → end), **Inside out** / **Outside in** (distance to the
-nearest curve sample over the local radius). **3D Fill aimed
-into a tube floods the whole tube** for every paint type; with Place in air on, no scaffolding
-is needed.
+nearest curve sample over the local radius). 3D Fill
+inside a tube is the ordinary growing fill (centre = the aimed block, or the air cell at reach),
+contained by the tube; with a Gradient it colours cells by the line's direction mode, normalised
+over the whole tube, and may grow through all of it. With Place in air on, no scaffolding is
+needed.
 
 ### Persistence
 

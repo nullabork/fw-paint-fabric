@@ -377,14 +377,14 @@ public final class HelpPanel {
                     + "far end, and gradients run from the base plane (start) to the far side "
                     + "(end) - so a tall extruded circle paints as a giant gradient cylinder "
                     + "with exactly the wall thickness you drew.")),
-            t("Marker line", "TL;DR: click start, click end, drag the dots, pick a shape above it, 3D Fill it.",
+            t("Marker line", "TL;DR: click start, click end, drag the dots, pick a shape above it, 3D Fill inside it.",
                 List.of(
                 "1. Pick Marker line on the wheel (Place > Shape markers).",
                 "2. Click a block face for the start, another for the end. Right-click cancels.",
                 "3. Drag the cubes to move the line. Drag the pink balls to bend it.",
                 "4. Click a shape in the floating buttons over either end. Glowing blocks = what "
                     + "gets painted. The row under it picks which way a gradient runs.",
-                "5. Switch to 3D Fill, aim into the tube, right-click. Done.",
+                "5. Switch to 3D Fill, aim at a spot inside the tube (a block, or the green air cell), hold right-click.",
                 "Stuck? The ? button over each end of a line opens this page."),
                 t("Controls cheat sheet", "Every click and key, one line each.", List.of(
                     "All of this works in Marker line mode only - in other modes lines just "
@@ -410,9 +410,10 @@ public final class HelpPanel {
                         + "{link}: both ends turn together.",
                     "White cube beside the line: drag to move the whole thing.",
                     "A bare line (no shape) selects just the blocks it passes through.")),
-                t("Painting it", "Fill the tube in one click.", List.of(
-                    "3D Fill aimed into the tube fills the whole thing - Solid, Gradient or "
-                        + "Noise (not Pattern).",
+                t("Painting it", "Grow a fill inside the tube.", List.of(
+                    "3D Fill inside the tube grows from where you aim - a block, or the green "
+                        + "cell in open air - one block, then a layer around it; keep holding "
+                        + "to keep growing. It stays inside the tube.",
                     "Which way a Gradient runs: the second row of buttons. Across (default): "
                         + "from the side you aim into to the far side. Along: start (turquoise "
                         + "cube) to end (amber). Inside out: line to skin. Outside in: skin to "

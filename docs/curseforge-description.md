@@ -163,7 +163,7 @@ at sight range — far beyond block reach. Saved per world and dimension; **Clea
   both ends (with a **?** for the in-game guide) sweep a **circle, square, triangle or star** along the curve — Shell or Solid — and each end
   gets a size node (taper it into a tentacle — Ctrl sizes both ends together) and a twist node, plus a node to move the whole
   thing. Everything shows faintly through terrain and stays grabbable behind blocks. **3D Fill
-  aimed into the tube fills it** in one go; a second button row picks the gradient direction —
+  inside the tube grows from the spot you aim at** (even mid-air) and stays inside it; a second button row picks the gradient direction —
   across from the side you aim in (default), along start → end, inside out, or outside in.
 - **Middle-click removes whatever marker you're aiming at** — a shape, the box, or a plain
   block marker — in any mode, tool in hand.

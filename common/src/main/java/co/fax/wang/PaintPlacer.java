@@ -80,6 +80,8 @@ public final class PaintPlacer {
     private static Block solidChosen;         // Solid: block resolved from the match mode at press
     private static PaletteChoice.Prepared prepared; // Gradient/Noise: press-wide palette state
     private static PaletteChoice.Ramp noiseRamp;    // Noise: the one ramp resolved for this press
+    /** Gradient 3D started inside a line tube: each tube cell's gradient position, else null. */
+    private static it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap lineTs;
     private static PaletteChoice.Ramp ramp3d;       // Gradient 3D: the fill's resolved ramp
     private static GradientCaches.Fill3D activeFill; // Gradient 3D: the cache entry being extended
     private static PatternChoice.Prepared patternPrep;              // Pattern: press-wide state
@@ -179,13 +181,11 @@ public final class PaintPlacer {
         mode = pm;
         GradientCaches.touch(cfg); // fingerprint change / idle timeout → forget old gradients
 
-        // 3D Fill aimed into a line tube floods the whole tube (any paint type) — tubes usually
-        // float in open air, where there's no block face to click.
-        if (mode == PlacementMode.FILL3D && tryLineRegionFill(mc)) {
-            return;
-        }
-        // Noise 3D aimed into a marked region keeps the classic instant region flood-fill.
-        if (type == PaintType.NOISE && mode == PlacementMode.FILL3D && tryNoiseRegionFill(mc)) {
+        // Noise 3D aimed at a block in a marked region keeps the classic instant region
+        // flood-fill. A click into open air grows from the air cell instead (startAir).
+        if (type == PaintType.NOISE && mode == PlacementMode.FILL3D
+                && mc.hitResult != null && mc.hitResult.getType() == HitResult.Type.BLOCK
+                && tryNoiseRegionFill(mc)) {
             return;
         }
 
@@ -240,7 +240,7 @@ public final class PaintPlacer {
                 }
             }
             case NOISE, GRADIENT -> {
-                prepared = PaletteChoice.prepare(player, type.label(), false);
+                prepared = PaletteChoice.prepare(player, type.label(), mode == PlacementMode.FILL3D);
                 if (prepared.error != null) {
                     overlay(mc, prepared.error);
                     return;
@@ -264,8 +264,36 @@ public final class PaintPlacer {
                 patternPlace = GradientCaches.newPattern(cell, wstep, dir);
             }
         }
+        if (mode == PlacementMode.FILL3D) {
+            startAirFill3D(mc, cell, g);
+            return;
+        }
         queue.add(new Pending(cell, g, 0));
         regionFill = true; // one block, finishes on its own
+        active = true;
+        drain(mc);
+    }
+
+    /**
+     * 3D Fill into open air: the air cell is the centre and is painted first, then the fill
+     * grows a layer at a time around it exactly like a block-centred fill (a beat after the
+     * first layer; holding keeps growing), held to the marker space / shape it starts in.
+     */
+    private static void startAirFill3D(Minecraft mc, BlockPos cell, GradCtx g) {
+        center = cell.immutable();
+        maxRadius = MAX_RADIUS;
+        if (type == PaintType.GRADIENT) {
+            ramp3d = g.ramp();
+            activeFill = GradientCaches.newFill(center);
+            maxRadius = switch (prepared.palette.sizing) {
+                case FILL_SPACE -> MAX_RADIUS;
+                default -> Math.max(1, Math.min(16, PaletteChoice.columnCells(prepared, ramp3d, -1)));
+            };
+        }
+        beginGrowth(mc, cell);
+        visited.add(center);
+        radius = 0;
+        queue.add(new Pending(center, gradCtx3d(center), 0));
         active = true;
         drain(mc);
     }
@@ -703,10 +731,7 @@ public final class PaintPlacer {
             overlay(mc, type.label() + ": no space to fill there");
             return;
         }
-        growCooldown = HOLD_DELAY; // a beat after the first shell, so a tap can stay one shell
-        spaceConstrained = !MarkerManager.startMarkers.isEmpty()
-                || co.fax.wang.shape.ShapeMarkers.any();
-        startedInSpace = spaceConstrained && inSpace(seed);
+        beginGrowth(mc, seed);
         visited.add(center);
         if (resuming) {
             // Grow outward from the click too, picking up at the click's distance.
@@ -718,6 +743,27 @@ public final class PaintPlacer {
         }
         active = true;
         grow(mc);
+    }
+
+    /**
+     * Common 3D Fill set-up: the hold delay, marker/shape containment from {@code seed}, and —
+     * for a gradient started inside a line tube — the tube's own gradient direction (the fill
+     * may then grow through the whole tube).
+     */
+    private static void beginGrowth(Minecraft mc, BlockPos seed) {
+        growCooldown = HOLD_DELAY; // a beat after the first shell, so a tap can stay one shell
+        spaceConstrained = !MarkerManager.startMarkers.isEmpty()
+                || co.fax.wang.shape.ShapeMarkers.any();
+        startedInSpace = spaceConstrained && inSpace(seed);
+        co.fax.wang.shape.LineShape line = co.fax.wang.shape.ShapeMarkers.lineContaining(seed);
+        if (type == PaintType.GRADIENT && line != null) {
+            List<BlockPos> tube = new ArrayList<>();
+            for (long k : line.cellKeys()) tube.add(BlockPos.of(k));
+            double[] ts = lineGradientTs(mc, line, tube);
+            lineTs = new it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap(tube.size());
+            for (int i = 0; i < ts.length; i++) lineTs.put(tube.get(i).asLong(), ts[i]);
+            maxRadius = MAX_RADIUS;
+        }
     }
 
     private static void tickFill(Minecraft mc) {
@@ -763,6 +809,11 @@ public final class PaintPlacer {
      */
     private static GradCtx gradCtx3d(BlockPos cell) {
         if (type != PaintType.GRADIENT) return null;
+        if (lineTs != null) {
+            // Growing inside a line tube: colour by the tube's gradient direction instead.
+            double t = lineTs.getOrDefault(cell.asLong(), -1);
+            if (t >= 0) return new GradCtx(t, center, ramp3d, -1);
+        }
         double d = Math.max(0, Math.sqrt(cell.distSqr(center)) - 1);
         double t = Math.min(1.0, d / Math.max(1, maxRadius));
         return new GradCtx(t, center, ramp3d, -1);
@@ -834,89 +885,15 @@ public final class PaintPlacer {
         return true;
     }
 
-    // ---- line tube fill -----------------------------------------------------------------------------
+    // ---- line tube gradients ------------------------------------------------------------------------
 
     /**
-     * Flood the line tube the crosshair points into: every empty tube cell connected to the first
-     * one along the view, nearest first. Gradients run start → end along the line; Solid matches
-     * against the block the line starts on. Returns false when not aimed into a tube.
-     */
-    private static boolean tryLineRegionFill(Minecraft mc) {
-        BlockPos[] seedOut = new BlockPos[1];
-        co.fax.wang.shape.LineShape line = co.fax.wang.shape.ShapeMarkers.lineAimedInto(mc, seedOut);
-        if (line == null) return false;
-        LocalPlayer player = mc.player;
-        BlockPos startCell = BlockPos.containing(line.curve.nodes.get(0).p);
-        Block ref = solidNear(mc, startCell);
-        switch (type) {
-            case SOLID -> {
-                solidChosen = chooseSolidBlock(player, ref);
-                if (solidChosen == null) {
-                    overlay(mc, noSolidBlockMessage(ref));
-                    return true;
-                }
-            }
-            case NOISE -> {
-                prepared = PaletteChoice.prepare(player, "Noise", true);
-                if (prepared.error != null) {
-                    overlay(mc, prepared.error);
-                    return true;
-                }
-                noiseRamp = PaletteChoice.resolveRamp(prepared, ref, null);
-                if (noiseRamp == null) {
-                    overlay(mc, cantResolveMessage());
-                    return true;
-                }
-            }
-            case GRADIENT -> {
-                prepared = PaletteChoice.prepare(player, "Gradient", false);
-                if (prepared.error != null) {
-                    overlay(mc, prepared.error);
-                    return true;
-                }
-            }
-            case PATTERN -> {
-                overlay(mc, "Pattern: can't fill a line tube — use Solid, Gradient or Noise");
-                return true;
-            }
-        }
-        dir = Direction.UP; // orientation for blocks placed into open air
-        it.unimi.dsi.fastutil.longs.LongSet tube = line.cellKeys();
-        ArrayDeque<BlockPos> bfs = new ArrayDeque<>();
-        Set<BlockPos> seen = new HashSet<>();
-        bfs.add(seedOut[0]);
-        seen.add(seedOut[0]);
-        List<BlockPos> cells = new ArrayList<>();
-        while (!bfs.isEmpty() && cells.size() < MAX_FILL) {
-            BlockPos c = bfs.poll();
-            if (Gradient.emptyCell(mc.level.getBlockState(c)) && !outOfReach(mc, c)) cells.add(c);
-            for (Direction d : Direction.values()) {
-                BlockPos n = c.relative(d);
-                if (tube.contains(n.asLong()) && seen.add(n)) bfs.add(n);
-            }
-        }
-        double[] ts = type == PaintType.GRADIENT ? lineGradientTs(mc, line, cells) : null;
-        for (int i = 0; i < cells.size(); i++) {
-            queue.add(new Pending(cells.get(i), ts == null ? null : lineGradCtx(mc, line, ts[i]), 0));
-        }
-        int count = cells.size();
-        if (count == 0) {
-            overlay(mc, type.label() + ": that tube is already filled (or out of reach)");
-            return true;
-        }
-        regionFill = true;
-        active = true;
-        overlay(mc, type.label() + ": filling " + count + " blocks");
-        return true;
-    }
-
-    /** Gradient context for a tube cell: its segment start → end along the line. */
-    /**
-     * Each fill cell's position along the gradient (0 … 1), by the line's {@link
+     * Each tube cell's position along the gradient (0 … 1), by the line's {@link
      * co.fax.wang.shape.LineGradient} mode: across the tube along the view (from the side aimed
      * into), along the curve, or radially (line → skin, or skin → line).
      */
     private static double[] lineGradientTs(Minecraft mc, co.fax.wang.shape.LineShape line, List<BlockPos> cells) {
+        // (cells: the whole tube, so every mode's 0 … 1 spans the tube, not just what's filled)
         double[] ts = new double[cells.size()];
         switch (line.gradient) {
             case ALONG -> {
@@ -944,14 +921,6 @@ public final class PaintPlacer {
         return ts;
     }
 
-    /** One ramp per line (anchored at its start/end cells), sampled at {@code t}. */
-    private static GradCtx lineGradCtx(Minecraft mc, co.fax.wang.shape.LineShape line, double t) {
-        List<co.fax.wang.shape.LineCurve.Node> ns = line.curve.nodes;
-        Seg seg = new Seg(BlockPos.containing(ns.get(0).p), BlockPos.containing(ns.get(ns.size() - 1).p), 0, 1);
-        PaletteChoice.Ramp ramp = segmentRamp(mc, seg);
-        if (ramp == null) return null;
-        return new GradCtx(t, List.of(seg.s(), seg.e()), ramp, -1);
-    }
 
     /** The block at {@code pos}, or the first real block beside it (a line starts on a surface). */
     private static Block solidNear(Minecraft mc, BlockPos pos) {
@@ -1164,9 +1133,9 @@ public final class PaintPlacer {
                     && (pm == PlacementMode.SINGLE || pm.isFace() || pm == PlacementMode.FACE_PERP)) {
                 src.addAll(gradientSourcingAt(mc, cfg, b, d));
             }
-        } else if ((airPreview = airTarget(mc, cfg)) != null
-                && !(pm == PlacementMode.FILL3D && co.fax.wang.shape.ShapeMarkers.lineAimedInto(mc, new BlockPos[1]) != null)) {
-            src.add("Place in air: one block at reach");
+        } else if ((airPreview = airTarget(mc, cfg)) != null) {
+            src.add(pm == PlacementMode.FILL3D ? "Place in air: 3D Fill grows from the green cell"
+                    : "Place in air: one block at reach");
         } else {
             airPreview = null;
             if (cfg.activePaintType == PaintType.GRADIENT
@@ -1396,6 +1365,7 @@ public final class PaintPlacer {
         prepared = null;
         noiseRamp = null;
         ramp3d = null;
+        lineTs = null;
         segRamps.clear();
         activeFill = null;
         patternPrep = null;
