@@ -40,8 +40,8 @@ public final class ShapeMarkers {
 
     // Ring visuals (fw-rule palette).
     private static final int RING_FILL = 0x33FFA000;        // committed ring cells (kept faint)
-    private static final int RING_EDGE = 0xD8FFB830;        // bright silhouette edges on the band
-    private static final int RING_EDGE_LOOKED = 0xF0FFFFFF; // edges go white while looked at
+    private static final int RING_EDGE = 0xB0FFB830;        // bright silhouette edges on the band
+    private static final int RING_EDGE_LOOKED = 0xC0FFFFFF; // edges go white while looked at
     // The on-top ghost pass draws through EVERYTHING (26.2 has no occluded-only pipeline), so
     // it stays at modest alpha: a faint cage through terrain, a slight glow where visible.
     private static final int RING_GHOST = 0x5CFFB830;       // edge cage through terrain
@@ -54,13 +54,13 @@ public final class ShapeMarkers {
     private static final int CONTROL_AIMED = 0x99A8CCFF;    // lighter blue when aimed
     private static final int CORNER_FILL = 0x7740C860;      // green square-corner nodes
     private static final int CORNER_AIMED = 0x99A0F0B0;     // lighter green when aimed
-    private static final int CONTROL_OUTLINE = 0xFFFFFFFF;  // white 1px edges when aimed
+    private static final int CONTROL_OUTLINE = 0xC0FFFFFF;  // white 1px edges when aimed
     private static final int HOVER_CENTER = 0x5560A0FF;     // creation hover: pick center
     private static final int HOVER_RADIUS = 0x66FFA000;     // creation hover: pick radii
 
     // Box visuals: neutral walls; start/end planes tinted with the marker colours.
     private static final int BOX_WALL = 0x2260A0FF;
-    private static final int BOX_EDGE = 0xFFE0E0E0;
+    private static final int BOX_EDGE = 0xC0E0E0E0;
     private static final int BOX_START = 0x4440E0D0;        // turquoise — gradient start plane
     private static final int BOX_END = 0x44FFB000;          // amber — gradient end plane
     private static final int BOX_HOVER = 0x5560A0FF;        // box mode: aimed anchor block
@@ -108,7 +108,7 @@ public final class ShapeMarkers {
 
     /** True when any region (box or ring) exists in this world. */
     public static boolean any() {
-        return box != null || !shapes.isEmpty();
+        return box != null || !shapes.isEmpty() || !LineMarkers.lines.isEmpty();
     }
 
     /** True when the cell is inside a region: the box volume, or a ring band × extrusion. */
@@ -116,6 +116,9 @@ public final class ShapeMarkers {
         if (box != null && box.contains(cell)) return true;
         for (RingShape s : shapes) {
             if (s.contains(cell)) return true;
+        }
+        for (LineShape l : LineMarkers.lines) {
+            if (l.contains(cell)) return true;
         }
         return false;
     }
@@ -133,12 +136,16 @@ public final class ShapeMarkers {
             RingShape.Segment seg = s.segmentFor(cell);
             if (seg != null) return seg;
         }
+        for (LineShape l : LineMarkers.lines) {
+            RingShape.Segment seg = l.segmentFor(cell);
+            if (seg != null) return seg;
+        }
         return null;
     }
 
     /** Region count for the Settings clear-button label. */
     public static int count() {
-        return shapes.size() + (box == null ? 0 : 1);
+        return shapes.size() + (box == null ? 0 : 1) + LineMarkers.lines.size();
     }
 
     /**
@@ -146,13 +153,22 @@ public final class ShapeMarkers {
      * to the shape — MarkerManager and PaintPlacer stand down.
      */
     public static boolean controlAimed() {
-        return aimedShape != null;
+        return aimedShape != null || LineMarkers.controlAimed();
+    }
+
+    /** The line whose tube holds {@code cell}, or null. */
+    public static LineShape lineContaining(BlockPos cell) {
+        for (LineShape l : LineMarkers.lines) {
+            if (l.contains(cell)) return l;
+        }
+        return null;
     }
 
     /** Drops every region and any in-progress creation, and persists. */
     public static void clearAll() {
         shapes.clear();
         box = null;
+        LineMarkers.clear();
         clearBoxPending();
         clearPending();
         aimedShape = null;
@@ -166,14 +182,20 @@ public final class ShapeMarkers {
     // ---- world sync / persistence ----------------------------------------------------------
 
     private static void saveCurrent() {
-        ShapeStore.store(currentKey, shapes, box);
+        ShapeStore.store(currentKey, shapes, box, LineMarkers.lines);
+    }
+
+    /** Persist after a line edit (LineMarkers owns the lines; the store file is shared). */
+    static void saveLines() {
+        saveCurrent();
     }
 
     private static void syncWorld(Minecraft mc) {
         String key = worldKey(mc);
         if (!java.util.Objects.equals(key, currentKey)) {
             currentKey = key;
-            box = ShapeStore.loadInto(key, shapes); // null key (main menu) clears
+            box = ShapeStore.loadInto(key, shapes, LineMarkers.lines); // null key (main menu) clears
+            LineMarkers.resetTransient();
             clearBoxPending();
             clearPending();
             aimedShape = null;
@@ -216,6 +238,7 @@ public final class ShapeMarkers {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.player == null || deltaY == 0) return false;
         if (!Gradient.holdingPaintTool(mc) || mc.gui.screen() != null) return false;
+        if (LineMarkers.onScroll(deltaY)) return true; // dragging a line control: push the plane
         // Sticky grab first: mid-scroll aim slips don't switch shapes.
         RingShape target = scrollGrace > 0 && scrollShape != null ? scrollShape
                 : aimedShape != null ? aimedShape : lookedShape;
@@ -257,6 +280,17 @@ public final class ShapeMarkers {
 
         if (!boxCreate) clearBoxPending(); // leaving box mode drops the pending corner
         if (!ringCreate) clearPending(); // leaving the mode mid-creation drops the half-built shape
+        {
+            boolean a = mc.options.keyAttack.isDown(), u = mc.options.keyUse.isDown(), p = mc.options.keyPickItem.isDown();
+            // Lines first: when one owns this tick's clicks, rings/box/block markers stand down.
+            if (LineMarkers.tick(mc, pm, handles, a, a && !lastAttack, u, u && !lastUse, p && !lastPick)) {
+                if (!a) dragShape = null;
+                lastAttack = a;
+                lastUse = u;
+                lastPick = p;
+                return;
+            }
+        }
         if (!handles) {
             dragShape = null;
             aimedShape = null;
@@ -577,6 +611,7 @@ public final class ShapeMarkers {
 
         renderBox(col, ps, cam, mc, handles, boxCreate);
         if (ringCreate) renderRingCreation(col, ps, cam, mc, pm);
+        LineMarkers.render(col, cam, handles, pm);
     }
 
     /** The committed box (and the pending-corner preview) as one region with tinted planes. */

@@ -6,6 +6,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,9 +49,19 @@ public final class ShapeStore {
         String axis;
     }
 
+    /** Serialized line: nodes as [px,py,pz, inx,iny,inz, outx,outy,outz]. */
+    private static final class StoredLine {
+        double[][] nodes;
+        String profile;
+        boolean solid;
+        String gradient;
+        double r0, r1, tw0, tw1;
+    }
+
     private static final class WorldShapes {
         List<StoredShape> shapes;
         StoredBox box;
+        List<StoredLine> lines;
     }
 
     private static Map<String, WorldShapes> data;
@@ -76,12 +87,38 @@ public final class ShapeStore {
         return data;
     }
 
-    /** Loads the shapes + box saved for {@code key} (null key → empty/none). */
-    public static BoxRegion loadInto(String key, List<RingShape> shapes) {
+    /** Loads the shapes, lines + box saved for {@code key} (null key → empty/none). */
+    public static BoxRegion loadInto(String key, List<RingShape> shapes, List<LineShape> lines) {
         shapes.clear();
+        lines.clear();
         if (key == null) return null;
         WorldShapes stored = data().get(key);
         if (stored == null) return null;
+        if (stored.lines != null) {
+            for (StoredLine sl : stored.lines) {
+                try {
+                    LineCurve c = new LineCurve();
+                    for (double[] n : sl.nodes) {
+                        c.nodes.add(new LineCurve.Node(new Vec3(n[0], n[1], n[2]),
+                                new Vec3(n[3], n[4], n[5]), new Vec3(n[6], n[7], n[8])));
+                    }
+                    if (c.nodes.size() < 2) continue;
+                    LineShape l = new LineShape(c);
+                    l.profile = LineProfile.valueOf(sl.profile);
+                    l.solid = sl.solid;
+                    for (LineGradient g : LineGradient.values()) {
+                        if (g.name().equals(sl.gradient)) l.gradient = g; // unknown/missing → default
+                    }
+                    l.r0 = sl.r0;
+                    l.r1 = sl.r1;
+                    l.tw0 = sl.tw0;
+                    l.tw1 = sl.tw1;
+                    lines.add(l);
+                } catch (Exception e) {
+                    LOG.warn("Skipping malformed stored line in {}: {}", key, e.toString());
+                }
+            }
+        }
         if (stored.shapes != null) {
             for (StoredShape s : stored.shapes) {
                 try {
@@ -105,10 +142,10 @@ public final class ShapeStore {
         return null;
     }
 
-    /** Saves the shapes + box for {@code key} (removing the entry entirely when empty). */
-    public static void store(String key, List<RingShape> shapes, BoxRegion box) {
+    /** Saves the shapes, lines + box for {@code key} (removing the entry entirely when empty). */
+    public static void store(String key, List<RingShape> shapes, BoxRegion box, List<LineShape> lines) {
         if (key == null) return;
-        if (shapes.isEmpty() && box == null) {
+        if (shapes.isEmpty() && box == null && lines.isEmpty()) {
             data().remove(key);
         } else {
             WorldShapes stored = new WorldShapes();
@@ -125,6 +162,23 @@ public final class ShapeStore {
                 s.height = shape.height;
                 s.theta = shape.theta;
                 stored.shapes.add(s);
+            }
+            stored.lines = new ArrayList<>(lines.size());
+            for (LineShape l : lines) {
+                StoredLine sl = new StoredLine();
+                sl.nodes = new double[l.curve.nodes.size()][];
+                for (int i = 0; i < sl.nodes.length; i++) {
+                    LineCurve.Node n = l.curve.nodes.get(i);
+                    sl.nodes[i] = new double[]{n.p.x, n.p.y, n.p.z, n.in.x, n.in.y, n.in.z, n.out.x, n.out.y, n.out.z};
+                }
+                sl.profile = l.profile.name();
+                sl.solid = l.solid;
+                sl.gradient = l.gradient.name();
+                sl.r0 = l.r0;
+                sl.r1 = l.r1;
+                sl.tw0 = l.tw0;
+                sl.tw1 = l.tw1;
+                stored.lines.add(sl);
             }
             if (box != null) {
                 StoredBox b = new StoredBox();

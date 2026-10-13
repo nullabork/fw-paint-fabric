@@ -147,6 +147,17 @@ public class GradientScreen extends Screen {
         return s;
     }
 
+    /** Help topic to open + scroll to the next time the Help tab lays out (see {@link #atHelpTopic}). */
+    private static String pendingHelpTopic;
+
+    /** Open the screen on the Help tab with {@code title}'s topic expanded and scrolled to the top. */
+    public static GradientScreen atHelpTopic(String title) {
+        GradientScreen s = new GradientScreen(false);
+        tab = Tab.HELP;
+        pendingHelpTopic = title;
+        return s;
+    }
+
     /** For the editors' + wheel's title bars: open the screen on a specific {@link #BAR_ORDER} tab. */
     public static GradientScreen atBarTab(int barIndex) {
         GradientScreen s = new GradientScreen(false);
@@ -677,6 +688,13 @@ public class GradientScreen extends Screen {
                 : "Off: every column advances at once"));
         y += 24;
 
+        cycleButton(rx, y, cw, () -> Component.literal("Place in air: " + (ConfigManager.get().placeInAir ? "On" : "Off")),
+                () -> ConfigManager.get().placeInAir = !ConfigManager.get().placeInAir);
+        helpSpots.add(new HelpSpot(rx, y, cw, 20, () -> ConfigManager.get().placeInAir
+                ? "On: blocks with nothing next to them are placed straight into the air; aim at the sky to place one at reach"
+                : "Off: a block waits until a neighbour is placed (for strict anti-cheat servers)"));
+        y += 24;
+
         addRenderableWidget(new ConfigSlider(rx, y, cw, secsToSlider(cfg.gradientCacheSeconds),
                 v -> "Paint memory: " + secsLabel(sliderToSecs(v)),
                 v -> ConfigManager.get().gradientCacheSeconds = sliderToSecs(v)));
@@ -892,6 +910,10 @@ public class GradientScreen extends Screen {
         if (help == null) help = new HelpPanel(this.font);
         // The manual gets the full content width (both columns), from under the bar to the Done button.
         help.setBounds(contentX(), 30, 2 * colW() + COL_GAP, this.height - 30 - 34);
+        if (pendingHelpTopic != null) {
+            help.focus(pendingHelpTopic);
+            pendingHelpTopic = null;
+        }
     }
 
     // ---- input ----------------------------------------------------------------------------------

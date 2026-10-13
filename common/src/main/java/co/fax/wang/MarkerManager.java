@@ -40,15 +40,15 @@ public final class MarkerManager {
 
     private MarkerManager() {}
 
-    // Semi-opaque fills (committed) + opaque outlines (drag preview). ARGB, alpha byte required.
+    // Semi-opaque fills (committed) + slightly see-through outlines (drag preview). ARGB, alpha byte required.
     private static final int START_FILL = 0x6640E0D0; // turquoise
-    private static final int START_LINE = 0xFF40E0D0;
+    private static final int START_LINE = 0xC840E0D0;
     private static final int END_FILL = 0x66FFB000;   // amber / orange-yellow
-    private static final int END_LINE = 0xFFFFB000;
+    private static final int END_LINE = 0xC8FFB000;
     private static final int FACE_FILL = 0x5560A0FF;  // translucent blue — auto-end scan face
     private static final int ARROW = 0xFF60A0FF;      // the scan-direction arrow off that face
     private static final float EXPAND = 0.005f;        // grow the box slightly to avoid z-fighting
-    private static final float LINE_WIDTH = 2.0f;
+    private static final float LINE_WIDTH = 1.0f;
 
     private static int maxEndDistance() {              // an end marker must be ≤ this from a start
         return Math.max(1, ConfigManager.get().maxMarkerDistance);
@@ -121,6 +121,7 @@ public final class MarkerManager {
 
     public static void tick(Minecraft mc) {
         syncWorld(mc); // load this world's saved markers when the world/dimension changes
+        DebugRender.tick(mc);
         PlacementMode pm = (mc.player == null || mc.level == null || mc.gui.screen() != null)
                 ? PlacementMode.DISABLED : Gradient.currentPlacement(mc);
         // Region markers (box + circle/square rings) run their own tick every frame — they

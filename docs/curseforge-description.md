@@ -57,7 +57,7 @@ Keys are rebindable under Options → Controls → Key Binds → **FW Paint**.
 Hover a wedge to fan out its options; click only to choose. **Paint** fans the paint types
 (Solid / Gradient / Pattern / Noise); **Place** fans **Blocks** (Single / Face any / Face target / Face perp /
 3D Fill), **Markers** (Marker / Marker draw), and **Shape markers** (Marker box / circle /
-square) onto a third ring; **Palette** follows the paint type (palettes, patterns, or — with
+square / line) onto a third ring; **Palette** follows the paint type (palettes, patterns, or — with
 Solid paint — the match modes, with **Select block** fanning your inventory's blocks in colour
 order). The wedge directly holding the current selection shows a blue tint; segments size
 themselves to their content (block icons pack tight), and anything that still doesn't fit
@@ -155,6 +155,24 @@ at sight range — far beyond block reach. Saved per world and dimension; **Clea
   part of a shape and its edges turn white; a faint ghost outline shows through terrain, so a
   buried shape stays findable and editable. Painting into a shape is restricted to its band —
   giant gradient cylinders and square donuts with exactly the wall thickness you drew.
+- **Marker line** — a curve in 3D: click a start and an end (nodes sit on the block grid, so
+  straight lines are easy). Drag the nodes, pull pink curve handles out to bend it (right-drag one
+  to slide it in/out at the same angle; double-click a node to flip it sharp ↔ smooth); a dragged point keeps its distance from you (scroll mid-drag
+  to push it further or pull it nearer). Hold **Alt** to lock a drag to an axis, **Ctrl** to
+  mirror handles or link both ends (both rebindable). Double-click the line to add a node. Floating buttons above
+  both ends (with a **?** for the in-game guide) sweep a **circle, square, triangle or star** along the curve — Shell or Solid — and each end
+  gets a size node (taper it into a tentacle — Ctrl sizes both ends together) and a twist node, plus a node to move the whole
+  thing — right-click a size or twist node to reset that end. Everything shows faintly through terrain and stays grabbable behind blocks. **3D Fill
+  inside the tube grows from the spot you aim at** (even mid-air) and stays inside it; a second button row picks the gradient direction —
+  across from the side you aim in (default), along start → end, inside out, or outside in.
+  Lines are edited in Marker line mode only; elsewhere they just show and keep constraining paint.
+- **Shape walls count as block faces** — inside a ring, box or tube, the wall within reach
+  selects like a real block face in every paint mode, so you can paint a shape's skin from the
+  inside with no scaffolding.
+
+![A marker line bent into a square tube, with its handles, control nodes and floating buttons](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/marker-line-square-tube-controls-v2.4.0.jpg)
+
+![The same tube filled with a rainbow gradient](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/marker-line-tube-gradient-fill-v2.4.0.jpg)
 - **Middle-click removes whatever marker you're aiming at** — a shape, the box, or a plain
   block marker — in any mode, tool in hand.
 - Clicking a marked block toggles it off in any marker mode; **Ctrl** clears its connected plane.
@@ -207,7 +225,8 @@ Every placeable block in the game ranked by colour — discover blocks beyond yo
 ## Settings
 
 - **Placement**, **Marker dist**, **Auto end marker**, **Fill voids first**, **Paint memory**
-  — see above. **Missing blocks**: refuse to paint or skip absent segments. **Color match**:
+  — see above. **Place in air** (on by default): blocks with nothing next to them go straight into
+  the air, no scaffolding needed (aim at the sky to drop one block at reach); turn it off for servers whose anti-cheat flags that. **Missing blocks**: refuse to paint or skip absent segments. **Color match**:
   Perceptual (Oklab) or Classic.
 - **Move helper text…** repositions the HUD lines with a live preview.
 

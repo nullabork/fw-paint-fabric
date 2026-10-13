@@ -52,6 +52,34 @@ public final class HelpPanel {
         rebuild();
     }
 
+    /** Expand the topic titled {@code title} (and every topic above it) and scroll it to the top. */
+    public void focus(String title) {
+        List<Topic> path = new ArrayList<>();
+        for (Topic t : TOPICS) {
+            if (findPath(t, title, path)) break;
+        }
+        if (path.isEmpty()) return;
+        expanded.addAll(path);
+        rebuild();
+        Topic target = path.get(path.size() - 1);
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).topic() == target) {
+                scroll = Math.min(i, maxScroll());
+                break;
+            }
+        }
+    }
+
+    private static boolean findPath(Topic t, String title, List<Topic> path) {
+        path.add(t);
+        if (t.title().equals(title)) return true;
+        for (Topic c : t.children()) {
+            if (findPath(c, title, path)) return true;
+        }
+        path.remove(path.size() - 1);
+        return false;
+    }
+
     // ---- layout -----------------------------------------------------------------------------------
 
     private void rebuild() {
@@ -92,7 +120,9 @@ public final class HelpPanel {
         return s.replace("{open}", Gradient.boundKey("open"))
                 .replace("{wheel}", Gradient.boundKey("wheel"))
                 .replace("{palette}", Gradient.boundKey("palette"))
-                .replace("{clear}", Gradient.boundKey("clear"));
+                .replace("{clear}", Gradient.boundKey("clear"))
+                .replace("{link}", Gradient.boundKey("link"))
+                .replace("{axis}", Gradient.boundKey("axis"));
     }
 
     private List<String> wrap(String text, int indent) {
@@ -205,7 +235,7 @@ public final class HelpPanel {
                 + "fan out its options (clicks are only for choosing): Paint picks what the "
                 + "tool paints (Solid, Gradient, Pattern, Noise); Place fans out Blocks "
                 + "(Single, Face any, Face target, Face perp, 3D Fill), Markers (Marker, Marker draw), and "
-                + "Shape markers (Marker box, circle, square) on a third ring. The Palette "
+                + "Shape markers (Marker box, circle, square, line) on a third ring. The Palette "
                 + "wedge follows the paint type: your gradient palettes (or patterns under "
                 + "Pattern paint), or - with Solid paint - the match modes, where hovering "
                 + "Select block fans your inventory's blocks (colour-sorted compact icons) "
@@ -238,9 +268,20 @@ public final class HelpPanel {
                 "A tap places one layer; holding pauses for a beat after the first layer, then "
                     + "keeps going at full speed - release during the beat to stop at exactly "
                     + "one.",
+                "Place in air (Settings, on by default): blocks with nothing next to them go "
+                    + "straight into the air, so fills and tubes in open sky don't need "
+                    + "scaffolding. Aim at open sky and a green cell shows at the edge of your "
+                    + "reach: click to put one block there. Turn it off on servers whose "
+                    + "anti-cheat flags that - blocks then wait until a neighbour is placed.",
                 "Markers never block painting - they only constrain it: columns stop at end "
                     + "markers (even ones floating in air), and 3D fills that start inside marker "
-                    + "space stay inside it."),
+                    + "space stay inside it. A 3D fill on a block touching an empty marked/shape "
+                    + "cell counts as inside - so a one-block gap at a jagged edge fills from any "
+                    + "face of its neighbour.",
+                "Inside a shape marker (ring, box, line tube), its inside wall counts as a "
+                    + "block face once it's within reach: aim at it and every mode selects "
+                    + "that face and its neighbours just like real blocks, growing back into "
+                    + "the shape."),
             t("Single", "One column out of the clicked face.", List.of(
                 "Aim at a block face and hold right-click: a single column grows straight out of "
                     + "that face, one block at a time, until it hits something (a block, an end "
@@ -342,6 +383,60 @@ public final class HelpPanel {
                     + "far end, and gradients run from the base plane (start) to the far side "
                     + "(end) - so a tall extruded circle paints as a giant gradient cylinder "
                     + "with exactly the wall thickness you drew.")),
+            t("Marker line", "TL;DR: click start, click end, drag the dots, pick a shape above it, 3D Fill inside it.",
+                List.of(
+                "1. Pick Marker line on the wheel (Place > Shape markers).",
+                "2. Click a block face for the start, another for the end. Right-click cancels.",
+                "3. Drag the cubes to move the line. Drag the pink balls to bend it.",
+                "4. Click a shape in the floating buttons over either end. Glowing blocks = what "
+                    + "gets painted. The row under it picks which way a gradient runs.",
+                "5. Switch to 3D Fill, aim at a spot inside the tube (a block, or the green air cell), hold right-click.",
+                "Stuck? The ? button over each end of a line opens this page."),
+                t("Controls cheat sheet", "Every click and key, one line each.", List.of(
+                    "All of this works in Marker line mode only - in other modes lines just "
+                        + "show (and keep painting inside the tube), so you can't nudge them by accident.",
+                    "Left-drag a cube (node): move it. Lands on the block grid when you let go.",
+                    "Left-drag a pink ball (handle): bend the curve that side.",
+                    "Right-drag a pink ball: slide it in or out - same angle, more or less bend.",
+                    "Drag a ball back onto its cube: sharp corner there.",
+                    "Double-click a cube: switch it between sharp corner and smooth curve.",
+                    "Double-click the line (Marker line mode): add a cube there.",
+                    "Scroll while dragging: push the point further away / pull it nearer.",
+                    "Hold {axis} while dragging: lock to one axis (coloured guide line).",
+                    "Hold {link} while dragging a ball: the opposite ball mirrors it.",
+                    "Right-click a green (size) or blue (twist) cube: reset that end. Hold "
+                        + "{link}: reset both ends.",
+                    "Middle-click a middle cube: remove it. Middle-click the line: delete it.",
+                    "{axis} and {link} are rebindable in Controls.")),
+                t("Shapes and tubes", "The buttons floating over each end.", List.of(
+                    "Circle, square, triangle, star: sweeps that shape along the line. Click the "
+                        + "lit one again to go back to a bare line.",
+                    "Ring button: Shell (just the skin, default) or Solid (filled in).",
+                    "Green cubes (diagonal arrow) at each end: drag to resize that end. Different sizes = a "
+                        + "taper, like a tentacle. Hold {link}: both ends size together.",
+                    "Blue cubes (curved arrow) at each end: drag around the end to twist the shape. Hold "
+                        + "{link}: both ends turn together.",
+                    "White cube (four arrows) beside the line: drag to move the whole thing.",
+                    "A bare line (no shape) selects just the blocks it passes through.")),
+                t("Painting it", "Grow a fill inside the tube.", List.of(
+                    "3D Fill inside the tube grows from where you aim - a block, or the green "
+                        + "cell in open air - one block, then a layer around it; keep holding "
+                        + "to keep growing. It stays inside the tube.",
+                    "Which way a Gradient runs: the second row of buttons. Across (default): "
+                        + "from the side you aim into to the far side. Along: start (turquoise "
+                        + "cube) to end (amber). Inside out: line to skin. Outside in: skin to "
+                        + "line. Hover a button to see its name.",
+                    "Place in air (Settings, on by default) means a tube floating in the sky "
+                        + "needs no scaffolding.",
+                    "Face and Single modes respect the tube too, like any shape marker - and "
+                        + "from inside, the tube's wall in reach counts as a face to click.")),
+                t("Tips", "Small things that save time.", List.of(
+                    "Lines show faintly through terrain, and you can grab their cubes and balls "
+                        + "through blocks - handy underground.",
+                    "Cubes snap to the block grid, so a two-cube line is perfectly straight.",
+                    "Big tubes update a moment after you drag (they rebuild in the background); "
+                        + "the line itself always follows instantly.",
+                    "Lines are saved per world and dimension, like the other markers."))),
             t("Marker draw", "A freehand marker pencil.", List.of(
                 "Hold left-click and sweep the crosshair to spatter start markers over whatever "
                     + "it touches; hold right-click for end markers (they only stick where a "

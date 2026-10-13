@@ -32,6 +32,14 @@ public final class Gradient {
     public static KeyMapping cyclePaletteKey;
     /** Held modifier (default L-Ctrl): a marker-removing click clears the whole connected plane. */
     public static KeyMapping clearConnectedKey;
+    /**
+     * Held while dragging a line control (default L-Ctrl): mirrors curve handles and links both
+     * tube ends (same size / same twist). Sharing Ctrl with clear-connected is fine — 26.3 keeps a
+     * list of mappings per key, so both report down.
+     */
+    public static KeyMapping lineLinkKey;
+    /** Held while dragging a line node, handle or move node (default L-Alt): lock to one axis. */
+    public static KeyMapping axisLockKey;
 
     private Gradient() {}
 
@@ -51,6 +59,10 @@ public final class Gradient {
                 InputConstants.KEY_B, KEY_CATEGORY);
         clearConnectedKey = new KeyMapping("key.gradient.clear_connected", InputConstants.Type.KEYBOARD,
                 InputConstants.KEY_LCONTROL, KEY_CATEGORY);
+        lineLinkKey = new KeyMapping("key.gradient.line_link", InputConstants.Type.KEYBOARD,
+                InputConstants.KEY_LCONTROL, KEY_CATEGORY);
+        axisLockKey = new KeyMapping("key.gradient.axis_lock", InputConstants.Type.KEYBOARD,
+                InputConstants.KEY_LALT, KEY_CATEGORY);
     }
 
     /** Physical state of {@link #wheelKey} last tick (edge detection for hold-to-open). */
@@ -104,6 +116,7 @@ public final class Gradient {
     /** True when the configured paint tool item is in the player's main hand. */
     public static boolean holdingPaintTool(Minecraft mc) {
         if (mc.player == null) return false;
+        if (DebugRender.FORCE_TOOL) return true;
         GradientConfig cfg = ConfigManager.get();
         if (cfg.paintTool.isEmpty()) return false;
         Identifier id = BuiltInRegistries.ITEM.getKey(mc.player.getMainHandItem().getItem());
@@ -208,8 +221,19 @@ public final class Gradient {
         return clearConnectedKey != null && clearConnectedKey.isDown();
     }
 
+    /** True while the line link modifier (default L-Ctrl) is held. */
+    public static boolean lineLinkDown() {
+        return lineLinkKey != null && lineLinkKey.isDown();
+    }
+
+    /** True while the axis-lock modifier (default L-Alt) is held. */
+    public static boolean axisLockDown() {
+        return axisLockKey != null && axisLockKey.isDown();
+    }
+
     /**
-     * Display name of a mod keybind ("open" / "wheel" / "palette" / "clear") as currently bound —
+     * Display name of a mod keybind ("open" / "wheel" / "palette" / "clear" / "link" / "axis")
+     * as currently bound —
      * UI text (e.g. the Help tab) uses this so rebinds always read correctly.
      */
     public static String boundKey(String id) {
@@ -218,6 +242,8 @@ public final class Gradient {
             case "wheel" -> wheelKey;
             case "palette" -> cyclePaletteKey;
             case "clear" -> clearConnectedKey;
+            case "link" -> lineLinkKey;
+            case "axis" -> axisLockKey;
             default -> null;
         };
         return k == null ? "?" : k.getTranslatedKeyMessage().getString();

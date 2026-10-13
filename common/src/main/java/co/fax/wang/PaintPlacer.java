@@ -66,6 +66,7 @@ public final class PaintPlacer {
 
     private static final int GREEN_FILL = 0x5555FF55;  // translucent green — placement face preview
     private static final int GREEN_ARROW = 0xFF55FF55;
+    private static final int GREEN_EDGE = 0xC055FF55;  // place-in-air target cell edges
 
     private static boolean lastUseDown = false;
 
@@ -79,6 +80,8 @@ public final class PaintPlacer {
     private static Block solidChosen;         // Solid: block resolved from the match mode at press
     private static PaletteChoice.Prepared prepared; // Gradient/Noise: press-wide palette state
     private static PaletteChoice.Ramp noiseRamp;    // Noise: the one ramp resolved for this press
+    /** Gradient 3D started inside a line tube: each tube cell's gradient position, else null. */
+    private static it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap lineTs;
     private static PaletteChoice.Ramp ramp3d;       // Gradient 3D: the fill's resolved ramp
     private static GradientCaches.Fill3D activeFill; // Gradient 3D: the cache entry being extended
     private static PatternChoice.Prepared patternPrep;              // Pattern: press-wide state
@@ -129,6 +132,8 @@ public final class PaintPlacer {
     // Preview + HUD sourcing, recomputed every tick while a placing mode is live.
     private static final List<BlockPos> previewPos = new ArrayList<>();
     private static final List<Direction> previewDir = new ArrayList<>();
+    /** Place in air: the cell a click into open air would fill, or null. */
+    private static BlockPos airPreview;
     private static List<String> sourcing = List.of();
 
     /** Extra HUD lines describing where the next click's gradient endpoints come from. */
@@ -147,6 +152,7 @@ public final class PaintPlacer {
             lastUseDown = false;
             previewPos.clear();
             previewDir.clear();
+            airPreview = null;
             sourcing = List.of();
             return;
         }
@@ -175,15 +181,21 @@ public final class PaintPlacer {
         mode = pm;
         GradientCaches.touch(cfg); // fingerprint change / idle timeout → forget old gradients
 
-        // Noise 3D aimed into a marked region keeps the classic instant region flood-fill.
-        if (type == PaintType.NOISE && mode == PlacementMode.FILL3D && tryNoiseRegionFill(mc)) {
+        // Noise 3D aimed at a block in a marked region keeps the classic instant region
+        // flood-fill. A click into open air grows from the air cell instead (startAir).
+        if (type == PaintType.NOISE && mode == PlacementMode.FILL3D
+                && mc.hitResult != null && mc.hitResult.getType() == HitResult.Type.BLOCK
+                && tryNoiseRegionFill(mc)) {
             return;
         }
 
         LocalPlayer player = mc.player;
-        HitResult hr = mc.hitResult;
-        if (!(hr instanceof BlockHitResult bhr) || hr.getType() != HitResult.Type.BLOCK) {
-            overlay(mc, type.label() + ": aim at a block face");
+        BlockHitResult bhr = paintHit(mc);
+        virtualWalls = bhr != null && shapeHit;
+        if (bhr == null) {
+            BlockPos air = airTarget(mc, cfg);
+            if (air != null) startAir(mc, player, air);
+            else overlay(mc, type.label() + ": aim at a block face");
             return;
         }
         BlockPos clicked = bhr.getBlockPos();
@@ -196,11 +208,174 @@ public final class PaintPlacer {
         if (active) drain(mc);
     }
 
+    /**
+     * Place in air with nothing under the crosshair: the cell at the edge of block reach along
+     * the view, where one block goes (null when Place in air is off or that cell is taken).
+     */
+    private static BlockPos airTarget(Minecraft mc, GradientConfig cfg) {
+        if (!cfg.placeInAir || mc.player == null || mc.level == null) return null;
+        if (paintHit(mc) != null) return null;
+        double reach = Math.min(REACH, mc.player.blockInteractionRange()) - 0.5;
+        BlockPos cell = BlockPos.containing(mc.player.getEyePosition().add(mc.player.getViewVector(1f).scale(reach)));
+        return Gradient.emptyCell(mc.level.getBlockState(cell)) ? cell : null;
+    }
+
+    /** Set by {@link #paintHit}: the hit it returned is a shape-boundary face, not a block. */
+    private static boolean shapeHit;
+    /**
+     * For the current press: the click was on a shape-boundary face, so cells outside every
+     * shape count as walls (see {@link #wall}) — the shape's inside behaves like a hollow of
+     * real blocks.
+     */
+    private static boolean virtualWalls;
+
+    /**
+     * What painting treats as the clicked face: the crosshair's block, unless the view first
+     * leaves a shape marker (ring, box, line tube) within reach — then the face where it leaves,
+     * on the first cell outside the shape, exactly as if a block sat there. Null when neither.
+     */
+    private static BlockHitResult paintHit(Minecraft mc) {
+        shapeHit = false;
+        BlockHitResult real = (mc.hitResult instanceof BlockHitResult b
+                && mc.hitResult.getType() == HitResult.Type.BLOCK) ? b : null;
+        if (mc.player == null || !co.fax.wang.shape.ShapeMarkers.any()) return real;
+        Vec3 eye = mc.player.getEyePosition(), look = mc.player.getViewVector(1f);
+        double max = Math.min(REACH, mc.player.blockInteractionRange());
+        if (real != null) max = Math.min(max, real.getLocation().distanceTo(eye));
+        BlockHitResult exit = shapeExit(mc, eye, look, max);
+        if (exit == null) return real;
+        shapeHit = true;
+        return exit;
+    }
+
+    /**
+     * Walk the view ray cell by cell (Amanatides–Woo) up to {@code max}: the first step from a
+     * shape cell into a non-shape cell, as a hit on that outside cell's face toward the shape.
+     * Stops at the first real block.
+     */
+    private static BlockHitResult shapeExit(Minecraft mc, Vec3 o, Vec3 d, double max) {
+        int x = net.minecraft.util.Mth.floor(o.x), y = net.minecraft.util.Mth.floor(o.y), z = net.minecraft.util.Mth.floor(o.z);
+        int sx = d.x > 0 ? 1 : -1, sy = d.y > 0 ? 1 : -1, sz = d.z > 0 ? 1 : -1;
+        double tdx = d.x == 0 ? Double.MAX_VALUE : Math.abs(1 / d.x);
+        double tdy = d.y == 0 ? Double.MAX_VALUE : Math.abs(1 / d.y);
+        double tdz = d.z == 0 ? Double.MAX_VALUE : Math.abs(1 / d.z);
+        double tx = d.x == 0 ? Double.MAX_VALUE : ((sx > 0 ? x + 1 - o.x : o.x - x) * tdx);
+        double ty = d.y == 0 ? Double.MAX_VALUE : ((sy > 0 ? y + 1 - o.y : o.y - y) * tdy);
+        double tz = d.z == 0 ? Double.MAX_VALUE : ((sz > 0 ? z + 1 - o.z : o.z - z) * tdz);
+        BlockPos cur = new BlockPos(x, y, z);
+        boolean inShape = co.fax.wang.shape.ShapeMarkers.contains(cur);
+        while (true) {
+            double t;
+            Direction face; // face of the NEXT cell the ray enters through
+            if (tx <= ty && tx <= tz) {
+                t = tx; x += sx; tx += tdx; face = sx > 0 ? Direction.WEST : Direction.EAST;
+            } else if (ty <= tz) {
+                t = ty; y += sy; ty += tdy; face = sy > 0 ? Direction.DOWN : Direction.UP;
+            } else {
+                t = tz; z += sz; tz += tdz; face = sz > 0 ? Direction.NORTH : Direction.SOUTH;
+            }
+            if (t > max) return null;
+            BlockPos next = new BlockPos(x, y, z);
+            boolean nextIn = co.fax.wang.shape.ShapeMarkers.contains(next);
+            if (inShape && !nextIn && Gradient.emptyCell(mc.level.getBlockState(cur))) {
+                return new BlockHitResult(o.add(d.scale(t)), face, next, false);
+            }
+            if (!Gradient.emptyCell(mc.level.getBlockState(next))) return null; // real block first
+            inShape = nextIn;
+        }
+    }
+
+    /** A wall for column / face selection: a real block, or (virtual walls) outside every shape. */
+    private static boolean wall(Minecraft mc, BlockPos p) {
+        return !Gradient.emptyCell(mc.level.getBlockState(p))
+                || (virtualWalls && !co.fax.wang.shape.ShapeMarkers.contains(p));
+    }
+
+    /**
+     * A click into open air (Place in air): one block at {@code cell}, facing the player — the
+     * start of whatever gets built out from it next. Gradient/Noise use the palette's first
+     * colour, Solid needs a ✓ block (there's nothing in the air to match), Pattern its corner.
+     */
+    private static void startAir(Minecraft mc, LocalPlayer player, BlockPos cell) {
+        Vec3 look = player.getViewVector(1f);
+        double ax = Math.abs(look.x), ay = Math.abs(look.y), az = Math.abs(look.z);
+        dir = ax >= ay && ax >= az ? (look.x > 0 ? Direction.WEST : Direction.EAST)
+                : ay >= az ? (look.y > 0 ? Direction.DOWN : Direction.UP)
+                : (look.z > 0 ? Direction.NORTH : Direction.SOUTH);
+        GradCtx g = null;
+        switch (type) {
+            case SOLID -> {
+                solidChosen = chooseSolidBlock(player, null);
+                if (solidChosen == null) {
+                    overlay(mc, "Solid: nothing to match in the air — aim at a block, or pick a ✓ block (K)");
+                    return;
+                }
+            }
+            case NOISE, GRADIENT -> {
+                prepared = PaletteChoice.prepare(player, type.label(), mode == PlacementMode.FILL3D);
+                if (prepared.error != null) {
+                    overlay(mc, prepared.error);
+                    return;
+                }
+                PaletteChoice.Ramp r = PaletteChoice.resolveRamp(prepared, null, null);
+                if (r == null) {
+                    overlay(mc, cantResolveMessage());
+                    return;
+                }
+                if (type == PaintType.NOISE) noiseRamp = r;
+                else g = new GradCtx(0, List.of(cell), r, -1);
+            }
+            case PATTERN -> {
+                patternPrep = PatternChoice.prepare(player);
+                if (patternPrep.error != null) {
+                    overlay(mc, patternPrep.error);
+                    return;
+                }
+                int[] facing = PatternMath.snappedFacingStep(player.getYRot(), ConfigManager.get().perpSnapDegrees);
+                int[] wstep = PatternMath.widthStep(facing, new int[]{dir.getStepX(), dir.getStepY(), dir.getStepZ()});
+                patternPlace = GradientCaches.newPattern(cell, wstep, dir);
+            }
+        }
+        if (mode == PlacementMode.FILL3D) {
+            startAirFill3D(mc, cell, g);
+            return;
+        }
+        queue.add(new Pending(cell, g, 0));
+        regionFill = true; // one block, finishes on its own
+        active = true;
+        drain(mc);
+    }
+
+    /**
+     * 3D Fill into open air: the air cell is the centre and is painted first, then the fill
+     * grows a layer at a time around it exactly like a block-centred fill (a beat after the
+     * first layer; holding keeps growing), held to the marker space / shape it starts in.
+     */
+    private static void startAirFill3D(Minecraft mc, BlockPos cell, GradCtx g) {
+        center = cell.immutable();
+        maxRadius = MAX_RADIUS;
+        if (type == PaintType.GRADIENT) {
+            ramp3d = g.ramp();
+            activeFill = GradientCaches.newFill(center);
+            maxRadius = switch (prepared.palette.sizing) {
+                case FILL_SPACE -> MAX_RADIUS;
+                default -> Math.max(1, Math.min(16, PaletteChoice.columnCells(prepared, ramp3d, -1)));
+            };
+        }
+        beginGrowth(mc, cell);
+        visited.add(center);
+        radius = 0;
+        queue.add(new Pending(center, gradCtx3d(center), 0));
+        active = true;
+        drain(mc);
+    }
+
     /** Resolve the press-wide block choice state; flashes a message and returns false on failure. */
     private static boolean prepareChoice(Minecraft mc, LocalPlayer player, BlockPos clicked) {
         switch (type) {
             case SOLID -> {
-                Block ref = mc.level.getBlockState(clicked).getBlock();
+                // A shape-boundary click has no block to match: use the nearest real one.
+                Block ref = virtualWalls ? solidNear(mc, clicked) : mc.level.getBlockState(clicked).getBlock();
                 solidChosen = chooseSolidBlock(player, ref);
                 if (solidChosen == null) {
                     overlay(mc, noSolidBlockMessage(ref));
@@ -364,8 +539,7 @@ public final class PaintPlacer {
                 markerDriven = true;
             } else {
                 boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(clicked.relative(dir));
-                bases = perpRun(mc, clicked, dir, p -> !Gradient.emptyCell(mc.level.getBlockState(p))
-                        && Gradient.emptyCell(mc.level.getBlockState(p.relative(dir)))
+                bases = perpRun(mc, clicked, dir, p -> wall(mc, p) && !wall(mc, p.relative(dir))
                         && !MarkerManager.endMarkers.contains(p.relative(dir))
                         && (!regionOnly || co.fax.wang.shape.ShapeMarkers.contains(p.relative(dir)))
                         && !outOfReach(mc, p.relative(dir)));
@@ -578,10 +752,10 @@ public final class PaintPlacer {
                     BlockPos n = p.offset(du * ux, du * uy + dv * vy, dv * vz);
                     if (seen.contains(n)) continue;
                     var ns = mc.level.getBlockState(n);
-                    if (Gradient.emptyCell(ns)) continue; // needs a block to grow from
+                    if (!wall(mc, n)) continue; // needs a block (or a shape's outside) to grow from
                     if (sameType && ns.getBlock() != target) continue; // Face target: like blocks only
                     BlockPos front = n.relative(dir);
-                    if (!Gradient.emptyCell(mc.level.getBlockState(front))) continue; // face not exposed on this plane
+                    if (wall(mc, front)) continue; // face not exposed on this plane
                     if (MarkerManager.endMarkers.contains(front)) continue;   // marker right on the face
                     if (regionOnly && !co.fax.wang.shape.ShapeMarkers.contains(front)) continue;
                     if (outOfReach(mc, front)) continue;
@@ -629,10 +803,7 @@ public final class PaintPlacer {
             overlay(mc, type.label() + ": no space to fill there");
             return;
         }
-        growCooldown = HOLD_DELAY; // a beat after the first shell, so a tap can stay one shell
-        spaceConstrained = !MarkerManager.startMarkers.isEmpty()
-                || co.fax.wang.shape.ShapeMarkers.any();
-        startedInSpace = spaceConstrained && inSpace(seed);
+        beginGrowth(mc, seed);
         visited.add(center);
         if (resuming) {
             // Grow outward from the click too, picking up at the click's distance.
@@ -644,6 +815,27 @@ public final class PaintPlacer {
         }
         active = true;
         grow(mc);
+    }
+
+    /**
+     * Common 3D Fill set-up: the hold delay, marker/shape containment from {@code seed}, and —
+     * for a gradient started inside a line tube — the tube's own gradient direction (the fill
+     * may then grow through the whole tube).
+     */
+    private static void beginGrowth(Minecraft mc, BlockPos seed) {
+        growCooldown = HOLD_DELAY; // a beat after the first shell, so a tap can stay one shell
+        spaceConstrained = !MarkerManager.startMarkers.isEmpty()
+                || co.fax.wang.shape.ShapeMarkers.any();
+        startedInSpace = spaceConstrained && fillStartsInSpace(mc, center, seed);
+        co.fax.wang.shape.LineShape line = co.fax.wang.shape.ShapeMarkers.lineContaining(seed);
+        if (type == PaintType.GRADIENT && line != null) {
+            List<BlockPos> tube = new ArrayList<>();
+            for (long k : line.cellKeys()) tube.add(BlockPos.of(k));
+            double[] ts = lineGradientTs(mc, line, tube);
+            lineTs = new it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap(tube.size());
+            for (int i = 0; i < ts.length; i++) lineTs.put(tube.get(i).asLong(), ts[i]);
+            maxRadius = MAX_RADIUS;
+        }
     }
 
     private static void tickFill(Minecraft mc) {
@@ -689,6 +881,11 @@ public final class PaintPlacer {
      */
     private static GradCtx gradCtx3d(BlockPos cell) {
         if (type != PaintType.GRADIENT) return null;
+        if (lineTs != null) {
+            // Growing inside a line tube: colour by the tube's gradient direction instead.
+            double t = lineTs.getOrDefault(cell.asLong(), -1);
+            if (t >= 0) return new GradCtx(t, center, ramp3d, -1);
+        }
         double d = Math.max(0, Math.sqrt(cell.distSqr(center)) - 1);
         double t = Math.min(1.0, d / Math.max(1, maxRadius));
         return new GradCtx(t, center, ramp3d, -1);
@@ -711,6 +908,21 @@ public final class PaintPlacer {
             int dist = Math.abs(cell.getX() - m.getX()) + Math.abs(cell.getY() - m.getY())
                     + Math.abs(cell.getZ() - m.getZ());
             if (dist <= maxDist) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Whether a 3D fill centred on {@code center} belongs inside marker space / a shape: its
+     * start cell is in space, or the centre touches an empty in-space cell. The second case
+     * catches a one-block gap at a jagged shape edge — the crosshair easily lands on the
+     * neighbouring block's outward face, but the user is filling the gap, not the outside.
+     */
+    private static boolean fillStartsInSpace(Minecraft mc, BlockPos center, BlockPos seed) {
+        if (inSpace(seed)) return true;
+        for (Direction d : Direction.values()) {
+            BlockPos n = center.relative(d);
+            if (Gradient.emptyCell(mc.level.getBlockState(n)) && inSpace(n)) return true;
         }
         return false;
     }
@@ -760,9 +972,59 @@ public final class PaintPlacer {
         return true;
     }
 
+    // ---- line tube gradients ------------------------------------------------------------------------
+
+    /**
+     * Each tube cell's position along the gradient (0 … 1), by the line's {@link
+     * co.fax.wang.shape.LineGradient} mode: across the tube along the view (from the side aimed
+     * into), along the curve, or radially (line → skin, or skin → line).
+     */
+    private static double[] lineGradientTs(Minecraft mc, co.fax.wang.shape.LineShape line, List<BlockPos> cells) {
+        // (cells: the whole tube, so every mode's 0 … 1 spans the tube, not just what's filled)
+        double[] ts = new double[cells.size()];
+        switch (line.gradient) {
+            case ALONG -> {
+                for (int i = 0; i < ts.length; i++) ts[i] = Math.max(0, line.fracOf(cells.get(i)));
+            }
+            case INSIDE_OUT, OUTSIDE_IN -> {
+                boolean in = line.gradient == co.fax.wang.shape.LineGradient.OUTSIDE_IN;
+                for (int i = 0; i < ts.length; i++) {
+                    double r = line.radialFrac(cells.get(i));
+                    ts[i] = in ? 1 - r : r;
+                }
+            }
+            case ACROSS -> {
+                Vec3 look = co.fax.wang.shape.Raycast.look(mc);
+                double lo = Double.MAX_VALUE, hi = -Double.MAX_VALUE;
+                for (int i = 0; i < ts.length; i++) {
+                    ts[i] = Vec3.atCenterOf(cells.get(i)).dot(look);
+                    lo = Math.min(lo, ts[i]);
+                    hi = Math.max(hi, ts[i]);
+                }
+                double span = hi - lo;
+                for (int i = 0; i < ts.length; i++) ts[i] = span < 1e-9 ? 0 : (ts[i] - lo) / span;
+            }
+        }
+        return ts;
+    }
+
+
+    /** The block at {@code pos}, or the first real block beside it (a line starts on a surface). */
+    private static Block solidNear(Minecraft mc, BlockPos pos) {
+        if (!Gradient.emptyCell(mc.level.getBlockState(pos))) return mc.level.getBlockState(pos).getBlock();
+        for (Direction d : Direction.values()) {
+            var s = mc.level.getBlockState(pos.relative(d));
+            if (!Gradient.emptyCell(s)) return s.getBlock();
+        }
+        return null;
+    }
+
     // ---- placement ----------------------------------------------------------------------------------
 
-    /** Place queued cells, a few per tick; a cell with no solid neighbour yet is retried later. */
+    /**
+     * Place queued cells, a few per tick. A cell with no solid neighbour goes straight into the
+     * air (Place in air), or with that off is retried later once a neighbour lands.
+     */
     private static void drain(Minecraft mc) {
         LocalPlayer player = mc.player;
         GradientConfig cfg = ConfigManager.get();
@@ -772,7 +1034,7 @@ public final class PaintPlacer {
             Pending p = queue.poll();
             if (!Gradient.emptyCell(mc.level.getBlockState(p.cell()))) continue;
             BlockPos support = findSupport(mc, p.cell());
-            if (support == null) {
+            if (support == null && !cfg.placeInAir) {
                 if (p.tries() + 1 < MAX_TRIES) queue.add(new Pending(p.cell(), p.g(), p.tries() + 1));
                 continue;
             }
@@ -829,10 +1091,15 @@ public final class PaintPlacer {
                 return;
             }
             if (slot < 0) continue;
-            Direction face = Direction.getNearest(
-                    p.cell().getX() - support.getX(), p.cell().getY() - support.getY(),
-                    p.cell().getZ() - support.getZ(), Direction.UP);
-            BlockPlacement.place(mc, player, slot, support, face);
+            if (support != null) {
+                Direction face = Direction.getNearest(
+                        p.cell().getX() - support.getX(), p.cell().getY() - support.getY(),
+                        p.cell().getZ() - support.getZ(), Direction.UP);
+                BlockPlacement.place(mc, player, slot, support, face);
+            } else {
+                // Nothing to click against: place straight into the air cell (Place in air).
+                BlockPlacement.placeInAir(mc, player, slot, p.cell(), dir != null ? dir : Direction.UP);
+            }
             placed++;
             if (type == PaintType.GRADIENT && p.g() != null) {
                 if (p.g().step() >= 0) GradientCaches.recordColumn(mode, p.cell(), p.g().step(), dir);
@@ -903,6 +1170,7 @@ public final class PaintPlacer {
         }
         previewPos.clear();
         previewDir.clear();
+        airPreview = null;
         List<String> src = new ArrayList<>();
         boolean paletteAlways = cfg.activePaintType == PaintType.NOISE
                 || (cfg.activePaintType == PaintType.GRADIENT && pm == PlacementMode.FILL3D);
@@ -913,8 +1181,8 @@ public final class PaintPlacer {
         }
 
         // Paint stays at normal block reach (the crosshair hit) — only markers target further.
-        BlockHitResult hit = (mc.hitResult instanceof BlockHitResult bhr
-                && mc.hitResult.getType() == HitResult.Type.BLOCK) ? bhr : null;
+        BlockHitResult hit = paintHit(mc);
+        virtualWalls = hit != null && shapeHit; // the preview selects exactly what a click would
         if (hit != null) {
             BlockPos b = hit.getBlockPos();
             Direction d = hit.getDirection();
@@ -931,16 +1199,19 @@ public final class PaintPlacer {
                     boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(b.relative(d));
                     List<BlockPos> bases = (seed != null)
                             ? perpRun(mc, seed, d, p -> MarkerManager.startMarkers.contains(p))
-                            : perpRun(mc, b, d, p -> !Gradient.emptyCell(mc.level.getBlockState(p))
-                                    && Gradient.emptyCell(mc.level.getBlockState(p.relative(d)))
+                            : perpRun(mc, b, d, p -> wall(mc, p) && !wall(mc, p.relative(d))
                                     && !MarkerManager.endMarkers.contains(p.relative(d))
                                     && (!regionOnly || co.fax.wang.shape.ShapeMarkers.contains(p.relative(d)))
                                     && !outOfReach(mc, p.relative(d)));
                     for (BlockPos base : bases) addFrontPreview(mc, base, d);
                 }
                 case FILL3D -> {
+                    // Same side rule as the fill itself: only faces the fill will grow through.
+                    boolean constrained = !MarkerManager.startMarkers.isEmpty()
+                            || co.fax.wang.shape.ShapeMarkers.any();
+                    boolean inside = constrained && fillStartsInSpace(mc, b, b.relative(d));
                     for (Direction dd : Direction.values()) {
-                        if (Gradient.emptyCell(mc.level.getBlockState(b.relative(dd)))) {
+                        if (!wall(mc, b.relative(dd)) && (!constrained || inSpace(b.relative(dd)) == inside)) {
                             previewPos.add(b);
                             previewDir.add(dd);
                         }
@@ -952,9 +1223,15 @@ public final class PaintPlacer {
                     && (pm == PlacementMode.SINGLE || pm.isFace() || pm == PlacementMode.FACE_PERP)) {
                 src.addAll(gradientSourcingAt(mc, cfg, b, d));
             }
-        } else if (cfg.activePaintType == PaintType.GRADIENT
-                && (pm == PlacementMode.SINGLE || pm.isFace() || pm == PlacementMode.FACE_PERP)) {
-            src.add("Selected from palette");
+        } else if ((airPreview = airTarget(mc, cfg)) != null) {
+            src.add(pm == PlacementMode.FILL3D ? "Place in air: 3D Fill grows from the green cell"
+                    : "Place in air: one block at reach");
+        } else {
+            airPreview = null;
+            if (cfg.activePaintType == PaintType.GRADIENT
+                    && (pm == PlacementMode.SINGLE || pm.isFace() || pm == PlacementMode.FACE_PERP)) {
+                src.add("Selected from palette");
+            }
         }
         sourcing = src;
     }
@@ -984,6 +1261,13 @@ public final class PaintPlacer {
 
     /** Submit the green face tint + direction arrows (each loader's level-render submit hook). */
     public static void renderPreview(SubmitNodeCollector col, Vec3 cam) {
+        BlockPos air = airPreview;
+        if (air != null) {
+            // The whole cell a click into the air fills: green tint + thin green edges.
+            PoseStack aps = new PoseStack();
+            co.fax.wang.shape.WorldDraw.filledBlock(col, aps, cam, air, GREEN_FILL);
+            co.fax.wang.shape.WorldDraw.blockEdges(col, aps, cam, air, GREEN_EDGE, 0x3F);
+        }
         if (previewPos.isEmpty()) return;
         PoseStack ps = new PoseStack();
         for (int i = 0; i < previewPos.size(); i++) {
@@ -1171,6 +1455,8 @@ public final class PaintPlacer {
         prepared = null;
         noiseRamp = null;
         ramp3d = null;
+        lineTs = null;
+        virtualWalls = false;
         segRamps.clear();
         activeFill = null;
         patternPrep = null;

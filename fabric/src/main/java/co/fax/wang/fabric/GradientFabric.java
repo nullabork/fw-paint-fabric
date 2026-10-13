@@ -34,6 +34,8 @@ public class GradientFabric implements ClientModInitializer {
         KeyMappingHelper.registerKeyMapping(Gradient.wheelKey);
         KeyMappingHelper.registerKeyMapping(Gradient.cyclePaletteKey);
         KeyMappingHelper.registerKeyMapping(Gradient.clearConnectedKey);
+        KeyMappingHelper.registerKeyMapping(Gradient.lineLinkKey);
+        KeyMappingHelper.registerKeyMapping(Gradient.axisLockKey);
 
         ClientTickEvents.END_CLIENT_TICK.register(Gradient::endClientTick);
 
