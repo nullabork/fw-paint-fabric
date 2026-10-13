@@ -190,8 +190,9 @@ public final class PaintPlacer {
         }
 
         LocalPlayer player = mc.player;
-        HitResult hr = mc.hitResult;
-        if (!(hr instanceof BlockHitResult bhr) || hr.getType() != HitResult.Type.BLOCK) {
+        BlockHitResult bhr = paintHit(mc);
+        virtualWalls = bhr != null && shapeHit;
+        if (bhr == null) {
             BlockPos air = airTarget(mc, cfg);
             if (air != null) startAir(mc, player, air);
             else overlay(mc, type.label() + ": aim at a block face");
@@ -213,10 +214,81 @@ public final class PaintPlacer {
      */
     private static BlockPos airTarget(Minecraft mc, GradientConfig cfg) {
         if (!cfg.placeInAir || mc.player == null || mc.level == null) return null;
-        if (mc.hitResult != null && mc.hitResult.getType() == HitResult.Type.BLOCK) return null;
+        if (paintHit(mc) != null) return null;
         double reach = Math.min(REACH, mc.player.blockInteractionRange()) - 0.5;
         BlockPos cell = BlockPos.containing(mc.player.getEyePosition().add(mc.player.getViewVector(1f).scale(reach)));
         return Gradient.emptyCell(mc.level.getBlockState(cell)) ? cell : null;
+    }
+
+    /** Set by {@link #paintHit}: the hit it returned is a shape-boundary face, not a block. */
+    private static boolean shapeHit;
+    /**
+     * For the current press: the click was on a shape-boundary face, so cells outside every
+     * shape count as walls (see {@link #wall}) — the shape's inside behaves like a hollow of
+     * real blocks.
+     */
+    private static boolean virtualWalls;
+
+    /**
+     * What painting treats as the clicked face: the crosshair's block, unless the view first
+     * leaves a shape marker (ring, box, line tube) within reach — then the face where it leaves,
+     * on the first cell outside the shape, exactly as if a block sat there. Null when neither.
+     */
+    private static BlockHitResult paintHit(Minecraft mc) {
+        shapeHit = false;
+        BlockHitResult real = (mc.hitResult instanceof BlockHitResult b
+                && mc.hitResult.getType() == HitResult.Type.BLOCK) ? b : null;
+        if (mc.player == null || !co.fax.wang.shape.ShapeMarkers.any()) return real;
+        Vec3 eye = mc.player.getEyePosition(), look = mc.player.getViewVector(1f);
+        double max = Math.min(REACH, mc.player.blockInteractionRange());
+        if (real != null) max = Math.min(max, real.getLocation().distanceTo(eye));
+        BlockHitResult exit = shapeExit(mc, eye, look, max);
+        if (exit == null) return real;
+        shapeHit = true;
+        return exit;
+    }
+
+    /**
+     * Walk the view ray cell by cell (Amanatides–Woo) up to {@code max}: the first step from a
+     * shape cell into a non-shape cell, as a hit on that outside cell's face toward the shape.
+     * Stops at the first real block.
+     */
+    private static BlockHitResult shapeExit(Minecraft mc, Vec3 o, Vec3 d, double max) {
+        int x = net.minecraft.util.Mth.floor(o.x), y = net.minecraft.util.Mth.floor(o.y), z = net.minecraft.util.Mth.floor(o.z);
+        int sx = d.x > 0 ? 1 : -1, sy = d.y > 0 ? 1 : -1, sz = d.z > 0 ? 1 : -1;
+        double tdx = d.x == 0 ? Double.MAX_VALUE : Math.abs(1 / d.x);
+        double tdy = d.y == 0 ? Double.MAX_VALUE : Math.abs(1 / d.y);
+        double tdz = d.z == 0 ? Double.MAX_VALUE : Math.abs(1 / d.z);
+        double tx = d.x == 0 ? Double.MAX_VALUE : ((sx > 0 ? x + 1 - o.x : o.x - x) * tdx);
+        double ty = d.y == 0 ? Double.MAX_VALUE : ((sy > 0 ? y + 1 - o.y : o.y - y) * tdy);
+        double tz = d.z == 0 ? Double.MAX_VALUE : ((sz > 0 ? z + 1 - o.z : o.z - z) * tdz);
+        BlockPos cur = new BlockPos(x, y, z);
+        boolean inShape = co.fax.wang.shape.ShapeMarkers.contains(cur);
+        while (true) {
+            double t;
+            Direction face; // face of the NEXT cell the ray enters through
+            if (tx <= ty && tx <= tz) {
+                t = tx; x += sx; tx += tdx; face = sx > 0 ? Direction.WEST : Direction.EAST;
+            } else if (ty <= tz) {
+                t = ty; y += sy; ty += tdy; face = sy > 0 ? Direction.DOWN : Direction.UP;
+            } else {
+                t = tz; z += sz; tz += tdz; face = sz > 0 ? Direction.NORTH : Direction.SOUTH;
+            }
+            if (t > max) return null;
+            BlockPos next = new BlockPos(x, y, z);
+            boolean nextIn = co.fax.wang.shape.ShapeMarkers.contains(next);
+            if (inShape && !nextIn && Gradient.emptyCell(mc.level.getBlockState(cur))) {
+                return new BlockHitResult(o.add(d.scale(t)), face, next, false);
+            }
+            if (!Gradient.emptyCell(mc.level.getBlockState(next))) return null; // real block first
+            inShape = nextIn;
+        }
+    }
+
+    /** A wall for column / face selection: a real block, or (virtual walls) outside every shape. */
+    private static boolean wall(Minecraft mc, BlockPos p) {
+        return !Gradient.emptyCell(mc.level.getBlockState(p))
+                || (virtualWalls && !co.fax.wang.shape.ShapeMarkers.contains(p));
     }
 
     /**
@@ -302,7 +374,8 @@ public final class PaintPlacer {
     private static boolean prepareChoice(Minecraft mc, LocalPlayer player, BlockPos clicked) {
         switch (type) {
             case SOLID -> {
-                Block ref = mc.level.getBlockState(clicked).getBlock();
+                // A shape-boundary click has no block to match: use the nearest real one.
+                Block ref = virtualWalls ? solidNear(mc, clicked) : mc.level.getBlockState(clicked).getBlock();
                 solidChosen = chooseSolidBlock(player, ref);
                 if (solidChosen == null) {
                     overlay(mc, noSolidBlockMessage(ref));
@@ -466,8 +539,7 @@ public final class PaintPlacer {
                 markerDriven = true;
             } else {
                 boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(clicked.relative(dir));
-                bases = perpRun(mc, clicked, dir, p -> !Gradient.emptyCell(mc.level.getBlockState(p))
-                        && Gradient.emptyCell(mc.level.getBlockState(p.relative(dir)))
+                bases = perpRun(mc, clicked, dir, p -> wall(mc, p) && !wall(mc, p.relative(dir))
                         && !MarkerManager.endMarkers.contains(p.relative(dir))
                         && (!regionOnly || co.fax.wang.shape.ShapeMarkers.contains(p.relative(dir)))
                         && !outOfReach(mc, p.relative(dir)));
@@ -680,10 +752,10 @@ public final class PaintPlacer {
                     BlockPos n = p.offset(du * ux, du * uy + dv * vy, dv * vz);
                     if (seen.contains(n)) continue;
                     var ns = mc.level.getBlockState(n);
-                    if (Gradient.emptyCell(ns)) continue; // needs a block to grow from
+                    if (!wall(mc, n)) continue; // needs a block (or a shape's outside) to grow from
                     if (sameType && ns.getBlock() != target) continue; // Face target: like blocks only
                     BlockPos front = n.relative(dir);
-                    if (!Gradient.emptyCell(mc.level.getBlockState(front))) continue; // face not exposed on this plane
+                    if (wall(mc, front)) continue; // face not exposed on this plane
                     if (MarkerManager.endMarkers.contains(front)) continue;   // marker right on the face
                     if (regionOnly && !co.fax.wang.shape.ShapeMarkers.contains(front)) continue;
                     if (outOfReach(mc, front)) continue;
@@ -1094,8 +1166,8 @@ public final class PaintPlacer {
         }
 
         // Paint stays at normal block reach (the crosshair hit) — only markers target further.
-        BlockHitResult hit = (mc.hitResult instanceof BlockHitResult bhr
-                && mc.hitResult.getType() == HitResult.Type.BLOCK) ? bhr : null;
+        BlockHitResult hit = paintHit(mc);
+        virtualWalls = hit != null && shapeHit; // the preview selects exactly what a click would
         if (hit != null) {
             BlockPos b = hit.getBlockPos();
             Direction d = hit.getDirection();
@@ -1112,8 +1184,7 @@ public final class PaintPlacer {
                     boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(b.relative(d));
                     List<BlockPos> bases = (seed != null)
                             ? perpRun(mc, seed, d, p -> MarkerManager.startMarkers.contains(p))
-                            : perpRun(mc, b, d, p -> !Gradient.emptyCell(mc.level.getBlockState(p))
-                                    && Gradient.emptyCell(mc.level.getBlockState(p.relative(d)))
+                            : perpRun(mc, b, d, p -> wall(mc, p) && !wall(mc, p.relative(d))
                                     && !MarkerManager.endMarkers.contains(p.relative(d))
                                     && (!regionOnly || co.fax.wang.shape.ShapeMarkers.contains(p.relative(d)))
                                     && !outOfReach(mc, p.relative(d)));
@@ -1121,7 +1192,7 @@ public final class PaintPlacer {
                 }
                 case FILL3D -> {
                     for (Direction dd : Direction.values()) {
-                        if (Gradient.emptyCell(mc.level.getBlockState(b.relative(dd)))) {
+                        if (!wall(mc, b.relative(dd))) {
                             previewPos.add(b);
                             previewDir.add(dd);
                         }
@@ -1366,6 +1437,7 @@ public final class PaintPlacer {
         noiseRamp = null;
         ramp3d = null;
         lineTs = null;
+        virtualWalls = false;
         segRamps.clear();
         activeFill = null;
         patternPrep = null;

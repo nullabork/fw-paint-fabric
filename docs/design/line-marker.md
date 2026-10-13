@@ -14,6 +14,10 @@ centre. Same packet Litematica's Easy Place uses.
 - Settings toggle **Place in air**, default **On**. Off restores the old behaviour (cells wait
   for a neighbour) for servers whose anti-cheat flags supportless placement.
 - Cells with a real neighbour still click against it (natural orientation, least surprising).
+- Shape walls as faces: `PaintPlacer.paintHit` walks the view ray (Amanatides–Woo) within reach;
+  the first step from a shape cell to a non-shape cell (before any real block) is a hit on that
+  outside cell's face. For that press `virtualWalls` makes cells outside every shape count as
+  walls, so face floods, perpendicular runs and 3D fills treat the shape like a hollow of blocks.
 - A click that hits nothing places **one block** in the cell at the edge of block reach along the
   view (a green cell previews it), facing the player. Gradient/Noise use the palette's first
   colour; Solid needs a ✓ block (nothing to match); Pattern anchors its corner there.

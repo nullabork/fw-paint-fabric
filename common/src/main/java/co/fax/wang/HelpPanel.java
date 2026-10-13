@@ -275,7 +275,11 @@ public final class HelpPanel {
                     + "anti-cheat flags that - blocks then wait until a neighbour is placed.",
                 "Markers never block painting - they only constrain it: columns stop at end "
                     + "markers (even ones floating in air), and 3D fills that start inside marker "
-                    + "space stay inside it."),
+                    + "space stay inside it.",
+                "Inside a shape marker (ring, box, line tube), its inside wall counts as a "
+                    + "block face once it's within reach: aim at it and every mode selects "
+                    + "that face and its neighbours just like real blocks, growing back into "
+                    + "the shape."),
             t("Single", "One column out of the clicked face.", List.of(
                 "Aim at a block face and hold right-click: a single column grows straight out of "
                     + "that face, one block at a time, until it hits something (a block, an end "
@@ -420,7 +424,8 @@ public final class HelpPanel {
                         + "line. Hover a button to see its name.",
                     "Place in air (Settings, on by default) means a tube floating in the sky "
                         + "needs no scaffolding.",
-                    "Face and Single modes respect the tube too, like any shape marker.")),
+                    "Face and Single modes respect the tube too, like any shape marker - and "
+                        + "from inside, the tube's wall in reach counts as a face to click.")),
                 t("Tips", "Small things that save time.", List.of(
                     "Lines show faintly through terrain, and you can grab their cubes and balls "
                         + "through blocks - handy underground.",
