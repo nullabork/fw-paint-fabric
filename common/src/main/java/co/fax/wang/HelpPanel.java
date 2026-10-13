@@ -386,6 +386,8 @@ public final class HelpPanel {
                 "5. Switch to 3D Fill, aim into the tube, right-click. Done.",
                 "Stuck? The ? button over each end of a line opens this page."),
                 t("Controls cheat sheet", "Every click and key, one line each.", List.of(
+                    "All of this works in Marker line mode only - in other modes lines just "
+                        + "show (and keep painting inside the tube), so you can't nudge them by accident.",
                     "Left-drag a cube (node): move it. Lands on the block grid when you let go.",
                     "Left-drag a pink ball (handle): bend the curve that side.",
                     "Right-drag a pink ball: slide it in or out - same angle, more or less bend.",

@@ -31,7 +31,11 @@ handles. A fresh line is two nodes with zero handles = a straight line.
 2. A live straight preview follows the aim; the second left-click sets the end.
    Right-click cancels a half-made line.
 
-### Editing (any mode, paint tool in hand)
+### Editing (Marker line mode only, paint tool in hand)
+
+Outside Marker line mode a line only shows (curve + tube, no nodes, handles or buttons) and
+keeps constraining painting; clicks pass straight through it, so it can't be nudged by accident.
+
 
 - **Looking at a line** highlights it (ray-to-curve distance), like other shape markers.
 - **Main nodes** are small cubes; **curve handles** are small spheres joined to their node by a

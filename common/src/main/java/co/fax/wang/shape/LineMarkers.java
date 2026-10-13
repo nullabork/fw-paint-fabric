@@ -21,10 +21,11 @@ import java.util.List;
  * <ul>
  *   <li>Marker line mode: left-click the start (aimed surface point, or 16 blocks out at the
  *       sky), left-click the end. Right-click cancels a half-made line.</li>
- *   <li>Any mode with the tool in hand: drag nodes (cubes) and curve handles (spheres) on the
- *       plane through the point facing the eye (rebuilt each tick); scroll while dragging
- *       pushes the point further / nearer. Handles snap onto their node when dragged close; Alt
- *       mirrors the opposite handle. Double-click the line to insert a node; middle-click a
+ *   <li>Editing, also only in Marker line mode (elsewhere lines just show and constrain
+ *       painting): drag nodes (cubes) and curve handles (spheres) on the plane through the point
+ *       facing the eye (rebuilt each tick); scroll while dragging pushes the point further /
+ *       nearer. Handles snap onto their node when dragged close; Link mirrors the opposite
+ *       handle, Axis lock locks a drag to an axis. Double-click the line to insert a node; middle-click a
  *       middle node to remove it, anything else on the line to delete the line.</li>
  *   <li>The selected line shows floating buttons (profile + shell/solid), and with a profile its
  *       size and twist nodes at each end plus a move node at its side.</li>
@@ -168,7 +169,9 @@ public final class LineMarkers {
                                      boolean attack, boolean attackEdge, boolean use, boolean useEdge, boolean pickEdge) {
         boolean create = pm == PlacementMode.MARKER_LINE;
         if (!create) pendingStart = null;
-        if (!handles) {
+        // Lines are only editable in Marker line mode; elsewhere they just show and constrain
+        // painting (no aiming, dragging, buttons or deleting — clicks pass straight through).
+        if (!handles || (!create && !debugHold)) {
             aimed = null;
             dragLine = null;
             return false;
@@ -724,15 +727,16 @@ public final class LineMarkers {
         Vec3[] axes = cameraAxes(mc);
         PoseStack ps = new PoseStack();
         for (LineShape l : lines) {
-            boolean sel = handles && l == selected;
+            boolean editing = handles && pm == PlacementMode.MARKER_LINE;
+            boolean sel = editing && l == selected;
             l.ensureCells(false); // stale tubes rebuild in the background; the last one keeps drawing
             drawTube(col, ps, cam, l, sel ? TUBE_EDGE_SELECTED : TUBE_EDGE, sel ? TUBE_GHOST_SELECTED : TUBE_GHOST);
             // Twice: depth-tested (weaves through terrain), then a faint on-top ghost so the
             // line and its controls stay readable — and grabbable — behind blocks.
             col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(),
-                    (pose, vc) -> drawParts(new Em(pose, vc, cam, false), l, sel));
+                    (pose, vc) -> drawParts(new Em(pose, vc, cam, false), l, sel, editing));
             col.submitCustomGeometry(ps, WorldDraw.seeThrough(),
-                    (pose, vc) -> drawParts(new Em(pose, vc, cam, true), l, sel));
+                    (pose, vc) -> drawParts(new Em(pose, vc, cam, true), l, sel, editing));
             if (sel) drawButtons(col, ps, cam, l, axes);
         }
         if (dragLine != null && lockAxis != null && dragOrigin != null) {
@@ -766,8 +770,9 @@ public final class LineMarkers {
     }
 
     /** The curve, nodes, and (selected) handles + end controls into one pass. */
-    private static void drawParts(Em e, LineShape l, boolean sel) {
+    private static void drawParts(Em e, LineShape l, boolean sel, boolean editing) {
         drawCurve(e, l.samples(), 0.035, sel ? LINE_SELECTED : LINE);
+        if (!editing) return; // outside Marker line mode: just the line (and its tube)
         List<LineCurve.Node> ns = l.curve.nodes;
         for (int i = 0; i < ns.size(); i++) {
             int c = i == 0 ? NODE_START : i == ns.size() - 1 ? NODE_END : NODE_MID;
