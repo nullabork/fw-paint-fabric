@@ -402,17 +402,19 @@ public final class HelpPanel {
                     "Scroll while dragging: push the point further away / pull it nearer.",
                     "Hold {axis} while dragging: lock to one axis (coloured guide line).",
                     "Hold {link} while dragging a ball: the opposite ball mirrors it.",
+                    "Right-click a green (size) or blue (twist) cube: reset that end. Hold "
+                        + "{link}: reset both ends.",
                     "Middle-click a middle cube: remove it. Middle-click the line: delete it.",
                     "{axis} and {link} are rebindable in Controls.")),
                 t("Shapes and tubes", "The buttons floating over each end.", List.of(
                     "Circle, square, triangle, star: sweeps that shape along the line. Click the "
                         + "lit one again to go back to a bare line.",
                     "Ring button: Shell (just the skin, default) or Solid (filled in).",
-                    "Green cubes at each end: drag to resize that end. Different sizes = a "
+                    "Green cubes (diagonal arrow) at each end: drag to resize that end. Different sizes = a "
                         + "taper, like a tentacle. Hold {link}: both ends size together.",
-                    "Blue cubes at each end: drag around the end to twist the shape. Hold "
+                    "Blue cubes (curved arrow) at each end: drag around the end to twist the shape. Hold "
                         + "{link}: both ends turn together.",
-                    "White cube beside the line: drag to move the whole thing.",
+                    "White cube (four arrows) beside the line: drag to move the whole thing.",
                     "A bare line (no shape) selects just the blocks it passes through.")),
                 t("Painting it", "Grow a fill inside the tube.", List.of(
                     "3D Fill inside the tube grows from where you aim - a block, or the green "

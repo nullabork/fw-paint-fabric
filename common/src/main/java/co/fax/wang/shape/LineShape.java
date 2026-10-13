@@ -27,7 +27,9 @@ public final class LineShape {
     /** Which way a Gradient fill runs through the tube. */
     public LineGradient gradient = LineGradient.ACROSS;
     /** Profile radius at the start / end (interpolated along the line). */
-    public double r0 = 2, r1 = 2;
+    public double r0 = DEFAULT_RADIUS, r1 = DEFAULT_RADIUS;
+    /** A new tube's radius (and what right-clicking a size cube resets to). */
+    public static final double DEFAULT_RADIUS = 2;
     /** Profile twist (radians) at the start / end (interpolated along the line). */
     public double tw0, tw1;
 

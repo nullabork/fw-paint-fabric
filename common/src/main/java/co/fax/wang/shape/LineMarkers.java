@@ -101,6 +101,14 @@ public final class LineMarkers {
             {"4433211", "4433211", "4433211", "4433211", "4433211"},   // ALONG
             {"1111111", "1233321", "1234321", "1233321", "1111111"},   // INSIDE_OUT
             {"4444444", "4322234", "4321234", "4322234", "4444444"}};  // OUTSIDE_IN
+    /** Control-cube icons, 7×7 (rows top to bottom): four-way move, diagonal resize, rotate. */
+    private static final String[] MOVE_ICON = {
+            "...X...", "..XXX..", ".X.X.X.", "XXXXXXX", ".X.X.X.", "..XXX..", "...X..."};
+    private static final String[] RESIZE_ICON = {
+            "XXX....", "XX.....", "X.X....", "...X...", "....X.X", ".....XX", "....XXX"};
+    private static final String[] ROTATE_ICON = {
+            "..XXX.X", ".X...XX", "X...XXX", "X......", "X.....X", ".X...X.", "..XXX.."};
+    private static final int CTRL_ICON = 0xFF202020;
     /** The "?" glyph as a 3×6 pixel grid (rows top to bottom). */
     private static final String[] QUESTION = {"XXX", "..X", ".XX", ".X.", "...", ".X."};
 
@@ -258,6 +266,9 @@ public final class LineMarkers {
             // Right-drag a handle: slide it in/out along its own direction (angle kept).
             beginDrag(mc, aimed, true);
             consumed = true;
+        } else if (useEdge && dragLine == null && aimed != null && resetEnd(mc, aimed)) {
+            saveNeeded = true;
+            consumed = true;
         } else if (useEdge && create && pendingStart != null) {
             pendingStart = null;
             overlay(mc, "FW Paint — line cancelled");
@@ -280,6 +291,32 @@ public final class LineMarkers {
         }
         if (saveNeeded) ShapeMarkers.saveLines();
         return consumed || (create && attackEdge);
+    }
+
+    /**
+     * Right-click a size cube: that end back to the default radius; a twist cube: that end's
+     * twist back to zero. Holding Link resets both ends. False when {@code a} isn't one of them.
+     */
+    private static boolean resetEnd(Minecraft mc, Aim a) {
+        LineShape l = a.line;
+        boolean both = co.fax.wang.Gradient.lineLinkDown();
+        switch (a.kind) {
+            case SIZE_START, SIZE_END -> {
+                if (both || a.kind == Kind.SIZE_START) l.r0 = LineShape.DEFAULT_RADIUS;
+                if (both || a.kind == Kind.SIZE_END) l.r1 = LineShape.DEFAULT_RADIUS;
+                overlay(mc, both ? "Size reset (both ends)" : "Size reset");
+            }
+            case TWIST_START, TWIST_END -> {
+                if (both || a.kind == Kind.TWIST_START) l.tw0 = 0;
+                if (both || a.kind == Kind.TWIST_END) l.tw1 = 0;
+                overlay(mc, both ? "Twist reset (both ends)" : "Twist reset");
+            }
+            default -> {
+                return false;
+            }
+        }
+        l.markDirty();
+        return true;
     }
 
     /** Mouse wheel while dragging: push the dragged point a block further from / nearer to you. */
@@ -793,9 +830,9 @@ public final class LineMarkers {
             // Twice: depth-tested (weaves through terrain), then a faint on-top ghost so the
             // line and its controls stay readable — and grabbable — behind blocks.
             col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(),
-                    (pose, vc) -> drawParts(new Em(pose, vc, cam, false), l, sel, editing));
+                    (pose, vc) -> drawParts(new Em(pose, vc, cam, false), l, sel, editing, axes));
             col.submitCustomGeometry(ps, WorldDraw.seeThrough(),
-                    (pose, vc) -> drawParts(new Em(pose, vc, cam, true), l, sel, editing));
+                    (pose, vc) -> drawParts(new Em(pose, vc, cam, true), l, sel, editing, axes));
             if (sel) drawButtons(col, ps, cam, l, axes);
         }
         if (dragLine != null && lockAxis != null && dragOrigin != null) {
@@ -849,7 +886,7 @@ public final class LineMarkers {
     }
 
     /** The curve, nodes, and (selected) handles + end controls into one pass. */
-    private static void drawParts(Em e, LineShape l, boolean sel, boolean editing) {
+    private static void drawParts(Em e, LineShape l, boolean sel, boolean editing, Vec3[] axes) {
         drawCurve(e, l.samples(), 0.035, sel ? LINE_SELECTED : LINE);
         if (!editing) return; // outside Marker line mode: just the line (and its tube)
         List<LineCurve.Node> ns = l.curve.nodes;
@@ -870,12 +907,34 @@ public final class LineMarkers {
             }
         }
         if (l.profile != LineProfile.NONE) {
-            cube(e, l.sizeNode(false), CTRL_HALF, isAimed(l, Kind.SIZE_START, 0) ? AIMED : SIZE);
-            cube(e, l.sizeNode(true), CTRL_HALF, isAimed(l, Kind.SIZE_END, 0) ? AIMED : SIZE);
-            cube(e, l.twistNode(false), CTRL_HALF, isAimed(l, Kind.TWIST_START, 0) ? AIMED : TWIST);
-            cube(e, l.twistNode(true), CTRL_HALF, isAimed(l, Kind.TWIST_END, 0) ? AIMED : TWIST);
+            controlCube(e, l.sizeNode(false), isAimed(l, Kind.SIZE_START, 0) ? AIMED : SIZE, RESIZE_ICON, axes);
+            controlCube(e, l.sizeNode(true), isAimed(l, Kind.SIZE_END, 0) ? AIMED : SIZE, RESIZE_ICON, axes);
+            controlCube(e, l.twistNode(false), isAimed(l, Kind.TWIST_START, 0) ? AIMED : TWIST, ROTATE_ICON, axes);
+            controlCube(e, l.twistNode(true), isAimed(l, Kind.TWIST_END, 0) ? AIMED : TWIST, ROTATE_ICON, axes);
         }
-        cube(e, l.moveNode(), CTRL_HALF, isAimed(l, Kind.MOVE, 0) ? AIMED : MOVE);
+        controlCube(e, l.moveNode(), isAimed(l, Kind.MOVE, 0) ? AIMED : MOVE, MOVE_ICON, axes);
+    }
+
+    /**
+     * An end / move control: its cube, plus a small dark icon facing the camera, floated just
+     * in front of the cube so it reads on whichever side you see.
+     */
+    private static void controlCube(Em e, Vec3 c, int argb, String[] icon, Vec3[] ax) {
+        cube(e, c, CTRL_HALF, argb);
+        // Toward the eye (not along the view axis), so it stays centred on off-centre cubes.
+        Vec3 toEye = e.cam().subtract(c);
+        Vec3 front = toEye.lengthSqr() < 1e-6 ? c : c.add(toEye.normalize().scale(CTRL_HALF * 1.8));
+        double px = CTRL_HALF * 2 * 0.8 / icon[0].length(); // icon spans 80% of the cube
+        int cols = icon[0].length();
+        for (int ry = 0; ry < icon.length; ry++) {
+            for (int rx = 0; rx < cols; rx++) {
+                if (icon[ry].charAt(rx) != 'X') continue;
+                Vec3 p = front.add(ax[0].scale((rx - (cols - 1) / 2.0) * px))
+                        .add(ax[1].scale(((icon.length - 1) / 2.0 - ry) * px));
+                Vec3 r = ax[0].scale(px / 2), u = ax[1].scale(px / 2);
+                quad(e, CTRL_ICON, p.subtract(r).subtract(u), p.add(r).subtract(u), p.add(r).add(u), p.subtract(r).add(u));
+            }
+        }
     }
 
     private static boolean isAimed(LineShape l, Kind k, int i) {
