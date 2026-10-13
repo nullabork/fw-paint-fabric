@@ -193,9 +193,9 @@ final class TubeBuild {
         return (v << 11) >> 11; // sign-extend 21 bits
     }
 
+    @SuppressWarnings("unchecked") // generic arrays of fastutil maps
     static void buildGeometry(Long2FloatOpenHashMap cells, BlockPos origin, FloatList faces, FloatList edges) {
         // Exposed faces grouped by (face, plane coordinate) → set of in-plane (u, v) cells.
-        @SuppressWarnings("unchecked")
         Long2ObjectOpenHashMap<LongOpenHashSet>[] planes = new Long2ObjectOpenHashMap[6];
         for (int f = 0; f < 6; f++) planes[f] = new Long2ObjectOpenHashMap<>();
         // Convex edges grouped by (face pair, the two pinned coordinates) → positions along the edge.
