@@ -205,7 +205,7 @@ public final class HelpPanel {
                 + "fan out its options (clicks are only for choosing): Paint picks what the "
                 + "tool paints (Solid, Gradient, Pattern, Noise); Place fans out Blocks "
                 + "(Single, Face any, Face target, Face perp, 3D Fill), Markers (Marker, Marker draw), and "
-                + "Shape markers (Marker box, circle, square) on a third ring. The Palette "
+                + "Shape markers (Marker box, circle, square, line) on a third ring. The Palette "
                 + "wedge follows the paint type: your gradient palettes (or patterns under "
                 + "Pattern paint), or - with Solid paint - the match modes, where hovering "
                 + "Select block fans your inventory's blocks (colour-sorted compact icons) "
@@ -346,6 +346,30 @@ public final class HelpPanel {
                     + "far end, and gradients run from the base plane (start) to the far side "
                     + "(end) - so a tall extruded circle paints as a giant gradient cylinder "
                     + "with exactly the wall thickness you drew.")),
+            t("Marker line", "A curve you can sweep a shape along - tubes, arches, tentacles.", List.of(
+                "In Marker line mode, left-click a spot on a block for the start and another for "
+                    + "the end (aim at the sky to put a point 16 blocks out). Points sit exactly "
+                    + "where you aim - not on the block grid. Right-click cancels a half-made line.",
+                "Drag the cubes (nodes) to move them. Drag a pink sphere (curve handle) out of "
+                    + "a node to bend the line on that side; drag it back onto its node to make "
+                    + "that corner sharp again. Hold Alt while dragging a handle to mirror the "
+                    + "opposite handle - a smooth corner. Drags move on a flat plane facing you "
+                    + "where you clicked; scroll while dragging to push that plane nearer or "
+                    + "further.",
+                "Double-click the line (in Marker line mode) to add a node there without "
+                    + "changing its shape. Middle-click a middle node to remove it; middle-click "
+                    + "anything else on the line to delete the whole line.",
+                "Floating buttons above the line pick a shape to sweep along it: circle, "
+                    + "square, triangle or star (click the active one again to remove it), plus "
+                    + "Shell / Solid. The glowing blocks show exactly what the tube selects. A "
+                    + "bare line selects just the blocks it passes through.",
+                "With a shape on, each end gets a green size node (drag to set that end's "
+                    + "radius - different ends make a taper) and a blue twist node (drag around "
+                    + "the end to twist the shape along the line). The white node beside the "
+                    + "line moves the whole thing.",
+                "Painting: 3D Fill aimed into a tube fills the whole tube at once, with any "
+                    + "paint type but Pattern. Gradients run from the line's start to its end. "
+                    + "With Place in air on, a tube floating in open sky needs no scaffolding.")),
             t("Marker draw", "A freehand marker pencil.", List.of(
                 "Hold left-click and sweep the crosshair to spatter start markers over whatever "
                     + "it touches; hold right-click for end markers (they only stick where a "

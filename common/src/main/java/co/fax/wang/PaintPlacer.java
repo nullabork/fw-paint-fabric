@@ -175,6 +175,11 @@ public final class PaintPlacer {
         mode = pm;
         GradientCaches.touch(cfg); // fingerprint change / idle timeout → forget old gradients
 
+        // 3D Fill aimed into a line tube floods the whole tube (any paint type) — tubes usually
+        // float in open air, where there's no block face to click.
+        if (mode == PlacementMode.FILL3D && tryLineRegionFill(mc)) {
+            return;
+        }
         // Noise 3D aimed into a marked region keeps the classic instant region flood-fill.
         if (type == PaintType.NOISE && mode == PlacementMode.FILL3D && tryNoiseRegionFill(mc)) {
             return;
@@ -758,6 +763,99 @@ public final class PaintPlacer {
         active = true;
         overlay(mc, "Noise: filling " + cells.size() + " blocks");
         return true;
+    }
+
+    // ---- line tube fill -----------------------------------------------------------------------------
+
+    /**
+     * Flood the line tube the crosshair points into: every empty tube cell connected to the first
+     * one along the view, nearest first. Gradients run start → end along the line; Solid matches
+     * against the block the line starts on. Returns false when not aimed into a tube.
+     */
+    private static boolean tryLineRegionFill(Minecraft mc) {
+        BlockPos[] seedOut = new BlockPos[1];
+        co.fax.wang.shape.LineShape line = co.fax.wang.shape.ShapeMarkers.lineAimedInto(mc, seedOut);
+        if (line == null) return false;
+        LocalPlayer player = mc.player;
+        BlockPos startCell = BlockPos.containing(line.curve.nodes.get(0).p);
+        Block ref = solidNear(mc, startCell);
+        switch (type) {
+            case SOLID -> {
+                solidChosen = chooseSolidBlock(player, ref);
+                if (solidChosen == null) {
+                    overlay(mc, noSolidBlockMessage(ref));
+                    return true;
+                }
+            }
+            case NOISE -> {
+                prepared = PaletteChoice.prepare(player, "Noise", true);
+                if (prepared.error != null) {
+                    overlay(mc, prepared.error);
+                    return true;
+                }
+                noiseRamp = PaletteChoice.resolveRamp(prepared, ref, null);
+                if (noiseRamp == null) {
+                    overlay(mc, cantResolveMessage());
+                    return true;
+                }
+            }
+            case GRADIENT -> {
+                prepared = PaletteChoice.prepare(player, "Gradient", false);
+                if (prepared.error != null) {
+                    overlay(mc, prepared.error);
+                    return true;
+                }
+            }
+            case PATTERN -> {
+                overlay(mc, "Pattern: can't fill a line tube — use Solid, Gradient or Noise");
+                return true;
+            }
+        }
+        dir = Direction.UP; // orientation for blocks placed into open air
+        java.util.Set<Long> tube = line.cellKeys();
+        ArrayDeque<BlockPos> bfs = new ArrayDeque<>();
+        Set<BlockPos> seen = new HashSet<>();
+        bfs.add(seedOut[0]);
+        seen.add(seedOut[0]);
+        int count = 0;
+        while (!bfs.isEmpty() && count < MAX_FILL) {
+            BlockPos c = bfs.poll();
+            if (Gradient.emptyCell(mc.level.getBlockState(c)) && !outOfReach(mc, c)) {
+                queue.add(new Pending(c, type == PaintType.GRADIENT ? lineGradCtx(mc, c) : null, 0));
+                count++;
+            }
+            for (Direction d : Direction.values()) {
+                BlockPos n = c.relative(d);
+                if (tube.contains(n.asLong()) && seen.add(n)) bfs.add(n);
+            }
+        }
+        if (count == 0) {
+            overlay(mc, type.label() + ": that tube is already filled (or out of reach)");
+            return true;
+        }
+        regionFill = true;
+        active = true;
+        overlay(mc, type.label() + ": filling " + count + " blocks");
+        return true;
+    }
+
+    /** Gradient context for a tube cell: its segment start → end along the line. */
+    private static GradCtx lineGradCtx(Minecraft mc, BlockPos cell) {
+        Seg seg = segmentForCell(cell);
+        if (seg == null) return null;
+        PaletteChoice.Ramp ramp = segmentRamp(mc, seg);
+        if (ramp == null) return null;
+        return new GradCtx((double) seg.index() / seg.length(), List.of(seg.s(), seg.e()), ramp, -1);
+    }
+
+    /** The block at {@code pos}, or the first real block beside it (a line starts on a surface). */
+    private static Block solidNear(Minecraft mc, BlockPos pos) {
+        if (!Gradient.emptyCell(mc.level.getBlockState(pos))) return mc.level.getBlockState(pos).getBlock();
+        for (Direction d : Direction.values()) {
+            var s = mc.level.getBlockState(pos.relative(d));
+            if (!Gradient.emptyCell(s)) return s.getBlock();
+        }
+        return null;
     }
 
     // ---- placement ----------------------------------------------------------------------------------

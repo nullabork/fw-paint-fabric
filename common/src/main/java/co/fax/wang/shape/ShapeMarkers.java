@@ -108,7 +108,7 @@ public final class ShapeMarkers {
 
     /** True when any region (box or ring) exists in this world. */
     public static boolean any() {
-        return box != null || !shapes.isEmpty();
+        return box != null || !shapes.isEmpty() || !LineMarkers.lines.isEmpty();
     }
 
     /** True when the cell is inside a region: the box volume, or a ring band × extrusion. */
@@ -116,6 +116,9 @@ public final class ShapeMarkers {
         if (box != null && box.contains(cell)) return true;
         for (RingShape s : shapes) {
             if (s.contains(cell)) return true;
+        }
+        for (LineShape l : LineMarkers.lines) {
+            if (l.contains(cell)) return true;
         }
         return false;
     }
@@ -133,12 +136,16 @@ public final class ShapeMarkers {
             RingShape.Segment seg = s.segmentFor(cell);
             if (seg != null) return seg;
         }
+        for (LineShape l : LineMarkers.lines) {
+            RingShape.Segment seg = l.segmentFor(cell);
+            if (seg != null) return seg;
+        }
         return null;
     }
 
     /** Region count for the Settings clear-button label. */
     public static int count() {
-        return shapes.size() + (box == null ? 0 : 1);
+        return shapes.size() + (box == null ? 0 : 1) + LineMarkers.lines.size();
     }
 
     /**
@@ -146,13 +153,33 @@ public final class ShapeMarkers {
      * to the shape — MarkerManager and PaintPlacer stand down.
      */
     public static boolean controlAimed() {
-        return aimedShape != null;
+        return aimedShape != null || LineMarkers.controlAimed();
+    }
+
+    /** The line tube the crosshair points into (first selected cell along the view), or null. */
+    public static LineShape lineAimedInto(Minecraft mc, BlockPos[] seedOut) {
+        Vec3 eye = Raycast.eye(mc), dir = Raycast.look(mc);
+        BlockPos last = null;
+        for (double d = 0; d <= Raycast.REACH; d += 0.1) {
+            BlockPos c = BlockPos.containing(eye.add(dir.scale(d)));
+            if (c.equals(last)) continue;
+            last = c;
+            for (LineShape l : LineMarkers.lines) {
+                if (l.contains(c)) {
+                    seedOut[0] = c;
+                    return l;
+                }
+            }
+            if (!Gradient.emptyCell(mc.level.getBlockState(c))) return null; // terrain blocks the view
+        }
+        return null;
     }
 
     /** Drops every region and any in-progress creation, and persists. */
     public static void clearAll() {
         shapes.clear();
         box = null;
+        LineMarkers.clear();
         clearBoxPending();
         clearPending();
         aimedShape = null;
@@ -166,14 +193,20 @@ public final class ShapeMarkers {
     // ---- world sync / persistence ----------------------------------------------------------
 
     private static void saveCurrent() {
-        ShapeStore.store(currentKey, shapes, box);
+        ShapeStore.store(currentKey, shapes, box, LineMarkers.lines);
+    }
+
+    /** Persist after a line edit (LineMarkers owns the lines; the store file is shared). */
+    static void saveLines() {
+        saveCurrent();
     }
 
     private static void syncWorld(Minecraft mc) {
         String key = worldKey(mc);
         if (!java.util.Objects.equals(key, currentKey)) {
             currentKey = key;
-            box = ShapeStore.loadInto(key, shapes); // null key (main menu) clears
+            box = ShapeStore.loadInto(key, shapes, LineMarkers.lines); // null key (main menu) clears
+            LineMarkers.resetTransient();
             clearBoxPending();
             clearPending();
             aimedShape = null;
@@ -216,6 +249,7 @@ public final class ShapeMarkers {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.player == null || deltaY == 0) return false;
         if (!Gradient.holdingPaintTool(mc) || mc.gui.screen() != null) return false;
+        if (LineMarkers.onScroll(deltaY)) return true; // dragging a line control: push the plane
         // Sticky grab first: mid-scroll aim slips don't switch shapes.
         RingShape target = scrollGrace > 0 && scrollShape != null ? scrollShape
                 : aimedShape != null ? aimedShape : lookedShape;
@@ -257,6 +291,17 @@ public final class ShapeMarkers {
 
         if (!boxCreate) clearBoxPending(); // leaving box mode drops the pending corner
         if (!ringCreate) clearPending(); // leaving the mode mid-creation drops the half-built shape
+        {
+            boolean a = mc.options.keyAttack.isDown(), u = mc.options.keyUse.isDown(), p = mc.options.keyPickItem.isDown();
+            // Lines first: when one owns this tick's clicks, rings/box/block markers stand down.
+            if (LineMarkers.tick(mc, pm, handles, a, a && !lastAttack, u && !lastUse, p && !lastPick)) {
+                if (!a) dragShape = null;
+                lastAttack = a;
+                lastUse = u;
+                lastPick = p;
+                return;
+            }
+        }
         if (!handles) {
             dragShape = null;
             aimedShape = null;
@@ -577,6 +622,7 @@ public final class ShapeMarkers {
 
         renderBox(col, ps, cam, mc, handles, boxCreate);
         if (ringCreate) renderRingCreation(col, ps, cam, mc, pm);
+        LineMarkers.render(col, cam, handles, pm);
     }
 
     /** The committed box (and the pending-corner preview) as one region with tinted planes. */

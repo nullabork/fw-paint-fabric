@@ -15,6 +15,7 @@ public enum PlacementMode {
     MARKER_DRAW("Marker draw", "Active: Marker draw", 0xFFFFA07A),          // salmon
     MARKER_CIRCLE("Marker circle", "Active: Marker circle", 0xFFFF8A3C),    // orange — donut ring region
     MARKER_SQUARE("Marker square", "Active: Marker square", 0xFF7BD88A),    // green — square ring region
+    MARKER_LINE("Marker line", "Active: Marker line", 0xFFFFE066),          // yellow — curve / swept tube
     SINGLE("Single", "Active: Single", 0xFF55FF55),     // green
     // Persisted by enum name: FACE keeps its name so saved configs stay on it (label only changed).
     FACE("Face any", "Active: Face any", 0xFF55FFFF),   // aqua — every exposed face on the plane
@@ -61,7 +62,7 @@ public enum PlacementMode {
     /** True for the marker-selection modes (drag lines, box, freehand, shape regions). */
     public boolean isMarker() {
         return this == MARKER || this == MARKER_BOX || this == MARKER_DRAW
-                || this == MARKER_CIRCLE || this == MARKER_SQUARE;
+                || this == MARKER_CIRCLE || this == MARKER_SQUARE || this == MARKER_LINE;
     }
 
     /** The next mode, wrapping. */

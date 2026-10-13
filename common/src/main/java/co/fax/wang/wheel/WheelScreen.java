@@ -114,7 +114,7 @@ public class WheelScreen extends Screen {
                 modeLeaf(PlacementMode.MARKER), modeLeaf(PlacementMode.MARKER_DRAW));
         WheelItem shapes = WheelItem.category("Shape markers",
                 modeLeaf(PlacementMode.MARKER_BOX), modeLeaf(PlacementMode.MARKER_CIRCLE),
-                modeLeaf(PlacementMode.MARKER_SQUARE));
+                modeLeaf(PlacementMode.MARKER_SQUARE), modeLeaf(PlacementMode.MARKER_LINE));
         return List.of(
                 WheelItem.category("Paint", paints.toArray(WheelItem[]::new)),
                 WheelItem.category("Place", blocks, markers, shapes),

@@ -57,7 +57,7 @@ Keys are rebindable under Options → Controls → Key Binds → **FW Paint**.
 Hover a wedge to fan out its options; click only to choose. **Paint** fans the paint types
 (Solid / Gradient / Pattern / Noise); **Place** fans **Blocks** (Single / Face any / Face target / Face perp /
 3D Fill), **Markers** (Marker / Marker draw), and **Shape markers** (Marker box / circle /
-square) onto a third ring; **Palette** follows the paint type (palettes, patterns, or — with
+square / line) onto a third ring; **Palette** follows the paint type (palettes, patterns, or — with
 Solid paint — the match modes, with **Select block** fanning your inventory's blocks in colour
 order). The wedge directly holding the current selection shows a blue tint; segments size
 themselves to their content (block icons pack tight), and anything that still doesn't fit
@@ -155,6 +155,13 @@ at sight range — far beyond block reach. Saved per world and dimension; **Clea
   part of a shape and its edges turn white; a faint ghost outline shows through terrain, so a
   buried shape stays findable and editable. Painting into a shape is restricted to its band —
   giant gradient cylinders and square donuts with exactly the wall thickness you drew.
+- **Marker line** — a free curve in 3D: click a start and an end (exactly where you aim, off the
+  block grid). Drag the nodes, pull pink curve handles out to bend it (Alt mirrors the opposite
+  handle for a smooth corner; drag one back onto its node for a sharp one), scroll mid-drag to
+  push the drag plane nearer/further, double-click the line to add a node. Floating buttons above
+  it sweep a **circle, square, triangle or star** along the curve — Shell or Solid — and each end
+  gets a size node (taper it into a tentacle) and a twist node, plus a node to move the whole
+  thing. **3D Fill aimed into the tube fills it** in one go, gradients running start → end.
 - **Middle-click removes whatever marker you're aiming at** — a shape, the box, or a plain
   block marker — in any mode, tool in hand.
 - Clicking a marked block toggles it off in any marker mode; **Ctrl** clears its connected plane.

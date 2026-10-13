@@ -121,6 +121,7 @@ public final class MarkerManager {
 
     public static void tick(Minecraft mc) {
         syncWorld(mc); // load this world's saved markers when the world/dimension changes
+        DebugRender.tick(mc);
         PlacementMode pm = (mc.player == null || mc.level == null || mc.gui.screen() != null)
                 ? PlacementMode.DISABLED : Gradient.currentPlacement(mc);
         // Region markers (box + circle/square rings) run their own tick every frame — they
