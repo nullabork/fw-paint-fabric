@@ -23,8 +23,8 @@ import java.util.List;
  *   <li>Marker line mode: left-click the start (aimed surface point, or 16 blocks out at the
  *       sky), left-click the end. Right-click cancels a half-made line.</li>
  *   <li>Any mode with the tool in hand: drag nodes (cubes) and curve handles (spheres) on the
- *       plane perpendicular to the view at the click; scroll while dragging pushes that plane
- *       along the original sight line. Handles snap onto their node when dragged close; Alt
+ *       plane through the point facing the eye (rebuilt each tick); scroll while dragging
+ *       pushes the point further / nearer. Handles snap onto their node when dragged close; Alt
  *       mirrors the opposite handle. Double-click the line to insert a node; middle-click a
  *       middle node to remove it, anything else on the line to delete the line.</li>
  *   <li>The selected line shows floating buttons (profile + shell/solid), and with a profile its
@@ -90,7 +90,7 @@ public final class LineMarkers {
     private static LineShape dragLine;
     private static Kind dragKind;
     private static int dragIndex;
-    private static Vec3 planeNormal, planePoint, grabOffset;
+    private static Vec3 grabOffset; // control position minus the aim point at the grab
     private static long lastBodyClickMs;
     private static LineShape lastBodyLine;
     private static long frame;
@@ -211,10 +211,16 @@ public final class LineMarkers {
         return consumed || (create && attackEdge);
     }
 
-    /** Mouse wheel while dragging: push the drag plane along the original sight line. */
+    /** Mouse wheel while dragging: push the dragged point a block further from / nearer to you. */
     static boolean onScroll(double deltaY) {
-        if (dragLine == null || planeNormal == null) return false;
-        planePoint = planePoint.add(planeNormal.scale(deltaY > 0 ? 1 : -1));
+        if (dragLine == null) return false;
+        Minecraft mc = Minecraft.getInstance();
+        Vec3 anchor = controlPos(dragLine, dragKind, dragIndex);
+        Vec3 away = anchor.subtract(Raycast.eye(mc));
+        if (away.lengthSqr() < 1e-6) return true;
+        Vec3 target = anchor.add(away.normalize().scale(deltaY > 0 ? 1 : -1));
+        if (target.distanceTo(Raycast.eye(mc)) < 1) return true; // don't pull it through your head
+        applyTarget(dragLine, target);
         return true;
     }
 
@@ -272,17 +278,23 @@ public final class LineMarkers {
         dragLine = a.line;
         dragKind = a.kind;
         dragIndex = a.index;
-        planeNormal = Raycast.look(mc);
-        planePoint = target;
-        Vec3 hit = planeHit(mc);
+        Vec3 hit = planeHit(mc, target);
         grabOffset = hit == null ? Vec3.ZERO : target.subtract(hit);
     }
 
+    /**
+     * Follow the aim: the drag plane passes through the control's current position, facing the
+     * eye (perpendicular to eye → point). Rebuilt every tick, so turning on the spot doesn't tilt
+     * it, but walking around the point does.
+     */
     private static void applyDrag(Minecraft mc) {
-        Vec3 hit = planeHit(mc);
+        Vec3 hit = planeHit(mc, controlPos(dragLine, dragKind, dragIndex));
         if (hit == null) return;
-        Vec3 target = hit.add(grabOffset);
-        LineShape l = dragLine;
+        applyTarget(dragLine, hit.add(grabOffset));
+    }
+
+    /** Move the dragged control to {@code target} (each kind interprets it its own way). */
+    private static void applyTarget(LineShape l, Vec3 target) {
         List<LineCurve.Node> ns = l.curve.nodes;
         switch (dragKind) {
             case NODE -> ns.get(dragIndex).p = target;
@@ -327,12 +339,18 @@ public final class LineMarkers {
         return ss.get(end ? ss.size() - 1 : 0);
     }
 
-    /** Where the view ray crosses the drag plane, or null when parallel / behind. */
-    private static Vec3 planeHit(Minecraft mc) {
+    /**
+     * Where the view ray crosses the plane through {@code anchor} perpendicular to eye → anchor,
+     * or null when parallel / behind.
+     */
+    private static Vec3 planeHit(Minecraft mc, Vec3 anchor) {
         Vec3 eye = Raycast.eye(mc), dir = Raycast.look(mc);
-        double den = dir.dot(planeNormal);
-        if (Math.abs(den) < 1e-6) return null;
-        double t = planePoint.subtract(eye).dot(planeNormal) / den;
+        Vec3 normal = anchor.subtract(eye);
+        if (normal.lengthSqr() < 1e-6) return null;
+        normal = normal.normalize();
+        double den = dir.dot(normal);
+        if (den < 1e-3) return null; // looking away from the point
+        double t = anchor.subtract(eye).dot(normal) / den;
         if (t < 0 || t > Raycast.REACH) return null;
         return eye.add(dir.scale(t));
     }

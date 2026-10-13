@@ -33,9 +33,10 @@ handles. A fresh line is two nodes with zero handles = a straight line.
 - **Looking at a line** highlights it (ray-to-curve distance), like other shape markers.
 - **Main nodes** are small cubes; **curve handles** are small spheres joined to their node by a
   thin stalk. Handles show on the looked/selected line.
-- **Drag** (hold left) a node or handle: it moves on the plane perpendicular to the view
-  direction *at the moment of the click*, through the grabbed point. **Scroll while dragging**
-  pushes that plane nearer/further along the original sight line.
+- **Drag** (hold left) a node or handle: it moves on the plane through the dragged point,
+  perpendicular to the line from the eye to that point. The plane is rebuilt every tick, so
+  turning on the spot doesn't tilt it but walking around the point does. **Scroll while
+  dragging** pushes the point a block further away / nearer along that eye → point line.
 - A handle dragged within ~0.35 blocks of its node **snaps** onto it (zero length → sharp corner).
 - **Alt + drag** a handle mirrors the opposite handle through the node (smooth corner).
 - **Double-click** the line inserts a node at the point on the curve closest to the view ray. The

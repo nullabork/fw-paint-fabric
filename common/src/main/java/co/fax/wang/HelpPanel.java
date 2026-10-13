@@ -353,9 +353,9 @@ public final class HelpPanel {
                 "Drag the cubes (nodes) to move them. Drag a pink sphere (curve handle) out of "
                     + "a node to bend the line on that side; drag it back onto its node to make "
                     + "that corner sharp again. Hold Alt while dragging a handle to mirror the "
-                    + "opposite handle - a smooth corner. Drags move on a flat plane facing you "
-                    + "where you clicked; scroll while dragging to push that plane nearer or "
-                    + "further.",
+                    + "opposite handle - a smooth corner. A dragged point stays the same distance "
+                    + "from you as you sweep the crosshair (walk around it to drag it another "
+                    + "way); scroll while dragging to push it further away or pull it nearer.",
                 "Double-click the line (in Marker line mode) to add a node there without "
                     + "changing its shape. Middle-click a middle node to remove it; middle-click "
                     + "anything else on the line to delete the whole line.",

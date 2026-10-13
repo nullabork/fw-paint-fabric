@@ -157,8 +157,8 @@ at sight range — far beyond block reach. Saved per world and dimension; **Clea
   giant gradient cylinders and square donuts with exactly the wall thickness you drew.
 - **Marker line** — a free curve in 3D: click a start and an end (exactly where you aim, off the
   block grid). Drag the nodes, pull pink curve handles out to bend it (Alt mirrors the opposite
-  handle for a smooth corner; drag one back onto its node for a sharp one), scroll mid-drag to
-  push the drag plane nearer/further, double-click the line to add a node. Floating buttons above
+  handle for a smooth corner; drag one back onto its node for a sharp one), a dragged point keeps
+  its distance from you (scroll mid-drag to push it further or pull it nearer), double-click the line to add a node. Floating buttons above
   it sweep a **circle, square, triangle or star** along the curve — Shell or Solid — and each end
   gets a size node (taper it into a tentacle) and a twist node, plus a node to move the whole
   thing. **3D Fill aimed into the tube fills it** in one go, gradients running start → end.
