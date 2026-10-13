@@ -226,9 +226,9 @@ public final class LineShape {
         return ss.get(i).pos().add(rotatedFrame(i)[0].scale(-(r + 1.5)));
     }
 
-    /** Where the floating button row is centred: above the start, clear of the tube. */
-    public Vec3 buttonAnchor() {
-        double r = profile == LineProfile.NONE ? 0 : r0 + 0.5;
-        return curve.nodes.get(0).p.add(0, r + 2.2, 0);
+    /** Where a floating button row is centred: above the start (or end), clear of the tube. */
+    public Vec3 buttonAnchor(boolean end) {
+        double r = profile == LineProfile.NONE ? 0 : (end ? r1 : r0) + 0.5;
+        return curve.nodes.get(end ? curve.nodes.size() - 1 : 0).p.add(0, r + 2.2, 0);
     }
 }

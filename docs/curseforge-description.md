@@ -156,11 +156,11 @@ at sight range — far beyond block reach. Saved per world and dimension; **Clea
   buried shape stays findable and editable. Painting into a shape is restricted to its band —
   giant gradient cylinders and square donuts with exactly the wall thickness you drew.
 - **Marker line** — a curve in 3D: click a start and an end (nodes sit on the block grid, so
-  straight lines are easy). Drag the nodes, pull pink curve handles out to bend it (drag one back
-  onto its node for a sharp corner); a dragged point keeps its distance from you (scroll mid-drag
+  straight lines are easy). Drag the nodes, pull pink curve handles out to bend it (right-drag one
+  to slide it in/out at the same angle; double-click a node to flip it sharp ↔ smooth); a dragged point keeps its distance from you (scroll mid-drag
   to push it further or pull it nearer). Hold **Alt** to lock a drag to an axis, **Ctrl** to
   mirror handles or link both ends (both rebindable). Double-click the line to add a node. Floating buttons above
-  it sweep a **circle, square, triangle or star** along the curve — Shell or Solid — and each end
+  both ends (with a **?** for the in-game guide) sweep a **circle, square, triangle or star** along the curve — Shell or Solid — and each end
   gets a size node (taper it into a tentacle — Ctrl sizes both ends together) and a twist node, plus a node to move the whole
   thing. Everything shows faintly through terrain and stays grabbable behind blocks. **3D Fill
   aimed into the tube fills it** in one go, gradients running start → end.

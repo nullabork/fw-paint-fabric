@@ -50,15 +50,21 @@ handles. A fresh line is two nodes with zero handles = a straight line.
     get the same twist. It shares Ctrl with clear-connected by default (26.3 keeps a list of
     mappings per key, so both report held).
 - A handle dragged within ~0.35 blocks of its node **snaps** onto it (zero length → sharp corner).
+- **Right-drag** a handle: it slides along its own direction from the node (angle kept, length
+  follows the point on that ray nearest the view); Link mirrors the opposite handle.
+- **Double-click a main node**: any handles → sharp corner (both zeroed); sharp → smooth
+  Catmull-Rom handles (± a sixth of the neighbour-to-neighbour span, doubled at the ends).
 - **Double-click** the line inserts a node at the point on the curve closest to the view ray. The
   segment is split with de Casteljau, so the curve's shape is unchanged.
 - **Middle-click** a middle node removes it; middle-click anywhere else on the line deletes the line.
 
 ### Profile (tube)
 
-Floating **billboard buttons** sit above the start end (offset so they never cover a handle),
+Floating **billboard buttons** sit above *both* ends (a row each, offset so they never cover a handle),
 always face the camera, and draw on top of terrain. Buttons: **circle, square, triangle, star**
-(click the active one again to remove the profile) and **Shell / Solid**.
+(click the active one again to remove the profile), **Shell / Solid**, and **?** (opens the
+Help tab at the Marker line page: a five-step TL;DR, then cheat-sheet / shapes / painting / tips
+sub-pages, one short line per item).
 
 The tube is the profile swept along the curve, built slice by slice (`TubeBuild`):
 

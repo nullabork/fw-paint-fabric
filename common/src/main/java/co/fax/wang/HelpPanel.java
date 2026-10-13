@@ -52,6 +52,34 @@ public final class HelpPanel {
         rebuild();
     }
 
+    /** Expand the topic titled {@code title} (and every topic above it) and scroll it to the top. */
+    public void focus(String title) {
+        List<Topic> path = new ArrayList<>();
+        for (Topic t : TOPICS) {
+            if (findPath(t, title, path)) break;
+        }
+        if (path.isEmpty()) return;
+        expanded.addAll(path);
+        rebuild();
+        Topic target = path.get(path.size() - 1);
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).topic() == target) {
+                scroll = Math.min(i, maxScroll());
+                break;
+            }
+        }
+    }
+
+    private static boolean findPath(Topic t, String title, List<Topic> path) {
+        path.add(t);
+        if (t.title().equals(title)) return true;
+        for (Topic c : t.children()) {
+            if (findPath(c, title, path)) return true;
+        }
+        path.remove(path.size() - 1);
+        return false;
+    }
+
     // ---- layout -----------------------------------------------------------------------------------
 
     private void rebuild() {
@@ -348,39 +376,51 @@ public final class HelpPanel {
                     + "far end, and gradients run from the base plane (start) to the far side "
                     + "(end) - so a tall extruded circle paints as a giant gradient cylinder "
                     + "with exactly the wall thickness you drew.")),
-            t("Marker line", "A curve you can sweep a shape along - tubes, arches, tentacles.", List.of(
-                "In Marker line mode, left-click a block face for the start and another for "
-                    + "the end (aim at the sky to put a point 16 blocks out). Points go in the "
-                    + "middle of the grid cell in front of the face - where a block placed there "
-                    + "would sit - so straight lines are easy. Right-click cancels a half-made line.",
-                "Drag the cubes (nodes) to move them; a node snaps back onto the block grid "
-                    + "when you let go. Drag a pink sphere (curve handle) out of a node to bend "
-                    + "the line on that side; drag it back onto its node to make that corner "
-                    + "sharp again. A dragged point stays the same distance from you as you "
-                    + "sweep the crosshair (walk around it to drag it another way); scroll while "
-                    + "dragging to push it further away or pull it nearer.",
-                "Two modifiers (both rebindable under Controls): hold {axis} while dragging a "
-                    + "node, handle or the move node to lock it to the axis it's mostly moving "
-                    + "along - a coloured guide line shows the track. Hold {link} while dragging "
-                    + "a handle to mirror the opposite one (a smooth corner), a size node to "
-                    + "make both ends the same size, or a twist node to turn both ends together.",
-                "Double-click the line (in Marker line mode) to add a node there (on the grid, "
-                    + "keeping the curve's bend). Middle-click a middle node to remove it; middle-click "
-                    + "anything else on the line to delete the whole line.",
-                "Floating buttons above the line pick a shape to sweep along it: circle, "
-                    + "square, triangle or star (click the active one again to remove it), plus "
-                    + "Shell / Solid. The glowing blocks show exactly what the tube selects. A "
-                    + "bare line selects just the blocks it passes through.",
-                "Lines, nodes, handles and tube edges show faintly through terrain, so a line "
-                    + "running underground or behind a wall stays readable - and its nodes and "
-                    + "handles can still be grabbed through the blocks in front of them.",
-                "With a shape on, each end gets a green size node (drag to set that end's "
-                    + "radius - different ends make a taper) and a blue twist node (drag around "
-                    + "the end to twist the shape along the line). The white node beside the "
-                    + "line moves the whole thing.",
-                "Painting: 3D Fill aimed into a tube fills the whole tube at once, with any "
-                    + "paint type but Pattern. Gradients run from the line's start to its end. "
-                    + "With Place in air on, a tube floating in open sky needs no scaffolding.")),
+            t("Marker line", "TL;DR: click start, click end, drag the dots, pick a shape above it, 3D Fill it.",
+                List.of(
+                "1. Pick Marker line on the wheel (Place > Shape markers).",
+                "2. Click a block face for the start, another for the end. Right-click cancels.",
+                "3. Drag the cubes to move the line. Drag the pink balls to bend it.",
+                "4. Click a shape in the floating buttons over either end. Glowing blocks = what "
+                    + "gets painted.",
+                "5. Switch to 3D Fill, aim into the tube, right-click. Done.",
+                "Stuck? The ? button over each end of a line opens this page."),
+                t("Controls cheat sheet", "Every click and key, one line each.", List.of(
+                    "Left-drag a cube (node): move it. Lands on the block grid when you let go.",
+                    "Left-drag a pink ball (handle): bend the curve that side.",
+                    "Right-drag a pink ball: slide it in or out - same angle, more or less bend.",
+                    "Drag a ball back onto its cube: sharp corner there.",
+                    "Double-click a cube: switch it between sharp corner and smooth curve.",
+                    "Double-click the line (Marker line mode): add a cube there.",
+                    "Scroll while dragging: push the point further away / pull it nearer.",
+                    "Hold {axis} while dragging: lock to one axis (coloured guide line).",
+                    "Hold {link} while dragging a ball: the opposite ball mirrors it.",
+                    "Middle-click a middle cube: remove it. Middle-click the line: delete it.",
+                    "{axis} and {link} are rebindable in Controls.")),
+                t("Shapes and tubes", "The buttons floating over each end.", List.of(
+                    "Circle, square, triangle, star: sweeps that shape along the line. Click the "
+                        + "lit one again to go back to a bare line.",
+                    "Ring button: Shell (just the skin, default) or Solid (filled in).",
+                    "Green cubes at each end: drag to resize that end. Different sizes = a "
+                        + "taper, like a tentacle. Hold {link}: both ends size together.",
+                    "Blue cubes at each end: drag around the end to twist the shape. Hold "
+                        + "{link}: both ends turn together.",
+                    "White cube beside the line: drag to move the whole thing.",
+                    "A bare line (no shape) selects just the blocks it passes through.")),
+                t("Painting it", "Fill the tube in one click.", List.of(
+                    "3D Fill aimed into the tube fills the whole thing - Solid, Gradient or "
+                        + "Noise (not Pattern).",
+                    "Gradients run from the line's start (turquoise cube) to its end (amber).",
+                    "Place in air (Settings, on by default) means a tube floating in the sky "
+                        + "needs no scaffolding.",
+                    "Face and Single modes respect the tube too, like any shape marker.")),
+                t("Tips", "Small things that save time.", List.of(
+                    "Lines show faintly through terrain, and you can grab their cubes and balls "
+                        + "through blocks - handy underground.",
+                    "Cubes snap to the block grid, so a two-cube line is perfectly straight.",
+                    "Big tubes update a moment after you drag (they rebuild in the background); "
+                        + "the line itself always follows instantly.",
+                    "Lines are saved per world and dimension, like the other markers."))),
             t("Marker draw", "A freehand marker pencil.", List.of(
                 "Hold left-click and sweep the crosshair to spatter start markers over whatever "
                     + "it touches; hold right-click for end markers (they only stick where a "

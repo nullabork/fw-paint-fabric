@@ -116,6 +116,7 @@ public final class Gradient {
     /** True when the configured paint tool item is in the player's main hand. */
     public static boolean holdingPaintTool(Minecraft mc) {
         if (mc.player == null) return false;
+        if (DebugRender.FORCE_TOOL) return true;
         GradientConfig cfg = ConfigManager.get();
         if (cfg.paintTool.isEmpty()) return false;
         Identifier id = BuiltInRegistries.ITEM.getKey(mc.player.getMainHandItem().getItem());

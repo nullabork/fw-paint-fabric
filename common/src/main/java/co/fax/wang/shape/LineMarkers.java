@@ -82,7 +82,11 @@ public final class LineMarkers {
     /** Floating buttons, left to right. */
     private static final LineProfile[] BUTTON_PROFILES = {
             LineProfile.CIRCLE, LineProfile.SQUARE, LineProfile.TRIANGLE, LineProfile.STAR};
-    private static final int BUTTON_COUNT = BUTTON_PROFILES.length + 1; // + shell/solid
+    /** Buttons per row: the profiles, shell/solid, help. One row floats above each end. */
+    private static final int BUTTON_COUNT = BUTTON_PROFILES.length + 2;
+    private static final int SLOT_SOLID = BUTTON_PROFILES.length, SLOT_HELP = BUTTON_PROFILES.length + 1;
+    /** The "?" glyph as a 3×6 pixel grid (rows top to bottom). */
+    private static final String[] QUESTION = {"XXX", "..X", ".XX", ".X.", "...", ".X."};
 
     static final List<LineShape> lines = new ArrayList<>();
     private static LineShape selected;
@@ -99,7 +103,12 @@ public final class LineMarkers {
     private static net.minecraft.core.Direction.Axis lockAxis;
     private static final double LOCK_PICK = 0.3; // movement needed before Alt picks an axis
     private static final double GUIDE_LEN = 96;  // half-length of the axis guide line
-    private static long lastBodyClickMs;
+    private static long lastBodyClickMs, lastNodeClickMs;
+    private static LineShape lastNodeLine;
+    private static int lastNodeIndex;
+    /** Right-drag of a handle: it slides along {@link #radialDir} through its node. */
+    private static boolean dragRadial;
+    private static Vec3 radialDir;
     private static LineShape lastBodyLine;
     private static long frame;
 
@@ -143,10 +152,10 @@ public final class LineMarkers {
      * when a line consumed this tick's clicks (ShapeMarkers then skips its own handling).
      */
     static boolean tick(Minecraft mc, PlacementMode pm, boolean handles,
-                        boolean attack, boolean attackEdge, boolean useEdge, boolean pickEdge) {
+                        boolean attack, boolean attackEdge, boolean use, boolean useEdge, boolean pickEdge) {
         long perfT0 = PERF ? System.nanoTime() : 0;
         try {
-            return tickInner(mc, pm, handles, attack, attackEdge, useEdge, pickEdge);
+            return tickInner(mc, pm, handles, attack, attackEdge, use, useEdge, pickEdge);
         } finally {
             if (PERF) {
                 perfTicks++;
@@ -156,7 +165,7 @@ public final class LineMarkers {
     }
 
     private static boolean tickInner(Minecraft mc, PlacementMode pm, boolean handles,
-                                     boolean attack, boolean attackEdge, boolean useEdge, boolean pickEdge) {
+                                     boolean attack, boolean attackEdge, boolean use, boolean useEdge, boolean pickEdge) {
         boolean create = pm == PlacementMode.MARKER_LINE;
         if (!create) pendingStart = null;
         if (!handles) {
@@ -173,7 +182,7 @@ public final class LineMarkers {
         if (dragLine != null) {
             if (debugHold) {
                 return true; // dev bench drag: the bench moves the node itself
-            } else if (attack) {
+            } else if (dragRadial ? use : attack) {
                 applyDrag(mc);
             } else {
                 snapOnRelease(dragLine);
@@ -190,7 +199,7 @@ public final class LineMarkers {
                 consumed = true;
                 switch (aimed.kind) {
                     case BUTTON -> {
-                        pressButton(aimed.line, aimed.index);
+                        pressButton(mc, aimed.line, aimed.index);
                         saveNeeded = true;
                     }
                     case BODY -> {
@@ -204,14 +213,34 @@ public final class LineMarkers {
                             lastBodyClickMs = now;
                         }
                     }
-                    default -> beginDrag(mc, aimed);
+                    case NODE -> {
+                        // Double-click a main node: toggle sharp corner <-> smooth curve.
+                        long now = System.currentTimeMillis();
+                        if (lastNodeLine == aimed.line && lastNodeIndex == aimed.index
+                                && now - lastNodeClickMs < DOUBLE_CLICK_MS) {
+                            toggleSmooth(aimed.line, aimed.index);
+                            lastNodeLine = null;
+                            saveNeeded = true;
+                        } else {
+                            lastNodeLine = aimed.line;
+                            lastNodeIndex = aimed.index;
+                            lastNodeClickMs = now;
+                            beginDrag(mc, aimed, false);
+                        }
+                    }
+                    default -> beginDrag(mc, aimed, false);
                 }
             } else if (create) {
                 consumed = true;
                 creationClick(mc);
             }
         }
-        if (useEdge && create && pendingStart != null) {
+        if (useEdge && dragLine == null && aimed != null
+                && (aimed.kind == Kind.HANDLE_IN || aimed.kind == Kind.HANDLE_OUT)) {
+            // Right-drag a handle: slide it in/out along its own direction (angle kept).
+            beginDrag(mc, aimed, true);
+            consumed = true;
+        } else if (useEdge && create && pendingStart != null) {
             pendingStart = null;
             overlay(mc, "FW Paint — line cancelled");
             consumed = true;
@@ -274,9 +303,14 @@ public final class LineMarkers {
         return gridCenter(Raycast.eye(mc).add(Raycast.look(mc).scale(DEFAULT_DIST)));
     }
 
-    private static void pressButton(LineShape l, int index) {
-        if (index < BUTTON_PROFILES.length) {
-            LineProfile p = BUTTON_PROFILES[index];
+    private static void pressButton(Minecraft mc, LineShape l, int index) {
+        int slot = index % BUTTON_COUNT;
+        if (slot == SLOT_HELP) {
+            mc.setScreenAndShow(co.fax.wang.GradientScreen.atHelpTopic("Marker line"));
+            return;
+        }
+        if (slot < BUTTON_PROFILES.length) {
+            LineProfile p = BUTTON_PROFILES[slot];
             l.profile = l.profile == p ? LineProfile.NONE : p; // clicking the active one removes it
         } else {
             l.solid = !l.solid;
@@ -301,12 +335,17 @@ public final class LineMarkers {
 
     // ---- drag ---------------------------------------------------------------------------------
 
-    private static void beginDrag(Minecraft mc, Aim a) {
+    private static void beginDrag(Minecraft mc, Aim a, boolean radial) {
         Vec3 target = controlPos(a.line, a.kind, a.index);
         if (target == null) return;
         dragLine = a.line;
         dragKind = a.kind;
         dragIndex = a.index;
+        dragRadial = radial;
+        if (radial) {
+            Vec3 d = target.subtract(a.line.curve.nodes.get(a.index).p);
+            radialDir = d.lengthSqr() < 1e-9 ? nodeTangent(a.line, a.index) : d.normalize();
+        }
         Vec3 hit = planeHit(mc, target);
         grabOffset = hit == null ? Vec3.ZERO : target.subtract(hit);
         dragOrigin = target;
@@ -319,6 +358,23 @@ public final class LineMarkers {
      * it, but walking around the point does.
      */
     private static void applyDrag(Minecraft mc) {
+        if (dragRadial) {
+            // The handle's length follows the point on its ray (from the node) nearest the view.
+            LineCurve.Node n = dragLine.curve.nodes.get(dragIndex);
+            Vec3 far = n.p.add(radialDir.scale(Raycast.REACH));
+            double s = LineCurve.segmentRayClosest(n.p, far, Raycast.eye(mc), Raycast.look(mc))[0];
+            double len = s * Raycast.REACH;
+            Vec3 h = len < SNAP ? Vec3.ZERO : radialDir.scale(len);
+            boolean in = dragKind == Kind.HANDLE_IN;
+            if (in) n.in = h;
+            else n.out = h;
+            if (co.fax.wang.Gradient.lineLinkDown()) {
+                if (in) n.out = h.scale(-1);
+                else n.in = h.scale(-1);
+            }
+            dragLine.markDirty();
+            return;
+        }
         Vec3 hit = planeHit(mc, controlPos(dragLine, dragKind, dragIndex));
         if (hit == null) return;
         Vec3 target = hit.add(grabOffset);
@@ -426,6 +482,27 @@ public final class LineMarkers {
         };
     }
 
+    /**
+     * Double-click on a main node: a node with any handle becomes a sharp corner (handles zeroed);
+     * a sharp one gets smooth Catmull-Rom handles — along the line through its neighbours, a sixth
+     * of that span each way — so the curve flows through it.
+     */
+    private static void toggleSmooth(LineShape l, int i) {
+        List<LineCurve.Node> ns = l.curve.nodes;
+        LineCurve.Node n = ns.get(i);
+        if (n.in.lengthSqr() > 1e-12 || n.out.lengthSqr() > 1e-12) {
+            n.in = Vec3.ZERO;
+            n.out = Vec3.ZERO;
+        } else {
+            Vec3 prev = ns.get(Math.max(0, i - 1)).p, next = ns.get(Math.min(ns.size() - 1, i + 1)).p;
+            Vec3 tan = next.subtract(prev).scale(1.0 / 6);
+            if (i == 0 || i == ns.size() - 1) tan = tan.scale(2); // ends see only half the span
+            if (i > 0) n.in = tan.scale(-1);
+            if (i < ns.size() - 1) n.out = tan;
+        }
+        l.markDirty();
+    }
+
     /** The centre of the block-grid cell containing {@code p}. */
     static Vec3 gridCenter(Vec3 p) {
         return new Vec3(Math.floor(p.x) + 0.5, Math.floor(p.y) + 0.5, Math.floor(p.z) + 0.5);
@@ -524,7 +601,7 @@ public final class LineMarkers {
                     best = closer(best, l, Kind.TWIST_END, 0, rayCube(eye, dir, l.twistNode(true), CTRL_HALF));
                 }
                 best = closer(best, l, Kind.MOVE, 0, rayCube(eye, dir, l.moveNode(), CTRL_HALF));
-                for (int k = 0; k < BUTTON_COUNT; k++) {
+                for (int k = 0; k < 2 * BUTTON_COUNT; k++) {
                     // Buttons draw on top of everything, so they win over anything behind them.
                     double t = rayButton(eye, dir, buttonCenter(l, k, cam), cam);
                     if (t >= 0) best = new Aim(l, Kind.BUTTON, k, 0);
@@ -573,10 +650,11 @@ public final class LineMarkers {
         return new Vec3[]{right, up, f};
     }
 
+    /** Button {@code k}: row k / BUTTON_COUNT (0 above the start, 1 above the end), slot k % BUTTON_COUNT. */
     private static Vec3 buttonCenter(LineShape l, int k, Vec3[] cam) {
         double width = BUTTON_COUNT * BTN + (BUTTON_COUNT - 1) * BTN_GAP;
-        double x = -width / 2 + BTN / 2 + k * (BTN + BTN_GAP);
-        return l.buttonAnchor().add(cam[0].scale(x));
+        double x = -width / 2 + BTN / 2 + (k % BUTTON_COUNT) * (BTN + BTN_GAP);
+        return l.buttonAnchor(k >= BUTTON_COUNT).add(cam[0].scale(x));
     }
 
     /** Ray distance to a camera-facing button quad, or -1. */
@@ -756,9 +834,10 @@ public final class LineMarkers {
     /** Camera-facing buttons drawn on top of everything (see-through pipeline). */
     private static void drawButtons(SubmitNodeCollector col, PoseStack ps, Vec3 cam, LineShape l, Vec3[] ax) {
         col.submitCustomGeometry(ps, WorldDraw.seeThrough(), (pose, vc) -> {
-            for (int k = 0; k < BUTTON_COUNT; k++) {
+            for (int k = 0; k < 2 * BUTTON_COUNT; k++) {
+                int slot = k % BUTTON_COUNT;
                 Vec3 c = buttonCenter(l, k, ax);
-                boolean active = k < BUTTON_PROFILES.length ? l.profile == BUTTON_PROFILES[k] : false;
+                boolean active = slot < BUTTON_PROFILES.length && l.profile == BUTTON_PROFILES[slot];
                 boolean hover = isAimed(l, Kind.BUTTON, k);
                 int bg = active ? BTN_ACTIVE : hover ? BTN_HOVER : BTN_BG;
                 billboardQuad(pose, vc, cam, c, ax, BTN / 2, BTN / 2, bg);
@@ -766,8 +845,10 @@ public final class LineMarkers {
                 Vec3 ic = c.subtract(ax[2].scale(0.01));
                 int fg = active ? ICON_ON_ACTIVE : ICON;
                 double r = BTN * 0.32;
-                if (k < BUTTON_PROFILES.length) {
-                    fan(pose, vc, cam, ic, ax, BUTTON_PROFILES[k].outline(r), fg);
+                if (slot < BUTTON_PROFILES.length) {
+                    fan(pose, vc, cam, ic, ax, BUTTON_PROFILES[slot].outline(r), fg);
+                } else if (slot == SLOT_HELP) {
+                    pixelGlyph(pose, vc, cam, ic, ax, QUESTION, BTN * 0.11, fg);
                 } else if (l.solid) {
                     fan(pose, vc, cam, ic, ax, LineProfile.CIRCLE.outline(r), fg);   // filled disc
                 } else {
@@ -878,6 +959,19 @@ public final class LineMarkers {
             vt(vc, pose, cam, pb, argb);
             vt(vc, pose, cam, pa, argb);
             vt(vc, pose, cam, pa, argb);
+        }
+    }
+
+    /** A tiny pixel-art glyph (rows of 'X'), centred, each pixel a billboard square. */
+    private static void pixelGlyph(PoseStack.Pose pose, VertexConsumer vc, Vec3 cam, Vec3 c, Vec3[] ax,
+                                   String[] rows, double px, int argb) {
+        int cols = rows[0].length();
+        for (int ry = 0; ry < rows.length; ry++) {
+            for (int rx = 0; rx < cols; rx++) {
+                if (rows[ry].charAt(rx) != 'X') continue;
+                double ox = (rx - (cols - 1) / 2.0) * px, oy = ((rows.length - 1) / 2.0 - ry) * px;
+                billboardQuad(pose, vc, cam, c.add(ax[0].scale(ox)).add(ax[1].scale(oy)), ax, px / 2, px / 2, argb);
+            }
         }
     }
 

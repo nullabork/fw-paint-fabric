@@ -20,6 +20,8 @@ import net.minecraft.world.phys.Vec3;
  *   <li>{@code FWPAINT_DEBUG_WIGGLE=1}: keep "dragging" the demo line's end node in a small
  *       circle every tick (never saved) — pair with {@code FWPAINT_PERF=1}, which logs the line
  *       work's cost once a second (rebuilds, resampling, tube vertex emission, vertex counts).</li>
+ *   <li>{@code FWPAINT_DEBUG_TOOL=1}: anything in hand counts as the paint tool, so handles,
+ *       buttons and previews show without touching the config.</li>
  *   <li>{@code FWPAINT_DEBUG_SKY=1}: first lifts the player 25 blocks into creative flight at
  *       noon (needs cheats in the dev world), so the scene is clear of terrain.</li>
  * </ul>
@@ -27,6 +29,8 @@ import net.minecraft.world.phys.Vec3;
 public final class DebugRender {
 
     private static final String LINE = System.getenv("FWPAINT_DEBUG_LINE");
+    /** FWPAINT_DEBUG_TOOL=1: whatever is in hand counts as the paint tool (tool-gated visuals). */
+    static final boolean FORCE_TOOL = System.getenv("FWPAINT_DEBUG_TOOL") != null;
     /** FWPAINT_DEBUG_WIGGLE=1: drag the demo line's end node in a small circle (perf test). */
     private static final boolean WIGGLE = System.getenv("FWPAINT_DEBUG_WIGGLE") != null;
     private static final double RADIUS = System.getenv("FWPAINT_DEBUG_RADIUS") != null

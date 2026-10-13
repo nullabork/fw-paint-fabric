@@ -294,7 +294,7 @@ public final class ShapeMarkers {
         {
             boolean a = mc.options.keyAttack.isDown(), u = mc.options.keyUse.isDown(), p = mc.options.keyPickItem.isDown();
             // Lines first: when one owns this tick's clicks, rings/box/block markers stand down.
-            if (LineMarkers.tick(mc, pm, handles, a, a && !lastAttack, u && !lastUse, p && !lastPick)) {
+            if (LineMarkers.tick(mc, pm, handles, a, a && !lastAttack, u, u && !lastUse, p && !lastPick)) {
                 if (!a) dragShape = null;
                 lastAttack = a;
                 lastUse = u;
