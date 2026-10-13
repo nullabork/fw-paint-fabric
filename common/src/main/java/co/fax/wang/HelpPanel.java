@@ -363,6 +363,9 @@ public final class HelpPanel {
                     + "square, triangle or star (click the active one again to remove it), plus "
                     + "Shell / Solid. The glowing blocks show exactly what the tube selects. A "
                     + "bare line selects just the blocks it passes through.",
+                "Lines, nodes, handles and tube edges show faintly through terrain, so a line "
+                    + "running underground or behind a wall stays readable - and its nodes and "
+                    + "handles can still be grabbed through the blocks in front of them.",
                 "With a shape on, each end gets a green size node (drag to set that end's "
                     + "radius - different ends make a taper) and a blue twist node (drag around "
                     + "the end to twist the shape along the line). The white node beside the "

@@ -54,6 +54,10 @@ public final class LineMarkers {
     private static final int TUBE_FILL = 0x33FFA000;
     private static final int TUBE_EDGE = 0xD8FFB830;
     private static final int TUBE_EDGE_SELECTED = 0xF0FFFFFF;
+    // The on-top ghost pass draws through everything, so it stays faint (same as ring ghosts).
+    private static final int TUBE_GHOST = 0x5CFFB830;
+    private static final int TUBE_GHOST_SELECTED = 0xA8FFFFFF;
+    private static final float GHOST_ALPHA = 0.4f;          // line/node ghost alpha multiplier
     private static final int BTN_BG = 0xC0202020;
     private static final int BTN_HOVER = 0xE0505050;
     private static final int BTN_ACTIVE = 0xE0FFB830;
@@ -515,47 +519,58 @@ public final class LineMarkers {
             boolean sel = handles && l == selected;
             boolean dragging = l == dragLine;
             l.ensureCells(!dragging || frame % 4 == 0);
-            drawTube(col, ps, cam, l, sel ? TUBE_EDGE_SELECTED : TUBE_EDGE);
-            col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(), (pose, vc) -> {
-                drawCurve(pose, vc, cam, l.samples(), 0.035, sel ? LINE_SELECTED : LINE);
-                List<LineCurve.Node> ns = l.curve.nodes;
-                for (int i = 0; i < ns.size(); i++) {
-                    int c = i == 0 ? NODE_START : i == ns.size() - 1 ? NODE_END : NODE_MID;
-                    boolean a = isAimed(l, Kind.NODE, i);
-                    cube(pose, vc, cam, ns.get(i).p, a ? NODE_HALF * 1.3 : NODE_HALF, a ? AIMED : c);
-                }
-                if (!sel) return;
-                for (int i = 0; i < ns.size(); i++) {
-                    for (boolean in : new boolean[]{true, false}) {
-                        if (!hasHandle(l, i, in)) continue;
-                        Kind k = in ? Kind.HANDLE_IN : Kind.HANDLE_OUT;
-                        Vec3 hp = handlePos(l, i, in);
-                        boolean parked = handleParked(l, i, in);
-                        if (!parked) segmentRibbon(pose, vc, cam, ns.get(i).p, hp, 0.015, STALK);
-                        sphere(pose, vc, cam, hp, HANDLE_R, isAimed(l, k, i) ? AIMED : parked ? HANDLE_PARKED : HANDLE);
-                    }
-                }
-                if (l.profile != LineProfile.NONE) {
-                    cube(pose, vc, cam, l.sizeNode(false), CTRL_HALF, isAimed(l, Kind.SIZE_START, 0) ? AIMED : SIZE);
-                    cube(pose, vc, cam, l.sizeNode(true), CTRL_HALF, isAimed(l, Kind.SIZE_END, 0) ? AIMED : SIZE);
-                    cube(pose, vc, cam, l.twistNode(false), CTRL_HALF, isAimed(l, Kind.TWIST_START, 0) ? AIMED : TWIST);
-                    cube(pose, vc, cam, l.twistNode(true), CTRL_HALF, isAimed(l, Kind.TWIST_END, 0) ? AIMED : TWIST);
-                }
-                cube(pose, vc, cam, l.moveNode(), CTRL_HALF, isAimed(l, Kind.MOVE, 0) ? AIMED : MOVE);
-            });
+            drawTube(col, ps, cam, l, sel ? TUBE_EDGE_SELECTED : TUBE_EDGE, sel ? TUBE_GHOST_SELECTED : TUBE_GHOST);
+            // Twice: depth-tested (weaves through terrain), then a faint on-top ghost so the
+            // line and its controls stay readable — and grabbable — behind blocks.
+            col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(),
+                    (pose, vc) -> drawParts(new Em(pose, vc, cam, false), l, sel));
+            col.submitCustomGeometry(ps, WorldDraw.seeThrough(),
+                    (pose, vc) -> drawParts(new Em(pose, vc, cam, true), l, sel));
             if (sel) drawButtons(col, ps, cam, l, axes);
         }
         if (pm == PlacementMode.MARKER_LINE && handles && dragLine == null) {
             Vec3 p = aimPoint(mc);
             Vec3 start = pendingStart;
-            col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(), (pose, vc) -> {
-                cube(pose, vc, cam, p, NODE_HALF, start == null ? NODE_START : NODE_END);
-                if (start != null) {
-                    cube(pose, vc, cam, start, NODE_HALF, NODE_START);
-                    segmentRibbon(pose, vc, cam, start, p, 0.035, PREVIEW);
-                }
-            });
+            for (boolean ghost : new boolean[]{false, true}) {
+                col.submitCustomGeometry(ps, ghost ? WorldDraw.seeThrough() : RenderTypes.debugFilledBox(), (pose, vc) -> {
+                    Em e = new Em(pose, vc, cam, ghost);
+                    cube(e, p, NODE_HALF, start == null ? NODE_START : NODE_END);
+                    if (start != null) {
+                        cube(e, start, NODE_HALF, NODE_START);
+                        segmentRibbon(e, start, p, 0.035, PREVIEW);
+                    }
+                });
+            }
         }
+    }
+
+    /** The curve, nodes, and (selected) handles + end controls into one pass. */
+    private static void drawParts(Em e, LineShape l, boolean sel) {
+        drawCurve(e, l.samples(), 0.035, sel ? LINE_SELECTED : LINE);
+        List<LineCurve.Node> ns = l.curve.nodes;
+        for (int i = 0; i < ns.size(); i++) {
+            int c = i == 0 ? NODE_START : i == ns.size() - 1 ? NODE_END : NODE_MID;
+            boolean a = isAimed(l, Kind.NODE, i);
+            cube(e, ns.get(i).p, a ? NODE_HALF * 1.3 : NODE_HALF, a ? AIMED : c);
+        }
+        if (!sel) return;
+        for (int i = 0; i < ns.size(); i++) {
+            for (boolean in : new boolean[]{true, false}) {
+                if (!hasHandle(l, i, in)) continue;
+                Kind k = in ? Kind.HANDLE_IN : Kind.HANDLE_OUT;
+                Vec3 hp = handlePos(l, i, in);
+                boolean parked = handleParked(l, i, in);
+                if (!parked) segmentRibbon(e, ns.get(i).p, hp, 0.015, STALK);
+                sphere(e, hp, HANDLE_R, isAimed(l, k, i) ? AIMED : parked ? HANDLE_PARKED : HANDLE);
+            }
+        }
+        if (l.profile != LineProfile.NONE) {
+            cube(e, l.sizeNode(false), CTRL_HALF, isAimed(l, Kind.SIZE_START, 0) ? AIMED : SIZE);
+            cube(e, l.sizeNode(true), CTRL_HALF, isAimed(l, Kind.SIZE_END, 0) ? AIMED : SIZE);
+            cube(e, l.twistNode(false), CTRL_HALF, isAimed(l, Kind.TWIST_START, 0) ? AIMED : TWIST);
+            cube(e, l.twistNode(true), CTRL_HALF, isAimed(l, Kind.TWIST_END, 0) ? AIMED : TWIST);
+        }
+        cube(e, l.moveNode(), CTRL_HALF, isAimed(l, Kind.MOVE, 0) ? AIMED : MOVE);
     }
 
     private static boolean isAimed(LineShape l, Kind k, int i) {
@@ -563,7 +578,7 @@ public final class LineMarkers {
     }
 
     /** The selected cells as one batched submission: exposed faces + their convex edges. */
-    private static void drawTube(SubmitNodeCollector col, PoseStack ps, Vec3 cam, LineShape l, int edge) {
+    private static void drawTube(SubmitNodeCollector col, PoseStack ps, Vec3 cam, LineShape l, int edge, int ghost) {
         int n = l.renderSize();
         if (n == 0) return;
         var o = l.renderOrigin();
@@ -576,6 +591,14 @@ public final class LineMarkers {
                 float x = l.renderX(i), y = l.renderY(i), z = l.renderZ(i);
                 WorldDraw.emitCellFaces(pose, vc, x, y, z, TUBE_FILL, mask);
                 WorldDraw.emitCellEdges(pose, vc, x, y, z, edge, mask, false);
+            }
+        });
+        // Faint on-top edge cage: the tube's course stays visible through terrain.
+        col.submitCustomGeometry(ps, WorldDraw.seeThrough(), (pose, vc) -> {
+            for (int i = 0; i < n; i++) {
+                int mask = l.renderMask(i);
+                if (mask == 0) continue;
+                WorldDraw.emitCellEdges(pose, vc, l.renderX(i), l.renderY(i), l.renderZ(i), ghost, mask, true);
             }
         });
         ps.popPose();
@@ -607,8 +630,18 @@ public final class LineMarkers {
 
     // ---- geometry emitters (camera-relative, identity pose) ------------------------------------
 
-    private static void v(VertexConsumer vc, PoseStack.Pose pose, Vec3 cam, Vec3 p, int argb) {
-        vc.addVertex(pose, (float) (p.x - cam.x), (float) (p.y - cam.y), (float) (p.z - cam.z)).setColor(argb);
+    /**
+     * Where geometry goes: the depth-tested pass, or the on-top ghost pass. The ghost pass rides
+     * the see-through text pipeline, so its vertices carry the white-texel UV, every quad is
+     * emitted in both windings (that pipeline culls back faces), and alpha is scaled down.
+     */
+    private record Em(PoseStack.Pose pose, VertexConsumer vc, Vec3 cam, boolean ghost) {}
+
+    private static void v(Em e, Vec3 p, int argb) {
+        VertexConsumer x = e.vc().addVertex(e.pose(),
+                (float) (p.x - e.cam().x), (float) (p.y - e.cam().y), (float) (p.z - e.cam().z));
+        if (e.ghost()) x = x.setUv(0.5f, 0.5f);
+        x.setColor(argb);
     }
 
     private static void vt(VertexConsumer vc, PoseStack.Pose pose, Vec3 cam, Vec3 p, int argb) {
@@ -616,47 +649,56 @@ public final class LineMarkers {
                 .setUv(0.5f, 0.5f).setColor(argb);
     }
 
-    private static void quad(VertexConsumer vc, PoseStack.Pose pose, Vec3 cam, int argb, Vec3 a, Vec3 b, Vec3 c, Vec3 d) {
-        v(vc, pose, cam, a, argb);
-        v(vc, pose, cam, b, argb);
-        v(vc, pose, cam, c, argb);
-        v(vc, pose, cam, d, argb);
+    private static void quad(Em e, int argb, Vec3 a, Vec3 b, Vec3 c, Vec3 d) {
+        if (e.ghost()) {
+            int alpha = Math.round(((argb >>> 24) & 0xFF) * GHOST_ALPHA);
+            argb = (alpha << 24) | (argb & 0xFFFFFF);
+        }
+        v(e, a, argb);
+        v(e, b, argb);
+        v(e, c, argb);
+        v(e, d, argb);
+        if (e.ghost()) {
+            v(e, d, argb);
+            v(e, c, argb);
+            v(e, b, argb);
+            v(e, a, argb);
+        }
     }
 
-    private static void drawCurve(PoseStack.Pose pose, VertexConsumer vc, Vec3 cam,
-                                  List<LineCurve.Sample> ss, double w, int argb) {
-        for (int i = 0; i + 1 < ss.size(); i++) segmentRibbon(pose, vc, cam, ss.get(i).pos(), ss.get(i + 1).pos(), w, argb);
+    private static void drawCurve(Em e, List<LineCurve.Sample> ss, double w, int argb) {
+        for (int i = 0; i + 1 < ss.size(); i++) segmentRibbon(e, ss.get(i).pos(), ss.get(i + 1).pos(), w, argb);
     }
 
-    /** A thin crossed ribbon a→b (reads as a line from any angle; depth-tested). */
-    private static void segmentRibbon(PoseStack.Pose pose, VertexConsumer vc, Vec3 cam, Vec3 a, Vec3 b, double w, int argb) {
+    /** A thin crossed ribbon a→b (reads as a line from any angle). */
+    private static void segmentRibbon(Em e, Vec3 a, Vec3 b, double w, int argb) {
         Vec3 d = b.subtract(a);
         if (d.lengthSqr() < 1e-12) return;
         d = d.normalize();
         Vec3 e1 = d.cross(Math.abs(d.y) > 0.9 ? new Vec3(1, 0, 0) : new Vec3(0, 1, 0)).normalize().scale(w);
         Vec3 e2 = d.cross(e1).normalize().scale(w);
-        quad(vc, pose, cam, argb, a.subtract(e1), b.subtract(e1), b.add(e1), a.add(e1));
-        quad(vc, pose, cam, argb, a.subtract(e2), b.subtract(e2), b.add(e2), a.add(e2));
+        quad(e, argb, a.subtract(e1), b.subtract(e1), b.add(e1), a.add(e1));
+        quad(e, argb, a.subtract(e2), b.subtract(e2), b.add(e2), a.add(e2));
     }
 
-    private static void cube(PoseStack.Pose pose, VertexConsumer vc, Vec3 cam, Vec3 c, double h, int argb) {
+    private static void cube(Em e, Vec3 c, double h, int argb) {
         double x0 = c.x - h, x1 = c.x + h, y0 = c.y - h, y1 = c.y + h, z0 = c.z - h, z1 = c.z + h;
-        quad(vc, pose, cam, argb, new Vec3(x0, y0, z0), new Vec3(x1, y0, z0), new Vec3(x1, y0, z1), new Vec3(x0, y0, z1));
-        quad(vc, pose, cam, argb, new Vec3(x0, y1, z0), new Vec3(x0, y1, z1), new Vec3(x1, y1, z1), new Vec3(x1, y1, z0));
-        quad(vc, pose, cam, argb, new Vec3(x0, y0, z0), new Vec3(x0, y1, z0), new Vec3(x1, y1, z0), new Vec3(x1, y0, z0));
-        quad(vc, pose, cam, argb, new Vec3(x0, y0, z1), new Vec3(x1, y0, z1), new Vec3(x1, y1, z1), new Vec3(x0, y1, z1));
-        quad(vc, pose, cam, argb, new Vec3(x0, y0, z0), new Vec3(x0, y0, z1), new Vec3(x0, y1, z1), new Vec3(x0, y1, z0));
-        quad(vc, pose, cam, argb, new Vec3(x1, y0, z0), new Vec3(x1, y1, z0), new Vec3(x1, y1, z1), new Vec3(x1, y0, z1));
+        quad(e, argb, new Vec3(x0, y0, z0), new Vec3(x1, y0, z0), new Vec3(x1, y0, z1), new Vec3(x0, y0, z1));
+        quad(e, argb, new Vec3(x0, y1, z0), new Vec3(x0, y1, z1), new Vec3(x1, y1, z1), new Vec3(x1, y1, z0));
+        quad(e, argb, new Vec3(x0, y0, z0), new Vec3(x0, y1, z0), new Vec3(x1, y1, z0), new Vec3(x1, y0, z0));
+        quad(e, argb, new Vec3(x0, y0, z1), new Vec3(x1, y0, z1), new Vec3(x1, y1, z1), new Vec3(x0, y1, z1));
+        quad(e, argb, new Vec3(x0, y0, z0), new Vec3(x0, y0, z1), new Vec3(x0, y1, z1), new Vec3(x0, y1, z0));
+        quad(e, argb, new Vec3(x1, y0, z0), new Vec3(x1, y1, z0), new Vec3(x1, y1, z1), new Vec3(x1, y0, z1));
     }
 
     /** Low-poly UV sphere (8 slices × 6 stacks). */
-    private static void sphere(PoseStack.Pose pose, VertexConsumer vc, Vec3 cam, Vec3 c, double r, int argb) {
+    private static void sphere(Em e, Vec3 c, double r, int argb) {
         int slices = 8, stacks = 6;
         for (int i = 0; i < stacks; i++) {
             double p0 = Math.PI * i / stacks - Math.PI / 2, p1 = Math.PI * (i + 1) / stacks - Math.PI / 2;
             for (int j = 0; j < slices; j++) {
                 double a0 = 2 * Math.PI * j / slices, a1 = 2 * Math.PI * (j + 1) / slices;
-                quad(vc, pose, cam, argb,
+                quad(e, argb,
                         sp(c, r, p0, a0), sp(c, r, p0, a1), sp(c, r, p1, a1), sp(c, r, p1, a0));
             }
         }

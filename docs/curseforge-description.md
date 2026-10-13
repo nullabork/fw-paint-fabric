@@ -161,7 +161,8 @@ at sight range — far beyond block reach. Saved per world and dimension; **Clea
   its distance from you (scroll mid-drag to push it further or pull it nearer), double-click the line to add a node. Floating buttons above
   it sweep a **circle, square, triangle or star** along the curve — Shell or Solid — and each end
   gets a size node (taper it into a tentacle) and a twist node, plus a node to move the whole
-  thing. **3D Fill aimed into the tube fills it** in one go, gradients running start → end.
+  thing. Everything shows faintly through terrain and stays grabbable behind blocks. **3D Fill
+  aimed into the tube fills it** in one go, gradients running start → end.
 - **Middle-click removes whatever marker you're aiming at** — a shape, the box, or a plain
   block marker — in any mode, tool in hand.
 - Clicking a marked block toggles it off in any marker mode; **Ctrl** clears its connected plane.
