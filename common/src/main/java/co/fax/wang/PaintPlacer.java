@@ -826,7 +826,7 @@ public final class PaintPlacer {
         growCooldown = HOLD_DELAY; // a beat after the first shell, so a tap can stay one shell
         spaceConstrained = !MarkerManager.startMarkers.isEmpty()
                 || co.fax.wang.shape.ShapeMarkers.any();
-        startedInSpace = spaceConstrained && inSpace(seed);
+        startedInSpace = spaceConstrained && fillStartsInSpace(mc, center, seed);
         co.fax.wang.shape.LineShape line = co.fax.wang.shape.ShapeMarkers.lineContaining(seed);
         if (type == PaintType.GRADIENT && line != null) {
             List<BlockPos> tube = new ArrayList<>();
@@ -908,6 +908,21 @@ public final class PaintPlacer {
             int dist = Math.abs(cell.getX() - m.getX()) + Math.abs(cell.getY() - m.getY())
                     + Math.abs(cell.getZ() - m.getZ());
             if (dist <= maxDist) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Whether a 3D fill centred on {@code center} belongs inside marker space / a shape: its
+     * start cell is in space, or the centre touches an empty in-space cell. The second case
+     * catches a one-block gap at a jagged shape edge — the crosshair easily lands on the
+     * neighbouring block's outward face, but the user is filling the gap, not the outside.
+     */
+    private static boolean fillStartsInSpace(Minecraft mc, BlockPos center, BlockPos seed) {
+        if (inSpace(seed)) return true;
+        for (Direction d : Direction.values()) {
+            BlockPos n = center.relative(d);
+            if (Gradient.emptyCell(mc.level.getBlockState(n)) && inSpace(n)) return true;
         }
         return false;
     }
@@ -1191,8 +1206,12 @@ public final class PaintPlacer {
                     for (BlockPos base : bases) addFrontPreview(mc, base, d);
                 }
                 case FILL3D -> {
+                    // Same side rule as the fill itself: only faces the fill will grow through.
+                    boolean constrained = !MarkerManager.startMarkers.isEmpty()
+                            || co.fax.wang.shape.ShapeMarkers.any();
+                    boolean inside = constrained && fillStartsInSpace(mc, b, b.relative(d));
                     for (Direction dd : Direction.values()) {
-                        if (!wall(mc, b.relative(dd))) {
+                        if (!wall(mc, b.relative(dd)) && (!constrained || inSpace(b.relative(dd)) == inside)) {
                             previewPos.add(b);
                             previewDir.add(dd);
                         }

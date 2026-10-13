@@ -275,7 +275,9 @@ public final class HelpPanel {
                     + "anti-cheat flags that - blocks then wait until a neighbour is placed.",
                 "Markers never block painting - they only constrain it: columns stop at end "
                     + "markers (even ones floating in air), and 3D fills that start inside marker "
-                    + "space stay inside it.",
+                    + "space stay inside it. A 3D fill on a block touching an empty marked/shape "
+                    + "cell counts as inside - so a one-block gap at a jagged edge fills from any "
+                    + "face of its neighbour.",
                 "Inside a shape marker (ring, box, line tube), its inside wall counts as a "
                     + "block face once it's within reach: aim at it and every mode selects "
                     + "that face and its neighbours just like real blocks, growing back into "
