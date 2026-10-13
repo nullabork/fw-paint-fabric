@@ -162,9 +162,17 @@ at sight range — far beyond block reach. Saved per world and dimension; **Clea
   mirror handles or link both ends (both rebindable). Double-click the line to add a node. Floating buttons above
   both ends (with a **?** for the in-game guide) sweep a **circle, square, triangle or star** along the curve — Shell or Solid — and each end
   gets a size node (taper it into a tentacle — Ctrl sizes both ends together) and a twist node, plus a node to move the whole
-  thing. Everything shows faintly through terrain and stays grabbable behind blocks. **3D Fill
+  thing — right-click a size or twist node to reset that end. Everything shows faintly through terrain and stays grabbable behind blocks. **3D Fill
   inside the tube grows from the spot you aim at** (even mid-air) and stays inside it; a second button row picks the gradient direction —
   across from the side you aim in (default), along start → end, inside out, or outside in.
+  Lines are edited in Marker line mode only; elsewhere they just show and keep constraining paint.
+- **Shape walls count as block faces** — inside a ring, box or tube, the wall within reach
+  selects like a real block face in every paint mode, so you can paint a shape's skin from the
+  inside with no scaffolding.
+
+![A marker line bent into a square tube, with its handles, control nodes and floating buttons](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/marker-line-square-tube-controls-v2.4.0.jpg)
+
+![The same tube filled with a rainbow gradient](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/marker-line-tube-gradient-fill-v2.4.0.jpg)
 - **Middle-click removes whatever marker you're aiming at** — a shape, the box, or a plain
   block marker — in any mode, tool in hand.
 - Clicking a marked block toggles it off in any marker mode; **Ctrl** clears its connected plane.
