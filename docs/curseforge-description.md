@@ -57,11 +57,13 @@ Keys are rebindable under Options → Controls → Key Binds → **FW Paint**.
 Hover a wedge to fan out its options; click only to choose. **Paint** fans the paint types
 (Solid / Gradient / Pattern / Noise); **Place** fans **Blocks** (Single / Face any / Face target / Face perp /
 3D Fill), **Markers** (Marker / Marker draw), and **Shape markers** (Marker box / circle /
-square / line) onto a third ring; **Palette** follows the paint type (palettes, patterns, or — with
+square / line) onto a third ring, plus **Settings** with quick toggles (**Don't match
+palette**); **Palette** follows the paint type (palettes, patterns, or — with
 Solid paint — the match modes, with **Select block** fanning your inventory's blocks in colour
 order). The wedge directly holding the current selection shows a blue tint; segments size
 themselves to their content (block icons pack tight), and anything that still doesn't fit
-scrolls as a carousel (arrows or mouse wheel). Set several things in one hold, then release —
+scrolls as a carousel (arrows or mouse wheel). Hover anything for a one-line description
+along the bottom of the screen. Set several things in one hold, then release —
 or click a tab on the bar along the top to jump straight into that settings page (it stays
 open when you let go of G).
 
@@ -131,6 +133,10 @@ the next click grows from, and rides the advancing fronts while you hold.
   Contained by walls, end markers, and start-marker space.
 - Everywhere: an **end marker stops a column or fill even floating in air**, and a finished column
   never resumes past it.
+- **Don't match palette** (wheel → Place → Settings, off after a restart): Face any / target /
+  perp won't spread onto blocks of your palette, pattern or Solid block — lay a layer, click
+  beside it, and the selection stops at the layer.
+- Plants you could place into (hanging roots, grass, vines) count as solid and are left alone.
 
 ## Markers
 

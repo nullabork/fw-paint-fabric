@@ -52,6 +52,9 @@ public final class HudOverlay {
             g.text(font, line, x, lineY, SOURCE_COLOR);
             lineY += font.lineHeight + 1;
         }
+        if (Gradient.dontMatchPalette && mode.places()) {
+            g.text(font, "Don't match palette", x, lineY, YELLOW);
+        }
     }
 
     /**

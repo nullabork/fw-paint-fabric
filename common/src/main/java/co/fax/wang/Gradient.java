@@ -105,12 +105,16 @@ public final class Gradient {
     }
 
     /**
-     * True when a cell counts as empty space for painting: air, or anything vanilla hand
-     * placement would replace — fluids (water, lava), tall grass, snow layers. Waterlogged
-     * solids are NOT empty. Columns grow through it, fills flood it, scans see past it.
+     * True when a cell counts as empty space for painting: air or a fluid (water, lava, bubble
+     * column). Replaceable plants — hanging roots, grass, vines, snow layers — are NOT empty:
+     * painting keeps them and works around them. Waterlogged solids are NOT empty. Columns grow
+     * through it, fills flood it, scans see past it.
      */
     public static boolean emptyCell(net.minecraft.world.level.block.state.BlockState state) {
-        return state.isAir() || state.canBeReplaced();
+        if (state.isAir()) return true;
+        var block = state.getBlock();
+        return state.canBeReplaced() && (block instanceof net.minecraft.world.level.block.LiquidBlock
+                || block instanceof net.minecraft.world.level.block.BubbleColumnBlock);
     }
 
     /** True when the configured paint tool item is in the player's main hand. */
@@ -130,6 +134,18 @@ public final class Gradient {
     }
 
     /** Set the placement mode (wheel selection), persist it, and flash an action-bar message. */
+    /**
+     * Don't match palette: face selection skips blocks of the active palette / Solid block /
+     * pattern, so a re-click doesn't spread over the layer just placed. Session-only on
+     * purpose — a forgotten persisted toggle would look like a bug.
+     */
+    public static boolean dontMatchPalette = false;
+
+    public static void toggleDontMatchPalette() {
+        dontMatchPalette = !dontMatchPalette;
+        overlay(Minecraft.getInstance(), "FW Paint — Don't match palette: " + (dontMatchPalette ? "on" : "off"));
+    }
+
     public static void setPlacementMode(PlacementMode mode) {
         GradientConfig cfg = ConfigManager.get();
         cfg.placementMode = mode;
