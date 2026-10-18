@@ -5,6 +5,14 @@ on:
     branches: [ "**" ]
     tags: [ "v*" ]
   pull_request:
+  # Manual re-run of the CurseForge upload for the version on the chosen branch (e.g. a release
+  # whose upload failed). Builds, then uploads; no tag or GitHub release is made.
+  workflow_dispatch:
+    inputs:
+      curseforge:
+        description: Upload this branch's mod_version jars to CurseForge
+        type: boolean
+        default: true
 
 permissions:
   contents: write # needed to create releases when a v* tag is pushed
@@ -15,6 +23,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags + history: the CurseForge step diffs the description per release
 
       - name: Set up JDK 25
         uses: actions/setup-java@v4
@@ -106,3 +116,22 @@ jobs:
             neoforge/build/libs/fw-paint-neoforge-*.jar
           generate_release_notes: true
           body_path: RELEASE_BODY.md
+
+      # CurseForge: both jars, with the release notes as the changelog. Runs for every new release
+      # (or a manual dispatch). The Upload API can't edit the project description or gallery, so
+      # when docs/curseforge-description.md changed since the last release the job summary says so.
+      - name: Upload to CurseForge
+        if: steps.reltag.outputs.tag != '' || (github.event_name == 'workflow_dispatch' && inputs.curseforge)
+        env:
+          CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
+        run: |
+          TAG="${{ steps.reltag.outputs.tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="v$(grep -E '^mod_version=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')"
+          fi
+          bash .github/ci/curseforge-upload.sh "$TAG"
+          echo "### CurseForge: uploaded $TAG (Fabric + NeoForge)" >> "$GITHUB_STEP_SUMMARY"
+          PREV=$(git tag --list 'v*' --sort=-v:refname | grep -vx "$TAG" | head -n1)
+          if [ -n "$PREV" ] && ! git diff --quiet "$PREV" HEAD -- docs/curseforge-description.md docs/images; then
+            echo "**The CurseForge description changed since $PREV** - paste docs/curseforge-description.md into the project page (manual: no API for it)." >> "$GITHUB_STEP_SUMMARY"
+          fi
