@@ -1339,8 +1339,9 @@ public final class PaintPlacer {
     private static BlockPos findSupport(Minecraft mc, BlockPos cell) {
         for (Direction d : Direction.values()) {
             BlockPos n = cell.relative(d);
-            // A fluid/replaceable neighbour can't be clicked against — only real blocks support.
-            if (!Gradient.emptyCell(mc.level.getBlockState(n))) return n;
+            // A fluid/replaceable neighbour can't be clicked against — the server would place
+            // INTO a replaceable plant (hanging roots, grass) instead of next to it.
+            if (!mc.level.getBlockState(n).canBeReplaced()) return n;
         }
         return null;
     }

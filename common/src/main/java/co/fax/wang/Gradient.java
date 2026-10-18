@@ -105,12 +105,16 @@ public final class Gradient {
     }
 
     /**
-     * True when a cell counts as empty space for painting: air, or anything vanilla hand
-     * placement would replace — fluids (water, lava), tall grass, snow layers. Waterlogged
-     * solids are NOT empty. Columns grow through it, fills flood it, scans see past it.
+     * True when a cell counts as empty space for painting: air or a fluid (water, lava, bubble
+     * column). Replaceable plants — hanging roots, grass, vines, snow layers — are NOT empty:
+     * painting keeps them and works around them. Waterlogged solids are NOT empty. Columns grow
+     * through it, fills flood it, scans see past it.
      */
     public static boolean emptyCell(net.minecraft.world.level.block.state.BlockState state) {
-        return state.isAir() || state.canBeReplaced();
+        if (state.isAir()) return true;
+        var block = state.getBlock();
+        return state.canBeReplaced() && (block instanceof net.minecraft.world.level.block.LiquidBlock
+                || block instanceof net.minecraft.world.level.block.BubbleColumnBlock);
     }
 
     /** True when the configured paint tool item is in the player's main hand. */
