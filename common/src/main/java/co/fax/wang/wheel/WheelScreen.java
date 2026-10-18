@@ -104,31 +104,72 @@ public class WheelScreen extends Screen {
                 PaintType.SOLID, PaintType.GRADIENT, PaintType.PATTERN, PaintType.NOISE }) {
             paints.add(WheelItem.leaf(t.label(), WHITE,
                     () -> ConfigManager.get().activePaintType == t,
-                    () -> Gradient.setPaintType(t)));
+                    () -> Gradient.setPaintType(t)).describe(paintDescription(t)));
         }
         WheelItem blocks = WheelItem.category("Blocks",
                 modeLeaf(PlacementMode.SINGLE), modeLeaf(PlacementMode.FACE),
                 modeLeaf(PlacementMode.FACE_TARGET),
-                modeLeaf(PlacementMode.FACE_PERP), modeLeaf(PlacementMode.FILL3D));
+                modeLeaf(PlacementMode.FACE_PERP), modeLeaf(PlacementMode.FILL3D))
+                .describe("Modes that place blocks.");
         WheelItem markers = WheelItem.category("Markers",
-                modeLeaf(PlacementMode.MARKER), modeLeaf(PlacementMode.MARKER_DRAW));
+                modeLeaf(PlacementMode.MARKER), modeLeaf(PlacementMode.MARKER_DRAW))
+                .describe("Start and end blocks that aim and bound painting.");
         WheelItem shapes = WheelItem.category("Shape markers",
                 modeLeaf(PlacementMode.MARKER_BOX), modeLeaf(PlacementMode.MARKER_CIRCLE),
-                modeLeaf(PlacementMode.MARKER_SQUARE), modeLeaf(PlacementMode.MARKER_LINE));
+                modeLeaf(PlacementMode.MARKER_SQUARE), modeLeaf(PlacementMode.MARKER_LINE))
+                .describe("Boxes, rings and lines that shape what gets painted.");
+        // A session-only toggle (resets on restart), not a mode: lit while on.
+        WheelItem noMatch = WheelItem.leaf("Don't match palette", WHITE,
+                () -> Gradient.dontMatchPalette, Gradient::toggleDontMatchPalette)
+                .describe("Toggle. Face selection skips blocks already in your palette, pattern "
+                        + "or Solid block, so it won't spread over a layer you just placed. "
+                        + "Off again after a restart.");
+        WheelItem settings = WheelItem.category("Settings", noMatch)
+                .describe("Quick placement toggles.");
         return List.of(
-                WheelItem.category("Paint", paints.toArray(WheelItem[]::new)),
-                WheelItem.category("Place", blocks, markers, shapes),
+                WheelItem.category("Paint", paints.toArray(WheelItem[]::new))
+                        .describe("What gets placed."),
+                WheelItem.category("Place", blocks, markers, shapes, settings)
+                        .describe("Where blocks go."),
                 // Children here are only the open-time snapshot (they make it a category and
                 // feed the layout); every expansion rebuilds them for the paint type of the
                 // moment — see updateExpansion.
                 WheelItem.category("Palette",
-                        paletteChildren(mc, ConfigManager.get().activePaintType).toArray(WheelItem[]::new)));
+                        paletteChildren(mc, ConfigManager.get().activePaintType).toArray(WheelItem[]::new))
+                        .describe("Which palette, pattern or block to paint with."));
     }
 
     private static WheelItem modeLeaf(PlacementMode m) {
         return WheelItem.leaf(m.shortName(), m.color(),
                 () -> ConfigManager.get().placementMode == m,
-                () -> Gradient.setPlacementMode(m));
+                () -> Gradient.setPlacementMode(m)).describe(modeDescription(m));
+    }
+
+    private static String paintDescription(PaintType t) {
+        return switch (t) {
+            case SOLID -> "One block type everywhere.";
+            case GRADIENT -> "Blends the palette's blocks from start to end.";
+            case PATTERN -> "Repeats a hand-drawn grid of blocks.";
+            case NOISE -> "Scatters the palette's blocks in natural patches.";
+            default -> null;
+        };
+    }
+
+    private static String modeDescription(PlacementMode m) {
+        return switch (m) {
+            case SINGLE -> "One column out of the face you click.";
+            case FACE -> "The whole connected surface grows at once.";
+            case FACE_TARGET -> "Like Face any, but only the block type you click.";
+            case FACE_PERP -> "A one-block-wide run across the face, along your view.";
+            case FILL3D -> "A blob growing out around the clicked block.";
+            case MARKER -> "Click blocks to mark starts (turquoise) and ends (amber).";
+            case MARKER_DRAW -> "A freehand marker pencil.";
+            case MARKER_BOX -> "Two clicks mark a whole box region.";
+            case MARKER_CIRCLE -> "A round donut region with a wall thickness.";
+            case MARKER_SQUARE -> "A square donut region with a wall thickness.";
+            case MARKER_LINE -> "A curve you bend; give it a shape to make a tube.";
+            default -> null;
+        };
     }
 
     /**
@@ -140,11 +181,15 @@ public class WheelScreen extends Screen {
             List<WheelItem> blocks = solidBlockItems(mc);
             WheelItem select = blocks.isEmpty()
                     ? WheelItem.leaf("No blocks in inventory", GREY, null, () -> {})
-                    : WheelItem.category("Select block", blocks.toArray(WheelItem[]::new));
+                    : WheelItem.category("Select block", blocks.toArray(WheelItem[]::new))
+                            .describe("Pick the block to place from your inventory.");
             return List.of(select,
-                    matchLeaf(SolidMatch.EXACT, "Exact block"),
-                    matchLeaf(SolidMatch.CLOSEST_COLOR, "Closest colour"),
-                    matchLeaf(SolidMatch.CLOSEST_BRIGHTNESS, "Closest brightness"));
+                    matchLeaf(SolidMatch.EXACT, "Exact block")
+                            .describe("Copies exactly the block you click."),
+                    matchLeaf(SolidMatch.CLOSEST_COLOR, "Closest colour")
+                            .describe("Your block closest in colour to the one you click."),
+                    matchLeaf(SolidMatch.CLOSEST_BRIGHTNESS, "Closest brightness")
+                            .describe("Your block closest in brightness to the one you click."));
         }
         PaletteKind kind = Gradient.kindFor(type);
         List<Palette> list = PaletteStore.allOf(kind);
@@ -283,6 +328,7 @@ public class WheelScreen extends Screen {
             centerW = Math.max(centerW, font.width(child.label()));
         }
         for (WheelItem group : root.get(1).children()) {
+            if (group.label().equals("Settings")) continue; // toggles, never shown in the hole
             for (WheelItem mode : group.children()) {
                 centerW = Math.max(centerW, font.width(mode.label()));
             }
@@ -511,6 +557,41 @@ public class WheelScreen extends Screen {
                     + Math.min(carousel.offset() + carousel.visibleItems(), carousel.items.size())
                     + " of " + carousel.items.size();
             g.centeredText(this.font, pos, cx, belowY, GREY);
+        }
+        paintDescription(g, hover);
+    }
+
+    /** The hovered item's description, word-wrapped along the bottom of the screen. */
+    private void paintDescription(GuiGraphicsExtractor g, Hit hover) {
+        if (hover == null) return;
+        WheelItem item;
+        if (hover.ring() == 0) {
+            item = root.get(hover.index());
+        } else {
+            ExpandedRing ring = hover.ring() == 1 ? expanded1 : expanded2;
+            item = ring == null ? null : ring.itemAt(hover.index());
+        }
+        if (item == null || item.description() == null) return;
+        int maxW = Math.min(this.width - 32, 360);
+        List<String> lines = new ArrayList<>();
+        String line = "";
+        for (String word : item.description().split(" ")) {
+            String next = line.isEmpty() ? word : line + " " + word;
+            if (!line.isEmpty() && this.font.width(next) > maxW) {
+                lines.add(line);
+                line = word;
+            } else {
+                line = next;
+            }
+        }
+        if (!line.isEmpty()) lines.add(line);
+        int lh = this.font.lineHeight + 2;
+        int y = this.height - 8 - lines.size() * lh;
+        g.fill(this.width / 2 - maxW / 2 - 6, y - 4, this.width / 2 + maxW / 2 + 6,
+                this.height - 4, 0xA0000000);
+        for (String l : lines) {
+            g.centeredText(this.font, l, this.width / 2, y, WHITE);
+            y += lh;
         }
     }
 

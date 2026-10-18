@@ -13,9 +13,21 @@ import java.util.function.BooleanSupplier;
  * the slot); it reads config on every call so the highlight follows clicks instantly.
  * {@code missing} marks a selection whose backing thing is gone (e.g. the Solid block no longer
  * in the inventory): the slot stays selected but renders red with a cross.
+ * {@code description} is the one-liner shown along the bottom of the screen while hovered.
  */
 public record WheelItem(String label, int labelColor, ItemStack icon, BooleanSupplier selected,
-                        Runnable action, boolean missing, List<WheelItem> children) {
+                        Runnable action, boolean missing, List<WheelItem> children,
+                        String description) {
+
+    public WheelItem(String label, int labelColor, ItemStack icon, BooleanSupplier selected,
+                     Runnable action, boolean missing, List<WheelItem> children) {
+        this(label, labelColor, icon, selected, action, missing, children, null);
+    }
+
+    /** This item with a hover description. */
+    public WheelItem describe(String text) {
+        return new WheelItem(label, labelColor, icon, selected, action, missing, children, text);
+    }
 
     /** A selectable leaf: clicking runs {@code action}; {@code selected} drives the highlight. */
     public static WheelItem leaf(String label, int labelColor, BooleanSupplier selected, Runnable action) {

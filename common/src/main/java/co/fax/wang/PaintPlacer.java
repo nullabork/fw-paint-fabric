@@ -538,11 +538,7 @@ public final class PaintPlacer {
                 bases = perpRun(mc, seed, dir, p -> MarkerManager.startMarkers.contains(p));
                 markerDriven = true;
             } else {
-                boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(clicked.relative(dir));
-                bases = perpRun(mc, clicked, dir, p -> wall(mc, p) && !wall(mc, p.relative(dir))
-                        && !MarkerManager.endMarkers.contains(p.relative(dir))
-                        && (!regionOnly || co.fax.wang.shape.ShapeMarkers.contains(p.relative(dir)))
-                        && !outOfReach(mc, p.relative(dir)));
+                bases = perpRun(mc, clicked, dir, perpBase(mc, clicked, dir));
             }
         } else {
             bases = List.of(clicked);
@@ -675,6 +671,52 @@ public final class PaintPlacer {
      * increment (45° gives stair-stepped diagonal runs). Extends both ways from the seed while
      * {@code valid} accepts each step; the seed itself must pass too.
      */
+    /** Which blocks a free (unmarked) Face perp run may grow out of, from {@code clicked}. */
+    private static java.util.function.Predicate<BlockPos> perpBase(Minecraft mc, BlockPos clicked, Direction dir) {
+        boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(clicked.relative(dir));
+        Set<Block> skip = paintBlocksToSkip(mc);
+        return p -> wall(mc, p) && !wall(mc, p.relative(dir))
+                && !MarkerManager.endMarkers.contains(p.relative(dir))
+                && (!regionOnly || co.fax.wang.shape.ShapeMarkers.contains(p.relative(dir)))
+                && !outOfReach(mc, p.relative(dir))
+                && (p.equals(clicked) || !skip.contains(mc.level.getBlockState(p).getBlock()));
+    }
+
+    /**
+     * Don't match palette: the blocks face selection must not spread over — the active
+     * palette's / pattern's defined blocks, or the Solid block. Empty when the toggle is off.
+     * Automatic palette segments (blocks picked at paint time) can't be known, so don't count.
+     */
+    private static Set<Block> paintBlocksToSkip(Minecraft mc) {
+        Set<Block> out = new HashSet<>();
+        if (!Gradient.dontMatchPalette) return out;
+        GradientConfig c = ConfigManager.get();
+        List<String> ids = new ArrayList<>();
+        switch (c.activePaintType) {
+            case SOLID -> {
+                if (c.solidMatch == SolidMatch.SELECTED) ids.add(c.solidBlock);
+            }
+            case PATTERN -> {
+                co.fax.wang.palette.Palette pat = co.fax.wang.palette.PaletteStore.activePattern();
+                if (pat != null) ids.addAll(pat.cells);
+            }
+            default -> {
+                co.fax.wang.palette.Palette pal = co.fax.wang.palette.PaletteStore.active();
+                if (pal != null) {
+                    for (co.fax.wang.palette.PaletteSegment seg : pal.segments) {
+                        if (!seg.isAutomatic()) ids.add(seg.block);
+                    }
+                }
+            }
+        }
+        for (String id : ids) {
+            if (id == null || id.isEmpty()) continue;
+            Block b = Gradient.blockOfItemId(id);
+            if (b != null) out.add(b);
+        }
+        return out;
+    }
+
     private static List<BlockPos> perpRun(Minecraft mc, BlockPos seed, Direction dir,
                                           java.util.function.Predicate<BlockPos> valid) {
         int[] step = perpStep(mc, dir);
@@ -741,6 +783,7 @@ public final class PaintPlacer {
         // selects exactly the ring's faces, so the cylinder wall paints as one.
         boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(clicked.relative(dir));
         Block target = mc.level.getBlockState(clicked).getBlock();
+        Set<Block> skip = paintBlocksToSkip(mc); // Don't match palette (the clicked one still counts)
         bfs.add(clicked);
         seen.add(clicked);
         while (!bfs.isEmpty() && out.size() < MAX_FACES) {
@@ -754,6 +797,7 @@ public final class PaintPlacer {
                     var ns = mc.level.getBlockState(n);
                     if (!wall(mc, n)) continue; // needs a block (or a shape's outside) to grow from
                     if (sameType && ns.getBlock() != target) continue; // Face target: like blocks only
+                    if (skip.contains(ns.getBlock())) continue; // already painted
                     BlockPos front = n.relative(dir);
                     if (wall(mc, front)) continue; // face not exposed on this plane
                     if (MarkerManager.endMarkers.contains(front)) continue;   // marker right on the face
@@ -1196,13 +1240,9 @@ public final class PaintPlacer {
                 }
                 case FACE_PERP -> {
                     BlockPos seed = findMarkerBehind(b, d);
-                    boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(b.relative(d));
                     List<BlockPos> bases = (seed != null)
                             ? perpRun(mc, seed, d, p -> MarkerManager.startMarkers.contains(p))
-                            : perpRun(mc, b, d, p -> wall(mc, p) && !wall(mc, p.relative(d))
-                                    && !MarkerManager.endMarkers.contains(p.relative(d))
-                                    && (!regionOnly || co.fax.wang.shape.ShapeMarkers.contains(p.relative(d)))
-                                    && !outOfReach(mc, p.relative(d)));
+                            : perpRun(mc, b, d, perpBase(mc, b, d));
                     for (BlockPos base : bases) addFrontPreview(mc, base, d);
                 }
                 case FILL3D -> {

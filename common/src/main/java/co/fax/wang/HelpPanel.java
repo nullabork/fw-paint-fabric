@@ -235,7 +235,9 @@ public final class HelpPanel {
                 + "fan out its options (clicks are only for choosing): Paint picks what the "
                 + "tool paints (Solid, Gradient, Pattern, Noise); Place fans out Blocks "
                 + "(Single, Face any, Face target, Face perp, 3D Fill), Markers (Marker, Marker draw), and "
-                + "Shape markers (Marker box, circle, square, line) on a third ring. The Palette "
+                + "Shape markers (Marker box, circle, square, line) on a third ring, plus "
+                + "Settings with quick toggles (Don't match palette). Hovering anything shows "
+                + "a one-line description along the bottom of the screen. The Palette "
                 + "wedge follows the paint type: your gradient palettes (or patterns under "
                 + "Pattern paint), or - with Solid paint - the match modes, where hovering "
                 + "Select block fans your inventory's blocks (colour-sorted compact icons) "
@@ -273,6 +275,9 @@ public final class HelpPanel {
                     + "scaffolding. Aim at open sky and a green cell shows at the edge of your "
                     + "reach: click to put one block there. Turn it off on servers whose "
                     + "anti-cheat flags that - blocks then wait until a neighbour is placed.",
+                "Plants that vanilla lets you place into - hanging roots, grass, vines, "
+                    + "snow layers - count as solid: painting keeps them and works around "
+                    + "them. Only air, water and lava count as empty.",
                 "Markers never block painting - they only constrain it: columns stop at end "
                     + "markers (even ones floating in air), and 3D fills that start inside marker "
                     + "space stay inside it. A 3D fill on a block touching an empty marked/shape "
@@ -320,6 +325,17 @@ public final class HelpPanel {
                     + "selected - never the whole marker plane.",
                 "Works with every paint type - solid lines, gradient runs, noise streaks, or "
                     + "pattern strips.")),
+            t("Don't match palette", "Stop face selection spreading over what you just painted.", List.of(
+                "A toggle on the wheel: Place > Settings > Don't match palette. While it's on "
+                    + "(lit on the wheel, yellow line on the HUD), Face any, Face target and "
+                    + "Face perp don't spread onto blocks of your current selection - the "
+                    + "palette's blocks (Gradient, Noise), the pattern's blocks (Pattern) or "
+                    + "the selected Solid block. Lay one layer, click beside it, and the "
+                    + "selection stops at the layer instead of growing over it.",
+                "The block you click still counts. Automatic palette steps and the Solid "
+                    + "match modes (Exact, Closest) pick blocks at paint time, so they can't "
+                    + "be skipped. The toggle isn't saved: it's off again after a restart, so "
+                    + "it can't be forgotten on.")),
             t("3D Fill", "A blob of blocks growing around the clicked block.", List.of(
                 "The block you click is the centre: tap right-click to wrap its open sides in the "
                     + "first shell, hold to grow the fill layer by layer. "

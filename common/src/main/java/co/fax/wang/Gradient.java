@@ -134,6 +134,18 @@ public final class Gradient {
     }
 
     /** Set the placement mode (wheel selection), persist it, and flash an action-bar message. */
+    /**
+     * Don't match palette: face selection skips blocks of the active palette / Solid block /
+     * pattern, so a re-click doesn't spread over the layer just placed. Session-only on
+     * purpose — a forgotten persisted toggle would look like a bug.
+     */
+    public static boolean dontMatchPalette = false;
+
+    public static void toggleDontMatchPalette() {
+        dontMatchPalette = !dontMatchPalette;
+        overlay(Minecraft.getInstance(), "FW Paint — Don't match palette: " + (dontMatchPalette ? "on" : "off"));
+    }
+
     public static void setPlacementMode(PlacementMode mode) {
         GradientConfig cfg = ConfigManager.get();
         cfg.placementMode = mode;
