@@ -115,8 +115,8 @@ public class WheelScreen extends Screen {
                 modeLeaf(PlacementMode.MARKER), modeLeaf(PlacementMode.MARKER_DRAW))
                 .describe("Start and end blocks that aim and bound painting.");
         WheelItem shapes = WheelItem.category("Shape markers",
-                modeLeaf(PlacementMode.MARKER_BOX), modeLeaf(PlacementMode.MARKER_CIRCLE),
-                modeLeaf(PlacementMode.MARKER_SQUARE), modeLeaf(PlacementMode.MARKER_LINE))
+                modeLeaf(PlacementMode.MARKER_BOX), modeLeaf(PlacementMode.MARKER_RING),
+                modeLeaf(PlacementMode.MARKER_LINE))
                 .describe("Boxes, rings and lines that shape what gets painted.");
         // A session-only toggle (resets on restart), not a mode: lit while on.
         WheelItem noMatch = WheelItem.leaf("Don't match palette", WHITE,
@@ -165,8 +165,7 @@ public class WheelScreen extends Screen {
             case MARKER -> "Click blocks to mark starts (turquoise) and ends (amber).";
             case MARKER_DRAW -> "A freehand marker pencil.";
             case MARKER_BOX -> "Two clicks mark a whole box region.";
-            case MARKER_CIRCLE -> "A round donut region with a wall thickness.";
-            case MARKER_SQUARE -> "A square donut region with a wall thickness.";
+            case MARKER_RING -> "A round or square donut region with a wall thickness.";
             case MARKER_LINE -> "A curve you bend; give it a shape to make a tube.";
             default -> null;
         };

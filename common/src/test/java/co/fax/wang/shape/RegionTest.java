@@ -114,4 +114,28 @@ class RegionTest {
         // ...and the rotated corner (on the diagonal at ~rMax·√2 along X) is inside.
         assertTrue(s.contains(new BlockPos(7, 0, 0)));
     }
+
+    @Test
+    void flippedRingRunsFromTheFarLayerBack() {
+        RingShape s = ring(3, 5, 4); // layers 0..3
+        s.flip = true;
+        RingShape.Segment seg = s.segmentFor(new BlockPos(4, 1, 0));
+        assertEquals(new BlockPos(4, 3, 0), seg.start());
+        assertEquals(new BlockPos(4, 0, 0), seg.end());
+        assertEquals(2, seg.index());
+        assertEquals(3, seg.length());
+        assertEquals(0, s.segmentFor(new BlockPos(4, 3, 0)).index());
+    }
+
+    @Test
+    void switchingToCircleKeepsRadiiAndDropsRotation() {
+        RingShape s = new RingShape(RingShape.Kind.SQUARE, BlockPos.ZERO, Direction.Axis.Y,
+                new BlockPos(3, 0, 0), new BlockPos(5, 0, 0));
+        s.theta = 0.3;
+        s.setKind(RingShape.Kind.CIRCLE);
+        assertEquals(RingShape.Kind.CIRCLE, s.kind);
+        assertEquals(0, s.theta);
+        assertEquals(3, s.rMin());
+        assertEquals(5, s.rMax());
+    }
 }

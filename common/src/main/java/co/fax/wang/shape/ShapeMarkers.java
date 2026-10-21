@@ -256,7 +256,7 @@ public final class ShapeMarkers {
     }
 
     private static boolean ringMode(PlacementMode pm) {
-        return pm == PlacementMode.MARKER_CIRCLE || pm == PlacementMode.MARKER_SQUARE;
+        return pm == PlacementMode.MARKER_RING;
     }
 
     // ---- client tick ------------------------------------------------------------------------
@@ -421,8 +421,7 @@ public final class ShapeMarkers {
 
     /** The three creation clicks: center (plane from the clicked face), radius A, radius B. */
     private static void creationClick(Minecraft mc, PlacementMode pm) {
-        RingShape.Kind kind = pm == PlacementMode.MARKER_SQUARE
-                ? RingShape.Kind.SQUARE : RingShape.Kind.CIRCLE;
+        RingShape.Kind kind = RingShape.Kind.CIRCLE; // new rings start round; the toolbar switches
         if (pendingCenter == null) {
             BlockHitResult hit = Raycast.aimedBlock(mc);
             if (hit == null) return;
@@ -712,8 +711,7 @@ public final class ShapeMarkers {
 
         // Live preview: one-wide ring at the hovered radius, or the band vs radius A.
         if (onPlane == null) return;
-        RingShape.Kind kind = pm == PlacementMode.MARKER_SQUARE
-                ? RingShape.Kind.SQUARE : RingShape.Kind.CIRCLE;
+        RingShape.Kind kind = RingShape.Kind.CIRCLE; // new rings start round; the toolbar switches
         RingShape preview = new RingShape(kind, pendingCenter, pendingNormal,
                 pendingCtrlA != null ? pendingCtrlA : onPlane, onPlane);
         drawRing(col, ps, cam, preview, 0, 0, RING_PREVIEW, 0, true);

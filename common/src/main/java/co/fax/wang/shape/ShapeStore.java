@@ -41,6 +41,7 @@ public final class ShapeStore {
         int rB;
         int height;
         double theta;
+        boolean flip; // absent in older saves → false
     }
 
     private static final class StoredBox {
@@ -125,7 +126,7 @@ public final class ShapeStore {
                     shapes.add(RingShape.restore(
                             RingShape.Kind.valueOf(s.kind),
                             pos(s.center), Direction.Axis.valueOf(s.axis),
-                            pos(s.ctrlA), pos(s.ctrlB), s.rA, s.rB, s.height, s.theta));
+                            pos(s.ctrlA), pos(s.ctrlB), s.rA, s.rB, s.height, s.theta, s.flip));
                 } catch (Exception e) {
                     LOG.warn("Skipping malformed stored shape in {}: {}", key, e.toString());
                 }
@@ -161,6 +162,7 @@ public final class ShapeStore {
                 s.rB = shape.rB;
                 s.height = shape.height;
                 s.theta = shape.theta;
+                s.flip = shape.flip;
                 stored.shapes.add(s);
             }
             stored.lines = new ArrayList<>(lines.size());

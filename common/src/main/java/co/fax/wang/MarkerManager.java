@@ -136,7 +136,7 @@ public final class MarkerManager {
         switch (pm) {
             case MARKER -> tickDrag(mc);
             case MARKER_DRAW -> tickFreehand(mc);
-            default -> { } // MARKER_BOX / MARKER_CIRCLE / MARKER_SQUARE live in ShapeMarkers
+            default -> { } // MARKER_BOX / MARKER_RING / MARKER_LINE live in ShapeMarkers
         }
     }
 
