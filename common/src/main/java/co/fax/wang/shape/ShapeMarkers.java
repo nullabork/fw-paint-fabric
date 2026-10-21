@@ -249,6 +249,9 @@ public final class ShapeMarkers {
     private static void syncWorld(Minecraft mc) {
         String key = worldKey(mc);
         if (!java.util.Objects.equals(key, currentKey)) {
+            // Flush a pending scroll / drag edit into the world being left.
+            if (dragShape != null || scrollGrace > 0 || saveDelay > 0) saveCurrent();
+            saveDelay = 0;
             currentKey = key;
             BoxMarkers.box = ShapeStore.loadInto(key, shapes, LineMarkers.lines); // null key (main menu) clears
             BoxMarkers.reset();
@@ -342,6 +345,9 @@ public final class ShapeMarkers {
         lastPick = pick;
 
         if (!handles) {
+            // Tool put away mid-edit: keep what the drag / scroll did.
+            if (dragShape != null || scrollGrace > 0 || saveDelay > 0) saveCurrent();
+            saveDelay = 0;
             dragShape = null;
             aimedShape = null;
             lookedShape = null;
@@ -445,14 +451,14 @@ public final class ShapeMarkers {
         if (pickEdge && !barHover) {
             boolean connected = Gradient.modifierDown();
             RingShape ring = who == Who.RING ? aimedShape : who == Who.NONE ? lookedShape : null;
-            if (ring != null) {
+            if (who == Who.GROUP) {
+                GroupMarkers.deleteGroup(GroupMarkers.cogAimed());
+            } else if (who == Who.NONE && GroupMarkers.deleteAt(mc, connected)) {
+                // a block marker (or its group) under the crosshair — smaller than a region around it
+            } else if (ring != null) {
                 removeRing(ring);
             } else if (who == Who.BOX || (who == Who.NONE && BoxMarkers.looked(mc))) {
                 BoxMarkers.remove();
-            } else if (who == Who.GROUP) {
-                GroupMarkers.deleteGroup(GroupMarkers.cogAimed());
-            } else {
-                GroupMarkers.deleteAt(mc, connected);
             }
         }
     }

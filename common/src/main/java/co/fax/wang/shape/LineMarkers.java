@@ -183,6 +183,10 @@ public final class LineMarkers {
         boolean create = pm == PlacementMode.MARKER_LINE;
         if (!create) pendingStart = null;
         if (!handles || (!create && !debugHold)) {
+            if (dragLine != null && !debugHold) { // released by leaving: finish the drag properly
+                snapOnRelease(dragLine);
+                ShapeMarkers.saveLines();
+            }
             aimed = null;
             dragLine = null;
             return;

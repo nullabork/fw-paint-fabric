@@ -165,7 +165,7 @@ public final class GroupMarkers {
             }
             double e = component(eye, a);
             boolean low = Math.abs(e - lo) <= Math.abs(e - (hi + 1));
-            pos[a.ordinal()] = low ? lo + 0.5 - 0.6 : hi + 0.5 + 0.6;
+            pos[a.ordinal()] = low ? lo - 0.6 : hi + 1.6; // just clear of the corner marker
         }
         return new Vec3(pos[0], pos[1], pos[2]);
     }
