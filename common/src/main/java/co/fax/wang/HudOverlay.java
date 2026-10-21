@@ -2,27 +2,30 @@ package co.fax.wang;
 
 import co.fax.wang.config.ConfigManager;
 import co.fax.wang.config.GradientConfig;
+import co.fax.wang.ui.Ui;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.world.item.ItemStack;
 
 /**
- * The in-game helper text, shown only while the paint tool is held: the active paint type on top,
- * the placement mode below, then (gradient/noise only) where the gradient endpoints would come
- * from for the next click — "Selected from markers" / "Selected from picker", or a split pair
- * when one marker endpoint sits in air. Position comes from config ({@code hudX}/{@code hudY}),
- * movable via {@link HudPlacementScreen}. {@link #draw} is static and side-effect-free so the
- * placement screen reuses it as a live preview.
+ * The in-game HUD, shown only while the paint tool is held. It says what the next click will do:
+ * <ol>
+ *   <li>"&lt;Paint&gt; · &lt;Mode&gt;" on one line, the mode in its colour;</li>
+ *   <li>the selection — palette strip, pattern thumbnail or Solid block (or where to set one up);</li>
+ *   <li>yellow lines only for Place options switched from their default, or session-only and on
+ *       ({@link PlaceOptions#attentionLines});</li>
+ *   <li>grey sourcing lines (where the gradient endpoints come from) in the placing modes.</li>
+ * </ol>
+ * Position comes from config ({@code hudX}/{@code hudY}), movable via {@link HudPlacementScreen},
+ * which previews the same rows through {@link #drawHud}.
  */
 public final class HudOverlay {
 
-    /** ARGB colour of the paint-type (top) line; the mode line uses {@link PlacementMode#color()}. */
+    /** ARGB colour of the paint-type text on line 1; the mode uses {@link PlacementMode#color()}. */
     public static final int TYPE_COLOR = 0xFFFFFFFF;
-    /** ARGB colour of the sourcing lines. */
+    /** ARGB colour of the selection name and the sourcing lines. */
     public static final int SOURCE_COLOR = 0xFFC8C8C8;
-    /** ARGB colour of guidance hints (no tool / no palette). */
-    public static final int YELLOW = 0xFFFFE34D;
 
     private HudOverlay() {}
 
@@ -30,7 +33,6 @@ public final class HudOverlay {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return; // only while in a world
         GradientConfig cfg = ConfigManager.get();
-        Font font = mc.font;
         // Clamp so a position saved on a larger window can never render off-screen.
         int x = Math.max(0, Math.min(cfg.hudX, Math.max(0, g.guiWidth() - 10)));
         int y = Math.max(0, Math.min(cfg.hudY, Math.max(0, g.guiHeight() - 20)));
@@ -38,32 +40,59 @@ public final class HudOverlay {
         // First-run guidance: with no paint tool assigned at all the HUD (only in this case)
         // points at the Settings tab, where the tool picker lives.
         if (cfg.paintTool.isEmpty()) {
-            g.text(font, "FW Paint: tool selection required — press "
-                    + Gradient.boundKey("open") + " and go to Settings", x, y, YELLOW);
+            g.text(mc.font, noToolLine(), x, y, Ui.ATTENTION);
             return;
         }
-        if (!Gradient.holdingPaintTool(mc)) return; // helper text only while the tool is held
+        if (!Gradient.holdingPaintTool(mc)) return; // HUD only while the tool is held
+        drawHud(g, x, y, Gradient.currentPlacement(mc));
+    }
 
-        PlacementMode mode = Gradient.currentPlacement(mc);
-        draw(g, x, y, "FW Paint — " + cfg.activePaintType.label(), mode.displayName(), mode.color());
-        int lineY = y + 2 * (font.lineHeight + 1);
-        lineY = renderSelectionRow(g, mc, cfg, x, lineY);
+    /** The no-tool line ("FW Paint: pick a paint tool — K › Settings"). */
+    public static String noToolLine() {
+        return "FW Paint: pick a paint tool — " + Gradient.fixIn("Settings");
+    }
+
+    /**
+     * Draw every HUD row at (x, y) for {@code mode}; returns {width, height} of what was drawn
+     * (the placement screen outlines it).
+     */
+    public static int[] drawHud(GuiGraphicsExtractor g, int x, int y, PlacementMode mode) {
+        Minecraft mc = Minecraft.getInstance();
+        GradientConfig cfg = ConfigManager.get();
+        Font font = mc.font;
+        int lh = font.lineHeight + 1;
+
+        String type = cfg.activePaintType.label();
+        String sep = " · ";
+        g.text(font, type, x, y, TYPE_COLOR);
+        g.text(font, sep, x + font.width(type), y, Ui.HINT);
+        g.text(font, mode.shortName(), x + font.width(type + sep), y, mode.color());
+        int w = font.width(type + sep + mode.shortName());
+
+        int lineY = y + lh;
+        int[] sel = renderSelectionRow(g, mc, cfg, x, lineY);
+        w = Math.max(w, sel[0]);
+        lineY = sel[1];
+        for (String line : PlaceOptions.attentionLines(cfg, mode)) {
+            g.text(font, line, x, lineY, Ui.ATTENTION);
+            w = Math.max(w, font.width(line));
+            lineY += lh;
+        }
         for (String line : PaintPlacer.sourcingLines()) {
             g.text(font, line, x, lineY, SOURCE_COLOR);
-            lineY += font.lineHeight + 1;
+            w = Math.max(w, font.width(line));
+            lineY += lh;
         }
-        if (Gradient.dontMatchPalette && mode.places()) {
-            g.text(font, "Don't match palette", x, lineY, YELLOW);
-        }
+        return new int[] {w, lineY - y};
     }
 
     /**
      * The selection row: for gradient/noise, the active palette's segment sprites overlapped into
-     * a compact stripe plus its name (or the set-up hint); for solid, the chosen block or match
-     * mode. Returns the y below the row.
+     * a compact stripe plus its name (or where to set one up); for Pattern its thumbnail; for
+     * Solid, the chosen block or match mode. Returns {width, y below the row}.
      */
-    private static int renderSelectionRow(GuiGraphicsExtractor g, Minecraft mc,
-                                          GradientConfig cfg, int x, int y) {
+    private static int[] renderSelectionRow(GuiGraphicsExtractor g, Minecraft mc,
+                                            GradientConfig cfg, int x, int y) {
         Font font = mc.font;
         int rowH = 18;
         if (cfg.activePaintType == PaintType.SOLID) {
@@ -71,32 +100,29 @@ public final class HudOverlay {
                 ItemStack st = GradientScreen.stackOfId(cfg.solidBlock);
                 if (!st.isEmpty()) {
                     g.item(st, x, y);
-                    g.text(font, st.getHoverName().getString(), x + 18, y + 4, SOURCE_COLOR);
-                } else {
-                    g.text(font, "Solid: no block picked", x, y + 4, YELLOW);
+                    String name = st.getHoverName().getString();
+                    g.text(font, name, x + 18, y + 4, SOURCE_COLOR);
+                    return new int[] {18 + font.width(name), y + rowH};
                 }
-            } else {
-                g.text(font, "Match: " + cfg.solidMatch.displayName(), x, y + 4, SOURCE_COLOR);
+                return hint(g, font, "No block picked — " + Gradient.fixIn("Paint"), x, y, rowH);
             }
-            return y + rowH;
+            String m = cfg.solidMatch.displayName();
+            g.text(font, m, x, y + 4, SOURCE_COLOR);
+            return new int[] {font.width(m), y + rowH};
         }
         if (cfg.activePaintType == PaintType.PATTERN) {
             co.fax.wang.palette.Palette pat = co.fax.wang.palette.PaletteStore.activePattern();
             if (pat == null) {
-                g.text(font, "Press " + Gradient.boundKey("open") + " to set up a pattern",
-                        x, y + 4, YELLOW);
-            } else {
-                PatternThumb.draw(g, pat, x, y, 16);
-                g.text(font, pat.name + " (" + pat.width + "×" + pat.height + ")",
-                        x + 20, y + 4, SOURCE_COLOR);
+                return hint(g, font, "No pattern yet — " + Gradient.fixIn("Paint"), x, y, rowH);
             }
-            return y + rowH;
+            PatternThumb.draw(g, pat, x, y, 16);
+            String name = pat.name + " (" + pat.width + "×" + pat.height + ")";
+            g.text(font, name, x + 20, y + 4, SOURCE_COLOR);
+            return new int[] {20 + font.width(name), y + rowH};
         }
         co.fax.wang.palette.Palette active = co.fax.wang.palette.PaletteStore.active();
         if (active == null) {
-            g.text(font, "Press " + Gradient.boundKey("open") + " to set up a palette",
-                    x, y + 4, YELLOW);
-            return y + rowH;
+            return hint(g, font, "No palette yet — " + Gradient.fixIn("Paint"), x, y, rowH);
         }
         // Segment sprites drawn overlapping (tight spacing) so the stripe stays compact.
         int n = active.segments.size();
@@ -116,14 +142,11 @@ public final class HudOverlay {
         }
         int nameX = n == 0 ? x : sx + 12;
         g.text(font, active.name, nameX, y + 4, SOURCE_COLOR);
-        return y + rowH;
+        return new int[] {nameX - x + font.width(active.name), y + rowH};
     }
 
-    /** Draw the two fixed helper lines at (x, y): paint type on top, mode underneath. */
-    public static void draw(GuiGraphicsExtractor g, int x, int y,
-                            String typeLine, String modeLine, int modeColor) {
-        Font font = Minecraft.getInstance().font;
-        g.text(font, typeLine, x, y, TYPE_COLOR);
-        g.text(font, modeLine, x, y + font.lineHeight + 1, modeColor);
+    private static int[] hint(GuiGraphicsExtractor g, Font font, String text, int x, int y, int rowH) {
+        g.text(font, text, x, y + 4, Ui.ATTENTION);
+        return new int[] {font.width(text), y + rowH};
     }
 }
