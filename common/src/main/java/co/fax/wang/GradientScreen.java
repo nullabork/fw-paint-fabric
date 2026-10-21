@@ -147,6 +147,13 @@ public class GradientScreen extends Screen {
         return s;
     }
 
+    /** Open on the Paint tab, keeping its selection (where the editors return to on Cancel). */
+    public static GradientScreen atPaintTab() {
+        GradientScreen s = new GradientScreen(false);
+        tab = Tab.PALETTE;
+        return s;
+    }
+
     /** Help topic to open + scroll to the next time the Help tab lays out (see {@link #atHelpTopic}). */
     private static String pendingHelpTopic;
 
