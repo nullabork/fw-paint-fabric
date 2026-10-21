@@ -7,6 +7,7 @@ import co.fax.wang.Gradient;
 import co.fax.wang.GradientMode;
 import co.fax.wang.GradientSource;
 import co.fax.wang.PaintType;
+import co.fax.wang.PlaceOptions;
 import co.fax.wang.PlacementMode;
 import co.fax.wang.SolidMatch;
 import co.fax.wang.config.ConfigManager;
@@ -38,12 +39,13 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 
 /**
- * The radial selector wheel. Held open by the wheel keybind (default G); releasing it (or Esc)
- * closes, keeping whatever was chosen. Three ring levels: the root holds <b>Paint</b>,
- * <b>Place</b>, and <b>Palette</b>; hovering a category fans its children into the next ring
+ * The Wheel. Held open by the wheel keybind (default G); releasing it (or Esc) closes, keeping
+ * whatever was chosen. Three ring levels: the root holds <b>Paint</b>, <b>Palette</b> and
+ * <b>Place</b> (the screen's tab order); hovering a category fans its children into the next ring
  * out (clicking is reserved for the actual options). Paint fans the paint types; Place fans
- * <b>Blocks</b> (Single/Face/Face perp/3D Fill), <b>Markers</b> (Marker/Marker draw), and
- * <b>Shape markers</b> (Marker box/circle/square), each fanning a third ring of modes. The
+ * <b>Blocks</b>, <b>Markers</b> and <b>Shapes</b> (the Place tab's groups, from
+ * {@link PlacementMode#groups()}), <b>Options</b> (the placement toggles), and Off. Every ring
+ * ends in "More… (K)", which opens the screen on the matching tab. The
  * Palette ring follows the active paint type (palettes, patterns, or the Solid block picker,
  * Oklab colour-sorted like the list views) and becomes a scrollable radial carousel when it
  * outgrows the arc ({@link ExpandedRing}). The category wedge DIRECTLY holding the current
@@ -77,7 +79,7 @@ public class WheelScreen extends Screen {
     private static final int GREY = 0xFFA0A0A0;
 
     /** Root slot whose children are rebuilt from the active paint type on every expansion. */
-    private static final int PALETTE_INDEX = 2;
+    private static final int PALETTE_INDEX = 1;
 
     /** Height of the tab bar along the top (matches GradientScreen / the editors). */
     private static final int BAR_H = 22;
@@ -90,7 +92,7 @@ public class WheelScreen extends Screen {
     private ExpandedRing expanded2;
 
     public WheelScreen() {
-        super(Component.literal("FW Paint selector wheel"));
+        super(Component.literal("FW Paint — Wheel"));
         Minecraft mc = Minecraft.getInstance();
         this.root = buildRoot(mc);
         this.layout = computeLayout(mc.font, this.root, mc);
@@ -98,51 +100,79 @@ public class WheelScreen extends Screen {
 
     // ---- menu tree ------------------------------------------------------------------------
 
+    // Option leaves whose slot text is drawn live (see labelOf / colorOf).
+    private static final String DONT_MATCH = "Don't match palette";
+    private static final String PERP_SNAP = "Perp snap 45°";
+
     private static List<WheelItem> buildRoot(Minecraft mc) {
         List<WheelItem> paints = new ArrayList<>();
         for (PaintType t : new PaintType[] {
-                PaintType.SOLID, PaintType.GRADIENT, PaintType.PATTERN, PaintType.NOISE }) {
+                PaintType.SOLID, PaintType.GRADIENT, PaintType.NOISE, PaintType.PATTERN }) {
             paints.add(WheelItem.leaf(t.label(), WHITE,
                     () -> ConfigManager.get().activePaintType == t,
                     () -> Gradient.setPaintType(t)).describe(paintDescription(t)));
         }
-        WheelItem blocks = WheelItem.category("Blocks",
-                modeLeaf(PlacementMode.SINGLE), modeLeaf(PlacementMode.FACE),
-                modeLeaf(PlacementMode.FACE_TARGET),
-                modeLeaf(PlacementMode.FACE_PERP), modeLeaf(PlacementMode.FILL3D))
-                .describe("Modes that place blocks.");
-        WheelItem markers = WheelItem.category("Markers",
-                modeLeaf(PlacementMode.MARKER), modeLeaf(PlacementMode.MARKER_DRAW))
-                .describe("Start and end blocks that aim and bound painting.");
-        WheelItem shapes = WheelItem.category("Shape markers",
-                modeLeaf(PlacementMode.MARKER_BOX), modeLeaf(PlacementMode.MARKER_CIRCLE),
-                modeLeaf(PlacementMode.MARKER_SQUARE), modeLeaf(PlacementMode.MARKER_LINE))
-                .describe("Boxes, rings and lines that shape what gets painted.");
-        // A session-only toggle (resets on restart), not a mode: lit while on.
-        WheelItem noMatch = WheelItem.leaf("Don't match palette", WHITE,
-                () -> Gradient.dontMatchPalette, Gradient::toggleDontMatchPalette)
-                .describe("Toggle. Face selection skips blocks already in your palette, pattern "
-                        + "or Solid block, so it won't spread over a layer you just placed. "
-                        + "Off again after a restart.");
-        WheelItem settings = WheelItem.category("Settings", noMatch)
-                .describe("Quick placement toggles.");
+        paints.add(moreLeaf("Paint", co.fax.wang.GradientScreen::atPaintTab));
+
+        // Blocks / Markers / Shapes come from the same groups as the Place tab. Off sits directly
+        // on the Place ring, so the Markers group leaves it out here.
+        List<WheelItem> place = new ArrayList<>();
+        for (PlacementMode.Group group : PlacementMode.groups()) {
+            List<WheelItem> modes = new ArrayList<>();
+            for (PlacementMode m : group.modes()) {
+                if (m != PlacementMode.DISABLED) modes.add(modeLeaf(m));
+            }
+            place.add(WheelItem.category(group.title(), modes.toArray(WheelItem[]::new))
+                    .describe(group.description()));
+        }
+        // Toggles, not modes: lit while on. Don't match palette is session-only (yellow dot).
+        WheelItem options = WheelItem.category("Options",
+                WheelItem.leaf(DONT_MATCH, WHITE, () -> Gradient.dontMatchPalette,
+                        Gradient::toggleDontMatchPalette)
+                        .describe("Stop the Face modes spreading over blocks of your current "
+                                + "palette, pattern or Solid block. Resets on relaunch."),
+                WheelItem.leaf("Fill voids first", WHITE, () -> ConfigManager.get().faceFillVoids,
+                        PlaceOptions::toggleFillVoids)
+                        .describe("Face any / Face target in markers: level the gaps before "
+                                + "growing outward."),
+                WheelItem.leaf("Place in air", WHITE, () -> ConfigManager.get().placeInAir,
+                        PlaceOptions::togglePlaceInAir)
+                        .describe("Place blocks with nothing next to them straight into the "
+                                + "air; aim at the sky to paint at reach."),
+                WheelItem.leaf(PERP_SNAP, WHITE, () -> ConfigManager.get().perpSnapDegrees == 90,
+                        PlaceOptions::togglePerpSnap)
+                        .describe("Click to switch 45° / 90°: the angle Face perp runs and "
+                                + "pattern planes snap to."))
+                .describe("How the current mode places.");
+        place.add(options);
+        place.add(modeLeaf(PlacementMode.DISABLED));
+        place.add(moreLeaf("Place", co.fax.wang.GradientScreen::atPlaceTab));
+
+        // Ring 1 follows the screen's tab order: Paint · Palette · Place.
         return List.of(
                 WheelItem.category("Paint", paints.toArray(WheelItem[]::new))
                         .describe("What gets placed."),
-                WheelItem.category("Place", blocks, markers, shapes, settings)
-                        .describe("Where blocks go."),
                 // Children here are only the open-time snapshot (they make it a category and
                 // feed the layout); every expansion rebuilds them for the paint type of the
                 // moment — see updateExpansion.
                 WheelItem.category("Palette",
                         paletteChildren(mc, ConfigManager.get().activePaintType).toArray(WheelItem[]::new))
-                        .describe("Which palette, pattern or block to paint with."));
+                        .describe("Which palette, pattern or block to paint with."),
+                WheelItem.category("Place", place.toArray(WheelItem[]::new))
+                        .describe("Where it goes: a mode and its options."));
+    }
+
+    /** "More… (K)": opens the FW Paint screen on the matching tab. */
+    private static WheelItem moreLeaf(String tab, java.util.function.Supplier<Screen> screen) {
+        return WheelItem.leaf("More… (" + Gradient.boundKey("open") + ")", GREY, null,
+                () -> Minecraft.getInstance().setScreenAndShow(screen.get()))
+                .describe("Open the " + tab + " tab of the FW Paint screen.");
     }
 
     private static WheelItem modeLeaf(PlacementMode m) {
         return WheelItem.leaf(m.shortName(), m.color(),
                 () -> ConfigManager.get().placementMode == m,
-                () -> Gradient.setPlacementMode(m)).describe(modeDescription(m));
+                () -> Gradient.setPlacementMode(m)).describe(PlaceOptions.description(m));
     }
 
     private static String paintDescription(PaintType t) {
@@ -151,37 +181,41 @@ public class WheelScreen extends Screen {
             case GRADIENT -> "Blends the palette's blocks from start to end.";
             case PATTERN -> "Repeats a hand-drawn grid of blocks.";
             case NOISE -> "Scatters the palette's blocks in natural patches.";
-            default -> null;
         };
     }
 
-    private static String modeDescription(PlacementMode m) {
-        return switch (m) {
-            case SINGLE -> "One column out of the face you click.";
-            case FACE -> "The whole connected surface grows at once.";
-            case FACE_TARGET -> "Like Face any, but only the block type you click.";
-            case FACE_PERP -> "A one-block-wide run across the face, along your view.";
-            case FILL3D -> "A blob growing out around the clicked block.";
-            case MARKER -> "Click blocks to mark starts (turquoise) and ends (amber).";
-            case MARKER_DRAW -> "A freehand marker pencil.";
-            case MARKER_BOX -> "Two clicks mark a whole box region.";
-            case MARKER_CIRCLE -> "A round donut region with a wall thickness.";
-            case MARKER_SQUARE -> "A square donut region with a wall thickness.";
-            case MARKER_LINE -> "A curve you bend; give it a shape to make a tube.";
-            default -> null;
+    /** A slot's text: the live value for Perp snap, the stored label otherwise. */
+    private static String labelOf(WheelItem item) {
+        if (PERP_SNAP.equals(item.label())) return "Perp snap " + ConfigManager.get().perpSnapDegrees + "°";
+        return item.label();
+    }
+
+    /** A slot's text colour: Options toggles grey out when they don't apply to the current mode. */
+    private static int colorOf(WheelItem item) {
+        GradientConfig cfg = ConfigManager.get();
+        PlacementMode m = cfg.placementMode;
+        boolean applies = switch (item.label()) {
+            case DONT_MATCH -> PlaceOptions.dontMatchApplies(m);
+            case "Fill voids first" -> PlaceOptions.fillVoidsApplies(m);
+            case "Place in air" -> PlaceOptions.placeInAirApplies(m);
+            case PERP_SNAP -> PlaceOptions.perpSnapApplies(m, cfg.activePaintType);
+            default -> true;
         };
+        return applies ? item.labelColor() : GREY;
     }
 
     /**
      * The Palette ring's items for a paint type: palettes, patterns, or — for Solid — the
-     * match modes, with "Select block" fanning the inventory block picker onto the next ring.
+     * match modes, with "This block" fanning the inventory block picker onto the next ring.
+     * Every variant ends in "More… (K)" to the Paint tab.
      */
     private static List<WheelItem> paletteChildren(Minecraft mc, PaintType type) {
+        WheelItem more = moreLeaf("Paint", co.fax.wang.GradientScreen::atPaintTab);
         if (type == PaintType.SOLID) {
             List<WheelItem> blocks = solidBlockItems(mc);
             WheelItem select = blocks.isEmpty()
                     ? WheelItem.leaf("No blocks in inventory", GREY, null, () -> {})
-                    : WheelItem.category("Select block", blocks.toArray(WheelItem[]::new))
+                    : WheelItem.category("This block", blocks.toArray(WheelItem[]::new))
                             .describe("Pick the block to place from your inventory.");
             return List.of(select,
                     matchLeaf(SolidMatch.EXACT, "Exact block")
@@ -189,13 +223,16 @@ public class WheelScreen extends Screen {
                     matchLeaf(SolidMatch.CLOSEST_COLOR, "Closest colour")
                             .describe("Your block closest in colour to the one you click."),
                     matchLeaf(SolidMatch.CLOSEST_BRIGHTNESS, "Closest brightness")
-                            .describe("Your block closest in brightness to the one you click."));
+                            .describe("Your block closest in brightness to the one you click."),
+                    more);
         }
         PaletteKind kind = Gradient.kindFor(type);
         List<Palette> list = PaletteStore.allOf(kind);
         if (list.isEmpty()) {
             return List.of(WheelItem.leaf(
-                    "No " + kind.label().toLowerCase(Locale.ROOT) + "s yet", GREY, null, () -> {}));
+                    "No " + kind.label().toLowerCase(Locale.ROOT) + "s yet", GREY, null, () -> {})
+                    .describe("Make one on the Paint tab: More… (" + Gradient.boundKey("open") + ")."),
+                    more);
         }
         List<WheelItem> out = new ArrayList<>();
         Map<GradientSource, Set<String>> avail = new EnumMap<>(GradientSource.class);
@@ -212,6 +249,7 @@ public class WheelScreen extends Screen {
                     ? WheelItem.missingLeaf(p.name + " (missing)", selected, action)
                     : WheelItem.leaf(p.name, WHITE, selected, action));
         }
+        out.add(more);
         return out;
     }
 
@@ -246,7 +284,7 @@ public class WheelScreen extends Screen {
 
     /**
      * The Select-block ring: the unique placeable blocks from the configured source range (the
-     * same scan the Solid tab does), skipping excluded blocks and Oklab colour-sorted like the
+     * same scan the Paint tab's Solid list does), skipping excluded blocks and Oklab colour-sorted like the
      * list views. Clicking one makes it the Solid block.
      */
     private static List<WheelItem> solidBlockItems(Minecraft mc) {
@@ -323,16 +361,9 @@ public class WheelScreen extends Screen {
             }
         }
         // The hole shows the current paint type + placement mode — those labels come from the
-        // Paint children and the Place grandchildren.
-        for (WheelItem child : root.get(0).children()) {
-            centerW = Math.max(centerW, font.width(child.label()));
-        }
-        for (WheelItem group : root.get(1).children()) {
-            if (group.label().equals("Settings")) continue; // toggles, never shown in the hole
-            for (WheelItem mode : group.children()) {
-                centerW = Math.max(centerW, font.width(mode.label()));
-            }
-        }
+        // paint types and the placement modes.
+        for (PaintType t : PaintType.values()) centerW = Math.max(centerW, font.width(t.label()));
+        for (PlacementMode m : PlacementMode.values()) centerW = Math.max(centerW, font.width(m.shortName()));
         // The Palette ring's content depends on the paint type, which can change while the
         // wheel is open — merge every variant it could show into one conservative spec
         // ("sized from the start, never resizes live").
@@ -349,7 +380,7 @@ public class WheelScreen extends Screen {
         }
         level1[PALETTE_INDEX] = new WheelLayout.RingSpec(palCount, palMax);
         level2[PALETTE_INDEX] = new WheelLayout.RingSpec[Math.max(1, palCount)];
-        level2[PALETTE_INDEX][0] = blockSpec; // Select block sits first on the Solid ring
+        level2[PALETTE_INDEX][0] = blockSpec; // "This block" sits first on the Solid ring
         return WheelLayout.compute(font.lineHeight, centerW, 2 * font.lineHeight + 2,
                 rootW, level1, level2);
     }
@@ -358,7 +389,7 @@ public class WheelScreen extends Screen {
     private static WheelLayout.RingSpec specOf(Font font, List<WheelItem> items) {
         int max = 8;
         for (WheelItem it : items) {
-            max = Math.max(max, it.icon() != null ? 16 : font.width(it.label()));
+            max = Math.max(max, it.icon() != null ? 16 : font.width(it.label()) + (DONT_MATCH.equals(it.label()) ? 8 : 0));
         }
         return new WheelLayout.RingSpec(items.size(), max);
     }
@@ -369,7 +400,7 @@ public class WheelScreen extends Screen {
         Font font = Minecraft.getInstance().font;
         int max = 8;
         for (WheelItem it : children) {
-            max = Math.max(max, it.icon() != null ? 16 : font.width(it.label()));
+            max = Math.max(max, it.icon() != null ? 16 : font.width(it.label()) + (DONT_MATCH.equals(it.label()) ? 8 : 0));
         }
         return new ExpandedRing(category, children, parentAngle, max, midRadius);
     }
@@ -604,7 +635,7 @@ public class WheelScreen extends Screen {
         g.fill(0, 0, this.width, BAR_H, 0xE0000000);
         g.fill(0, BAR_H, this.width, BAR_H + 1, 0x60FFFFFF);
         int textY = (BAR_H - this.font.lineHeight) / 2 + 1;
-        g.text(this.font, "FW Paint — Quick selector", 8, textY, WHITE);
+        g.text(this.font, "FW Paint — Wheel", 8, textY, WHITE);
         String[] names = co.fax.wang.GradientScreen.barTabNames();
         int[] xs = tabXs();
         for (int i = 0; i < names.length; i++) {
@@ -769,7 +800,13 @@ public class WheelScreen extends Screen {
                     g.item(item.icon(), x - 8, y - 8);
                     if (item.missing()) crosses.add(new int[] {x - 8, y - 8});
                 } else {
-                    drawLabelAt(g, cx, cy, item.label(), item.labelColor(), angle, mid);
+                    drawLabelAt(g, cx, cy, labelOf(item), colorOf(item), angle, mid);
+                    if (DONT_MATCH.equals(item.label())) {
+                        // Session-only toggle: the kit's yellow dot just after the label.
+                        int x = cx + (int) Math.round(Math.sin(angle) * mid) + this.font.width(DONT_MATCH) / 2 + 3;
+                        int y = cy - (int) Math.round(Math.cos(angle) * mid) - 2;
+                        co.fax.wang.ui.Ui.sessionDot(g, x, y);
+                    }
                 }
             }
         }
