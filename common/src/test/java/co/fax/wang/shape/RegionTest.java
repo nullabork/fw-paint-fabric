@@ -39,6 +39,46 @@ class RegionTest {
     }
 
     @Test
+    void boxFaceEditsMoveTheRightCorner() {
+        // A at y=10 (start), B at y=7: the top face belongs to A, the bottom to B.
+        BoxRegion b = new BoxRegion(new BlockPos(5, 10, 5), new BlockPos(2, 7, 8), Direction.Axis.Y);
+        BoxRegion up = b.withFace(Direction.UP, 12);
+        assertEquals(new BlockPos(5, 12, 5), up.cornerA);
+        assertEquals(b.cornerB, up.cornerB);
+        BoxRegion east = b.withFace(Direction.EAST, 9);
+        assertEquals(9, east.max().getX());
+        assertEquals(2, east.min().getX());
+        // A face can't be dragged through the opposite one: the box stays one block thick.
+        assertEquals(7, b.withFace(Direction.UP, 3).max().getY());
+        assertEquals(10, b.withFace(Direction.DOWN, 40).min().getY());
+        assertEquals(10, b.faceCoord(Direction.UP));
+        assertEquals(7, b.faceCoord(Direction.DOWN));
+    }
+
+    @Test
+    void flatBoxGrowsFromEitherSide() {
+        BoxRegion b = new BoxRegion(new BlockPos(0, 5, 0), new BlockPos(4, 5, 4), Direction.Axis.Y);
+        BoxRegion taller = b.withFace(Direction.UP, 8);
+        assertEquals(5, taller.cornerA.getY()); // the start stays where it was
+        assertEquals(8, taller.cornerB.getY());
+        BoxRegion deeper = b.withFace(Direction.DOWN, 2);
+        assertEquals(2, deeper.min().getY());
+        assertEquals(5, deeper.max().getY());
+    }
+
+    @Test
+    void boxFlipSwapsStartAndEnd() {
+        BoxRegion b = new BoxRegion(new BlockPos(5, 10, 5), new BlockPos(2, 7, 8), Direction.Axis.Y);
+        RingShape.Segment seg = b.flipped().segmentFor(new BlockPos(3, 9, 6));
+        assertEquals(new BlockPos(3, 7, 6), seg.start());
+        assertEquals(2, seg.index());
+        assertEquals(b.min(), b.flipped().min());
+        BoxRegion x = b.withAxis(Direction.Axis.X).moved(1, 0, -1);
+        assertEquals(Direction.Axis.X, x.axis);
+        assertEquals(new BlockPos(3, 7, 4), x.min());
+    }
+
+    @Test
     void flatBoxHasNoSegment() {
         BoxRegion b = new BoxRegion(new BlockPos(0, 5, 0), new BlockPos(4, 5, 4), Direction.Axis.Y);
         assertTrue(b.contains(new BlockPos(2, 5, 2)));

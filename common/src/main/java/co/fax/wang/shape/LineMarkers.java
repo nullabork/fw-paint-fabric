@@ -3,12 +3,10 @@ package co.fax.wang.shape;
 import co.fax.wang.Gradient;
 import co.fax.wang.PlacementMode;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -16,23 +14,29 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The line marker (Marker line mode): creation, editing and rendering of {@link LineShape}s.
- * Behaviour is specified in docs/design/line-marker.md. In short:
+ * The line marker (Line mode): creation, editing and rendering of {@link LineShape}s. Behaviour
+ * is specified in docs/design/line-marker.md. In short:
  *
  * <ul>
- *   <li>Marker line mode: left-click the start (aimed surface point, or 16 blocks out at the
- *       sky), left-click the end. Right-click cancels a half-made line.</li>
- *   <li>Editing, also only in Marker line mode (elsewhere lines just show and constrain
- *       painting): drag nodes (cubes) and curve handles (spheres) on the plane through the point
- *       facing the eye (rebuilt each tick); scroll while dragging pushes the point further /
- *       nearer. Handles snap onto their node when dragged close; Link mirrors the opposite
- *       handle, Axis lock locks a drag to an axis. Double-click the line to insert a node; middle-click a
- *       middle node to remove it, anything else on the line to delete the line.</li>
- *   <li>The selected line shows floating buttons (profile + shell/solid), and with a profile its
- *       size and twist nodes at each end plus a move node at its side.</li>
+ *   <li>Line mode: LMB the start (aimed surface point, or Marker reach out at the sky), LMB the
+ *       end. RMB cancels a half-made line.</li>
+ *   <li>Editing, also only in Line mode (elsewhere lines just show and constrain painting): drag
+ *       nodes (cubes) and curve handles (spheres) on the plane through the point facing the eye
+ *       (rebuilt each tick); scroll while dragging pushes the point further / nearer. Handles
+ *       snap onto their node when dragged close; the modifier mirrors the opposite handle, Alt
+ *       locks a drag to an axis. Double-click a node: sharp ↔ smooth; double-click the line:
+ *       insert a node. MMB a middle node removes it, anything else on the line deletes the line
+ *       (modifier + MMB: always the whole line).</li>
+ *   <li>With a profile, every node has a size cube (green) and a twist cube (blue) — shown on the
+ *       two ends and on the node last aimed at. Drag = that node, modifier+drag = every node,
+ *       RMB = reset that node, modifier+RMB = reset all; modifier+scroll on a node grows / shrinks
+ *       it.</li>
+ *   <li>A white move cube and a grey cog sit beside the middle of the line; the cog opens the
+ *       line's toolbar ({@link MarkerToolbar}): profile, shell / solid, gradient, flip, delete.</li>
  * </ul>
  *
- * State lives here; {@link ShapeMarkers} forwards tick/render/scroll and owns persistence.
+ * State lives here; {@link ShapeMarkers} decides each tick who owns the aim, forwards
+ * tick/render/scroll and owns persistence.
  */
 public final class LineMarkers {
 
@@ -42,28 +46,13 @@ public final class LineMarkers {
     private static final int LINE = 0xFFFFB830;
     private static final int LINE_SELECTED = 0xFFFFFFFF;
     private static final int PREVIEW = 0xC0FFB830;
-    private static final int NODE_START = 0xE040E0D0;
-    private static final int NODE_END = 0xE0FFB000;
-    private static final int NODE_MID = 0xE0FFFFFF;
-    private static final int AIMED = 0xFFFFFFFF;
-    private static final int HANDLE = 0xE0FF55FF;
-    private static final int HANDLE_PARKED = 0x80FF55FF;
-    private static final int STALK = 0xC0FF55FF;
-    private static final int SIZE = 0xD055FF55;
-    private static final int TWIST = 0xD05599FF;
-    private static final int MOVE = 0xD0E0E0E0;
+    private static final int STALK = Gizmo.alpha(co.fax.wang.ui.Ui.BEND, 0xC0);
     private static final int TUBE_FILL = 0x33FFA000;
     private static final int TUBE_EDGE = 0xB0FFB830;
     private static final int TUBE_EDGE_SELECTED = 0xC0FFFFFF;
     // The on-top ghost pass draws through everything, so it stays faint (same as ring ghosts).
     private static final int TUBE_GHOST = 0x5CFFB830;
     private static final int TUBE_GHOST_SELECTED = 0xA8FFFFFF;
-    private static final float GHOST_ALPHA = 0.4f;          // line/node ghost alpha multiplier
-    private static final int BTN_BG = 0xC0202020;
-    private static final int BTN_HOVER = 0xE0505050;
-    private static final int BTN_ACTIVE = 0xE0FFB830;
-    private static final int ICON = 0xFFFFFFFF;
-    private static final int ICON_ON_ACTIVE = 0xFF202020;
 
     private static final double NODE_HALF = 0.15;   // main node cube half-size
     private static final double HANDLE_R = 0.12;    // curve handle sphere radius
@@ -71,28 +60,17 @@ public final class LineMarkers {
     private static final double BODY_PICK = 0.35;   // ray-to-curve distance that targets a line
     private static final double SNAP = 0.35;        // handle within this of its node → zero
     private static final double PARK = 0.6;         // where a zero handle is shown/grabbed
-    private static final double CTRL_HALF = 0.25;   // size / twist / move node half-size
-    private static final double BTN = 0.8;          // button size (blocks)
-    private static final double BTN_GAP = 0.15;
-    private static final double DEFAULT_DIST = 16;  // sky-aimed points land this far out
+    private static final double CTRL_HALF = Gizmo.CTRL_HALF;
     private static final long DOUBLE_CLICK_MS = 350;
 
     /** What the crosshair is on; SIZE / TWIST carry their node's index. */
-    private enum Kind { NODE, HANDLE_IN, HANDLE_OUT, SIZE, TWIST, MOVE, BUTTON, BODY }
+    private enum Kind { NODE, HANDLE_IN, HANDLE_OUT, SIZE, TWIST, MOVE, COG, BODY }
 
     private record Aim(LineShape line, Kind kind, int index, double dist) {}
 
-    /** Floating buttons, left to right. */
-    private static final LineProfile[] BUTTON_PROFILES = {
-            LineProfile.CIRCLE, LineProfile.SQUARE, LineProfile.TRIANGLE, LineProfile.STAR};
-    /**
-     * Buttons per end: a top row (the profiles, shell/solid, help) and under it the gradient
-     * directions. One set floats above each end.
-     */
-    private static final int TOP_ROW = BUTTON_PROFILES.length + 2;
-    private static final LineGradient[] BUTTON_GRADIENTS = LineGradient.values();
-    private static final int BUTTON_COUNT = TOP_ROW + BUTTON_GRADIENTS.length;
-    private static final int SLOT_SOLID = BUTTON_PROFILES.length, SLOT_HELP = BUTTON_PROFILES.length + 1;
+    /** Toolbar profile buttons, left to right (NONE = a bare line). */
+    private static final LineProfile[] PROFILES = {
+            LineProfile.NONE, LineProfile.CIRCLE, LineProfile.SQUARE, LineProfile.TRIANGLE, LineProfile.STAR};
     /**
      * Gradient button glyphs, 7×5: '1'…'4' are faint → full, '4' marking where the gradient
      * starts (across: the near side, drawn at the top; along: the start node, on the left).
@@ -102,16 +80,6 @@ public final class LineMarkers {
             {"4433211", "4433211", "4433211", "4433211", "4433211"},   // ALONG
             {"1111111", "1233321", "1234321", "1233321", "1111111"},   // INSIDE_OUT
             {"4444444", "4322234", "4321234", "4322234", "4444444"}};  // OUTSIDE_IN
-    /** Control-cube icons, 7×7 (rows top to bottom): four-way move, diagonal resize, rotate. */
-    private static final String[] MOVE_ICON = {
-            "...X...", "..XXX..", ".X.X.X.", "XXXXXXX", ".X.X.X.", "..XXX..", "...X..."};
-    private static final String[] RESIZE_ICON = {
-            "XXX....", "XX.....", "X.X....", "...X...", "....X.X", ".....XX", "....XXX"};
-    private static final String[] ROTATE_ICON = {
-            "..XXX.X", ".X...XX", "X...XXX", "X......", "X.....X", ".X...X.", "..XXX.."};
-    private static final int CTRL_ICON = 0xFF202020;
-    /** The "?" glyph as a 3×6 pixel grid (rows top to bottom). */
-    private static final String[] QUESTION = {"XXX", "..X", ".XX", ".X.", "...", ".X."};
 
     static final List<LineShape> lines = new ArrayList<>();
     private static LineShape selected;
@@ -141,14 +109,39 @@ public final class LineMarkers {
 
     // ---- queries ------------------------------------------------------------------------------
 
-    /** True while a line control/button is aimed or a drag is live: clicks belong to lines. */
+    /** True while a line control is aimed or a drag is live: clicks belong to lines. */
     static boolean controlAimed() {
         return dragLine != null || (aimed != null && aimed.kind != Kind.BODY);
     }
 
-    /** True while anything of a line (body included) is under the crosshair or being dragged. */
-    static boolean anythingAimed() {
-        return dragLine != null || aimed != null;
+    /** Ray distance to the aimed line control (0 while dragging), or +∞ when none. */
+    static double controlDist() {
+        if (dragLine != null) return 0;
+        return aimed != null && aimed.kind != Kind.BODY ? aimed.dist : Double.POSITIVE_INFINITY;
+    }
+
+    static boolean dragging() {
+        return dragLine != null;
+    }
+
+    /** The line whose cog is under the crosshair, or null. */
+    static LineShape cogAimed() {
+        return aimed != null && aimed.kind == Kind.COG ? aimed.line : null;
+    }
+
+    /** The line under the crosshair (any part, body included), or null. */
+    static LineShape lookedLine() {
+        return dragLine != null ? dragLine : aimed != null ? aimed.line : null;
+    }
+
+    /** Another marker's control won the aim this tick: forget ours (unless dragging). */
+    static void dropAim() {
+        if (dragLine == null) aimed = null;
+    }
+
+    /** Half-made line in progress (Line mode). */
+    static boolean creating() {
+        return pendingStart != null;
     }
 
     /** Dev bench hook ({@code DebugRender}): add a line and select it, without saving. */
@@ -159,30 +152,59 @@ public final class LineMarkers {
 
     static void clear() {
         lines.clear();
+        resetTransient();
+    }
+
+    static void resetTransient() {
         selected = null;
+        selNode = -1;
         pendingStart = null;
         aimed = null;
         dragLine = null;
     }
 
-    static void resetTransient() {
-        selected = null;
-        pendingStart = null;
-        aimed = null;
-        dragLine = null;
+    /** Delete a line (MMB, or the toolbar's bin). */
+    static void remove(LineShape l) {
+        lines.remove(l);
+        if (selected == l) selected = null;
+        if (aimed != null && aimed.line == l) aimed = null;
+        if (dragLine == l) dragLine = null;
+        MarkerText.say("Line removed");
+        ShapeMarkers.saveLines();
     }
 
     // ---- tick ---------------------------------------------------------------------------------
 
     /**
-     * Input for lines. Edges are passed in so ShapeMarkers keeps one source of truth; returns true
-     * when a line consumed this tick's clicks (ShapeMarkers then skips its own handling).
+     * Find the line control (or line body) under the crosshair. Lines are only editable in Line
+     * mode; elsewhere they just show and constrain painting (no aiming, dragging or deleting).
      */
-    static boolean tick(Minecraft mc, PlacementMode pm, boolean handles,
+    static void updateAim(Minecraft mc, PlacementMode pm, boolean handles) {
+        boolean create = pm == PlacementMode.MARKER_LINE;
+        if (!create) pendingStart = null;
+        if (!handles || (!create && !debugHold)) {
+            aimed = null;
+            dragLine = null;
+            return;
+        }
+        computeAim(mc);
+        if (aimed != null && dragLine == null) {
+            if (selected != aimed.line) selNode = -1;
+            selected = aimed.line;
+            if (aimed.kind == Kind.NODE) selNode = aimed.index;
+        }
+    }
+
+    /**
+     * Input for lines once ShapeMarkers has decided who owns this tick's aim: {@code owns} is
+     * false when another marker's control or the toolbar took it (only a live drag continues).
+     * Returns true when a line consumed this tick's clicks.
+     */
+    static boolean tick(Minecraft mc, PlacementMode pm, boolean owns,
                         boolean attack, boolean attackEdge, boolean use, boolean useEdge, boolean pickEdge) {
         long perfT0 = PERF ? System.nanoTime() : 0;
         try {
-            return tickInner(mc, pm, handles, attack, attackEdge, use, useEdge, pickEdge);
+            return tickInner(mc, pm, owns, attack, attackEdge, use, useEdge, pickEdge);
         } finally {
             if (PERF) {
                 perfTicks++;
@@ -191,23 +213,10 @@ public final class LineMarkers {
         }
     }
 
-    private static boolean tickInner(Minecraft mc, PlacementMode pm, boolean handles,
+    private static boolean tickInner(Minecraft mc, PlacementMode pm, boolean owns,
                                      boolean attack, boolean attackEdge, boolean use, boolean useEdge, boolean pickEdge) {
         boolean create = pm == PlacementMode.MARKER_LINE;
-        if (!create) pendingStart = null;
-        // Lines are only editable in Marker line mode; elsewhere they just show and constrain
-        // painting (no aiming, dragging, buttons or deleting — clicks pass straight through).
-        if (!handles || (!create && !debugHold)) {
-            aimed = null;
-            dragLine = null;
-            return false;
-        }
-        updateAim(mc);
-        if (aimed != null && dragLine == null) {
-            if (selected != aimed.line) selNode = -1;
-            selected = aimed.line;
-            if (aimed.kind == Kind.NODE) selNode = aimed.index;
-        }
+        if (!create && !debugHold) return false;
 
         boolean saveNeeded = false;
         boolean consumed = false;
@@ -224,17 +233,16 @@ public final class LineMarkers {
             }
             consumed = true;
         }
+        if (!owns) {
+            if (saveNeeded) ShapeMarkers.saveLines();
+            return consumed;
+        }
 
         if (attackEdge && dragLine == null) {
-            // A bare line body only takes clicks in Marker line mode (double-click to add a
-            // node) — elsewhere it mustn't swallow clicks meant for markers behind it.
-            if (aimed != null && (aimed.kind != Kind.BODY || create)) {
+            if (aimed != null && aimed.kind != Kind.COG) { // the cog is ShapeMarkers' (toolbar)
                 consumed = true;
+                ShapeMarkers.touch(aimed.line);
                 switch (aimed.kind) {
-                    case BUTTON -> {
-                        pressButton(mc, aimed.line, aimed.index);
-                        saveNeeded = true;
-                    }
                     case BODY -> {
                         long now = System.currentTimeMillis();
                         if (lastBodyLine == aimed.line && now - lastBodyClickMs < DOUBLE_CLICK_MS) {
@@ -263,7 +271,7 @@ public final class LineMarkers {
                     }
                     default -> beginDrag(mc, aimed, false);
                 }
-            } else if (create) {
+            } else if (aimed == null) {
                 consumed = true;
                 creationClick(mc);
             }
@@ -273,33 +281,32 @@ public final class LineMarkers {
             // Right-drag a handle: slide it in/out along its own direction (angle kept).
             beginDrag(mc, aimed, true);
             consumed = true;
-        } else if (useEdge && dragLine == null && aimed != null && resetNode(mc, aimed)) {
+        } else if (useEdge && dragLine == null && aimed != null && resetNode(aimed)) {
             saveNeeded = true;
             consumed = true;
-        } else if (useEdge && create && pendingStart != null) {
+        } else if (useEdge && pendingStart != null) {
             pendingStart = null;
-            overlay(mc, "FW Paint — line cancelled");
+            MarkerText.say("Line cancelled");
             consumed = true;
         }
-        if (pickEdge && aimed != null) {
+        if (pickEdge && aimed != null && dragLine == null) {
             consumed = true;
             LineShape l = aimed.line;
             int last = l.curve.nodes.size() - 1;
-            if (aimed.kind == Kind.NODE && aimed.index > 0 && aimed.index < last) {
-                // The other nodes keep their own sizes; only this one's goes.
+            if (aimed.kind == Kind.NODE && aimed.index > 0 && aimed.index < last && !Gradient.modifierDown()) {
+                // The smallest piece first: a middle node (the others keep their own sizes).
                 l.curve.nodes.remove(aimed.index);
                 if (l == selected) selNode = -1;
                 l.markDirty();
+                MarkerText.say("Line: node removed");
+                saveNeeded = true;
             } else {
-                lines.remove(l);
-                if (selected == l) selected = null;
-                overlay(mc, "FW Paint — line removed");
+                remove(l); // saves
             }
             aimed = null;
-            saveNeeded = true;
         }
         if (saveNeeded) ShapeMarkers.saveLines();
-        return consumed || (create && attackEdge);
+        return consumed || attackEdge;
     }
 
     /**
@@ -307,25 +314,26 @@ public final class LineMarkers {
      * twist back to zero. Holding the modifier resets every node. False when {@code a} isn't
      * one of them.
      */
-    private static boolean resetNode(Minecraft mc, Aim a) {
+    private static boolean resetNode(Aim a) {
         LineShape l = a.line;
-        boolean all = co.fax.wang.Gradient.modifierDown();
+        boolean all = Gradient.modifierDown();
         switch (a.kind) {
             case SIZE -> {
                 if (all) l.setAllRadii(LineShape.DEFAULT_RADIUS);
                 else l.curve.nodes.get(a.index).r = LineShape.DEFAULT_RADIUS;
-                overlay(mc, all ? "FW Paint · Line: every node's size reset" : "FW Paint · Line: node size reset");
+                MarkerText.say(all ? "Line: every node's size reset" : "Line: node size reset");
             }
             case TWIST -> {
                 if (all) l.setAllTwists(0);
                 else l.curve.nodes.get(a.index).tw = 0;
-                overlay(mc, all ? "FW Paint · Line: every node's twist reset" : "FW Paint · Line: node twist reset");
+                MarkerText.say(all ? "Line: every node's twist reset" : "Line: node twist reset");
             }
             default -> {
                 return false;
             }
         }
         l.markDirty();
+        ShapeMarkers.touch(l);
         return true;
     }
 
@@ -339,10 +347,10 @@ public final class LineMarkers {
         if (dragLine == null && aimed != null && (aimed.kind == Kind.NODE || aimed.kind == Kind.SIZE)) {
             LineShape l = aimed.line;
             LineCurve.Node n = l.curve.nodes.get(aimed.index);
-            if (co.fax.wang.Gradient.modifierDown()) {
+            if (Gradient.modifierDown()) {
                 n.r = Math.max(LineShape.MIN_RADIUS, Math.min(LineShape.MAX_RADIUS, n.r + (deltaY > 0 ? 0.5 : -0.5)));
                 l.markDirty();
-                overlay(mc, "FW Paint · Line: node " + (aimed.index + 1) + " radius " + fmt(n.r));
+                MarkerText.say("Line: node " + (aimed.index + 1) + " radius " + fmt(n.r));
             } else if (aimed.kind == Kind.NODE) {
                 Vec3 away = n.p.subtract(Raycast.eye(mc));
                 if (away.lengthSqr() < 1e-6) return true;
@@ -353,6 +361,7 @@ public final class LineMarkers {
             } else {
                 return false;
             }
+            ShapeMarkers.touch(l);
             ShapeMarkers.saveLines();
             return true;
         }
@@ -370,48 +379,28 @@ public final class LineMarkers {
         Vec3 p = aimPoint(mc);
         if (pendingStart == null) {
             pendingStart = p;
-            overlay(mc, "FW Paint — line: click the end point");
+            MarkerText.step("Line", 2, 2, "LMB the end");
             return;
         }
         if (p.distanceToSqr(pendingStart) < 0.01) return;
         LineShape l = new LineShape(new LineCurve(pendingStart, p));
         lines.add(l);
         selected = l;
+        selNode = -1;
         pendingStart = null;
+        ShapeMarkers.touch(l);
         ShapeMarkers.saveLines();
-        overlay(mc, "FW Paint — line set: drag nodes, double-click to add one, pick a shape above it");
+        MarkerText.say("Line set — drag its nodes, double-click it to add one, LMB its cog for options");
     }
 
     /**
      * Where a new point goes: the centre of the grid cell in front of the aimed face (where a
-     * block placed there would sit), or of the cell {@link #DEFAULT_DIST} out at the sky.
+     * block placed there would sit), or of the cell at Marker reach when aimed at the sky.
      */
     private static Vec3 aimPoint(Minecraft mc) {
         BlockHitResult hit = Raycast.aimedBlock(mc);
         if (hit != null) return Vec3.atCenterOf(hit.getBlockPos().relative(hit.getDirection()));
-        return gridCenter(Raycast.eye(mc).add(Raycast.look(mc).scale(DEFAULT_DIST)));
-    }
-
-    private static void pressButton(Minecraft mc, LineShape l, int index) {
-        int slot = index % BUTTON_COUNT;
-        if (slot >= TOP_ROW) {
-            // Only changes how a later Gradient fill runs — the tube itself is unchanged.
-            l.gradient = BUTTON_GRADIENTS[slot - TOP_ROW];
-            ShapeMarkers.saveLines();
-            overlay(mc, "Line gradient: " + l.gradient.label);
-            return;
-        }
-        if (slot == SLOT_HELP) {
-            mc.setScreenAndShow(co.fax.wang.GradientScreen.atHelpTopic("Marker line"));
-            return;
-        }
-        if (slot < BUTTON_PROFILES.length) {
-            LineProfile p = BUTTON_PROFILES[slot];
-            l.profile = l.profile == p ? LineProfile.NONE : p; // clicking the active one removes it
-        } else {
-            l.solid = !l.solid;
-        }
-        l.markDirty();
+        return gridCenter(Raycast.eye(mc).add(Raycast.look(mc).scale(MarkerText.airReach())));
     }
 
     private static void insertNodeAtAim(Minecraft mc, LineShape l) {
@@ -423,10 +412,129 @@ public final class LineMarkers {
         double ta = a.seg() == seg ? a.t() : 0;
         double t = ta + (b.t() - ta) * hit.frac();
         if (t <= 1e-3 || t >= 1 - 1e-3) return; // on an existing node already
-        int idx = l.curve.insertNode(seg, t);
+        int idx = l.curve.insertNode(seg, t); // takes the radius / twist already there
         LineCurve.Node n = l.curve.nodes.get(idx);
         n.p = gridCenter(n.p); // on the grid like every main node (handles keep the split's shape)
+        if (l == selected) selNode = idx;
         l.markDirty();
+    }
+
+    // ---- toolbar -------------------------------------------------------------------------------
+
+    /** The line's toolbar: profile · shell | solid, then the gradients · flip · delete · help. */
+    static MarkerToolbar.Spec toolbarSpec(LineShape l) {
+        if (!lines.contains(l)) return null;
+        List<MarkerToolbar.Button> top = new ArrayList<>(), bottom = new ArrayList<>();
+        for (LineProfile p : PROFILES) {
+            MarkerToolbar.Icon icon = p == LineProfile.NONE ? MarkerToolbar.LINE_BARE : MarkerToolbar.outline(p.outline(1));
+            String name = p == LineProfile.NONE ? "Bare line" : cap(p.name()) + " tube";
+            top.add(new MarkerToolbar.Button(icon, l.profile == p, false,
+                    name + (l.profile == p ? " (on)" : ""), () -> {
+                        l.profile = p;
+                        l.markDirty();
+                        changed(l, "Line: " + name.toLowerCase(java.util.Locale.ROOT));
+                    }));
+        }
+        top.add(new MarkerToolbar.Button(MarkerToolbar.HOLLOW, !l.solid, false,
+                "Shell: only the tube's skin" + (!l.solid ? " (on)" : ""), () -> {
+                    l.solid = false;
+                    l.markDirty();
+                    changed(l, "Line: shell tube");
+                }));
+        top.add(new MarkerToolbar.Button(MarkerToolbar.DISC, l.solid, false,
+                "Solid: the whole tube" + (l.solid ? " (on)" : ""), () -> {
+                    l.solid = true;
+                    l.markDirty();
+                    changed(l, "Line: solid tube");
+                }));
+        LineGradient[] gs = LineGradient.values();
+        for (int i = 0; i < gs.length; i++) {
+            LineGradient g = gs[i];
+            String what = switch (g) {
+                case ACROSS -> "from the side you aim into, across to the far side";
+                case ALONG -> "from the start node to the end node";
+                case INSIDE_OUT -> "from the line out to the skin";
+                case OUTSIDE_IN -> "from the skin in to the line";
+            };
+            bottom.add(new MarkerToolbar.Button(MarkerToolbar.pixels(GRADIENT_GLYPHS[i], 0.08), l.gradient == g, false,
+                    "Gradient " + g.label.toLowerCase(java.util.Locale.ROOT) + ": " + what
+                            + (l.gradient == g ? " (on)" : ""), () -> {
+                        // Only changes how a later Gradient fill runs — the tube itself is unchanged.
+                        l.gradient = g;
+                        changed(l, "Line gradient: " + g.label.toLowerCase(java.util.Locale.ROOT));
+                    }));
+        }
+        bottom.add(new MarkerToolbar.Button(MarkerToolbar.FLIP, false, false,
+                "Flip: swap the start and end nodes", () -> {
+                    l.reverse();
+                    changed(l, "Line flipped — it now starts at the other end");
+                }));
+        bottom.add(new MarkerToolbar.Button(MarkerToolbar.BIN, false, true,
+                "Delete this line (same as MMB)", () -> remove(l)));
+        bottom.add(new MarkerToolbar.Button(MarkerToolbar.QUESTION, false, false,
+                "Help: how lines work", () -> Minecraft.getInstance()
+                        .setScreenAndShow(co.fax.wang.GradientScreen.atHelpTopic("Marker line"))));
+        Vec3[] b = l.bounds();
+        return new MarkerToolbar.Spec(null, List.of(top, bottom), l.cogNode(), b[0], b[1], controlsOf(l));
+    }
+
+    private static void changed(LineShape l, String msg) {
+        ShapeMarkers.touch(l);
+        ShapeMarkers.saveLines();
+        MarkerText.say(msg);
+    }
+
+    /** Every control position of a line (the toolbar keeps clear of them). */
+    private static List<Vec3> controlsOf(LineShape l) {
+        List<Vec3> out = new ArrayList<>();
+        List<LineCurve.Node> ns = l.curve.nodes;
+        for (int i = 0; i < ns.size(); i++) {
+            out.add(ns.get(i).p);
+            if (l.profile != LineProfile.NONE && cubesShown(l, i)) {
+                out.add(l.sizeNode(i));
+                out.add(l.twistNode(i));
+            }
+        }
+        out.add(l.moveNode());
+        return out;
+    }
+
+    private static String cap(String s) {
+        return s.charAt(0) + s.substring(1).toLowerCase(java.util.Locale.ROOT);
+    }
+
+    // ---- aim hints -----------------------------------------------------------------------------
+
+    /** What the aimed line control does, for the action bar; null when nothing is aimed. */
+    static String hint() {
+        if (aimed == null) return null;
+        LineShape l = aimed.line;
+        String mod = MarkerText.mod(), alt = MarkerText.axis();
+        int last = l.curve.nodes.size() - 1;
+        return switch (aimed.kind) {
+            case NODE -> {
+                boolean end = aimed.index == 0 || aimed.index == last;
+                String name = aimed.index == 0 ? "Start node" : aimed.index == last ? "End node" : "Node " + (aimed.index + 1);
+                yield name + " · drag move · " + alt + " axis lock · dbl-click "
+                        + (hasAnyHandle(l, aimed.index) ? "sharp" : "smooth")
+                        + (l.profile != LineProfile.NONE ? " · " + mod + "+scroll resize" : "")
+                        + (end ? " · MMB delete line" : " · MMB delete node · " + mod + "+MMB delete line");
+            }
+            case HANDLE_IN, HANDLE_OUT -> "Handle · drag bend · RMB drag slide · " + mod + " mirror · "
+                    + alt + " axis lock · MMB delete line";
+            case SIZE -> "Node " + (aimed.index + 1) + " · radius " + fmt(l.curve.nodes.get(aimed.index).r)
+                    + " · drag resize · " + mod + "+drag all nodes · " + mod + "+scroll resize · RMB reset · "
+                    + mod + "+RMB reset all";
+            case TWIST -> "Twist · drag turn · " + mod + "+drag all nodes · RMB reset · " + mod + "+RMB reset all";
+            case MOVE -> "Move · drag move · " + alt + " axis lock · MMB delete line";
+            case COG -> "Cog · LMB options · MMB delete line";
+            case BODY -> "Line · dbl-click add a node · MMB delete line";
+        };
+    }
+
+    private static boolean hasAnyHandle(LineShape l, int i) {
+        LineCurve.Node n = l.curve.nodes.get(i);
+        return n.in.lengthSqr() > 1e-12 || n.out.lengthSqr() > 1e-12;
     }
 
     // ---- drag ---------------------------------------------------------------------------------
@@ -442,10 +550,11 @@ public final class LineMarkers {
             Vec3 d = target.subtract(a.line.curve.nodes.get(a.index).p);
             radialDir = d.lengthSqr() < 1e-9 ? nodeTangent(a.line, a.index) : d.normalize();
         }
-        Vec3 hit = planeHit(mc, target);
+        Vec3 hit = Gizmo.viewPlaneHit(Raycast.eye(mc), Raycast.look(mc), target);
         grabOffset = hit == null ? Vec3.ZERO : target.subtract(hit);
         dragOrigin = target;
         lockAxis = null;
+        ShapeMarkers.touch(a.line);
     }
 
     /**
@@ -464,32 +573,27 @@ public final class LineMarkers {
             boolean in = dragKind == Kind.HANDLE_IN;
             if (in) n.in = h;
             else n.out = h;
-            if (co.fax.wang.Gradient.modifierDown()) {
+            if (Gradient.modifierDown()) {
                 if (in) n.out = h.scale(-1);
                 else n.in = h.scale(-1);
             }
             dragLine.markDirty();
             return;
         }
-        Vec3 hit = planeHit(mc, controlPos(dragLine, dragKind, dragIndex));
+        Vec3 hit = Gizmo.viewPlaneHit(Raycast.eye(mc), Raycast.look(mc), controlPos(dragLine, dragKind, dragIndex));
         if (hit == null) return;
         Vec3 target = hit.add(grabOffset);
         boolean lockable = dragKind == Kind.NODE || dragKind == Kind.MOVE
                 || dragKind == Kind.HANDLE_IN || dragKind == Kind.HANDLE_OUT;
-        if (lockable && co.fax.wang.Gradient.axisLockDown()) {
+        if (lockable && Gradient.axisLockDown()) {
             // Axis lock: slide along the world axis the drag mostly moves on (picked once, kept until
             // Alt is released), following the point on that axis nearest the view ray.
             if (lockAxis == null) {
                 Vec3 d = target.subtract(dragOrigin);
                 if (d.length() < LOCK_PICK) return;
-                double ax = Math.abs(d.x), ay = Math.abs(d.y), az = Math.abs(d.z);
-                lockAxis = ax >= ay && ax >= az ? net.minecraft.core.Direction.Axis.X
-                        : ay >= az ? net.minecraft.core.Direction.Axis.Y : net.minecraft.core.Direction.Axis.Z;
+                lockAxis = Gizmo.dominantAxis(d);
             }
-            Vec3 u = axisUnit(lockAxis);
-            Vec3 a = dragOrigin.subtract(u.scale(Raycast.REACH)), b = dragOrigin.add(u.scale(Raycast.REACH));
-            double s = LineCurve.segmentRayClosest(a, b, Raycast.eye(mc), Raycast.look(mc))[0];
-            target = a.add(b.subtract(a).scale(s));
+            target = Gizmo.onAxis(Raycast.eye(mc), Raycast.look(mc), dragOrigin, lockAxis);
         } else {
             lockAxis = null;
         }
@@ -508,7 +612,7 @@ public final class LineMarkers {
                 boolean in = dragKind == Kind.HANDLE_IN;
                 if (in) n.in = h;
                 else n.out = h;
-                if (co.fax.wang.Gradient.modifierDown()) { // link: the opposite handle mirrors
+                if (Gradient.modifierDown()) { // modifier: the opposite handle mirrors
                     if (in) n.out = h.scale(-1);
                     else n.in = h.scale(-1);
                 }
@@ -518,7 +622,7 @@ public final class LineMarkers {
                 Vec3 d = target.subtract(s.pos());
                 Vec3 inPlane = d.subtract(s.tan().scale(d.dot(s.tan())));
                 double r = Math.max(LineShape.MIN_RADIUS, Math.min(LineShape.MAX_RADIUS, inPlane.length() - 0.5));
-                if (co.fax.wang.Gradient.modifierDown()) l.setAllRadii(r); // modifier: every node
+                if (Gradient.modifierDown()) l.setAllRadii(r); // modifier: every node
                 else ns.get(dragIndex).r = r;
             }
             case TWIST -> {
@@ -526,37 +630,13 @@ public final class LineMarkers {
                 Vec3 d = target.subtract(s.pos());
                 // The twist node sits a quarter turn (+b') from the profile's +n' direction.
                 double angle = Math.atan2(d.dot(s.b()), d.dot(s.n())) - Math.PI / 2;
-                if (co.fax.wang.Gradient.modifierDown()) l.setAllTwists(angle); // modifier: every node
+                if (Gradient.modifierDown()) l.setAllTwists(angle); // modifier: every node
                 else ns.get(dragIndex).tw = angle;
             }
             case MOVE -> l.curve.translate(target.subtract(l.moveNode()));
             default -> { }
         }
         l.markDirty();
-    }
-
-    /**
-     * Where the view ray crosses the plane through {@code anchor} perpendicular to eye → anchor,
-     * or null when parallel / behind.
-     */
-    private static Vec3 planeHit(Minecraft mc, Vec3 anchor) {
-        Vec3 eye = Raycast.eye(mc), dir = Raycast.look(mc);
-        Vec3 normal = anchor.subtract(eye);
-        if (normal.lengthSqr() < 1e-6) return null;
-        normal = normal.normalize();
-        double den = dir.dot(normal);
-        if (den < 1e-3) return null; // looking away from the point
-        double t = anchor.subtract(eye).dot(normal) / den;
-        if (t < 0 || t > Raycast.REACH) return null;
-        return eye.add(dir.scale(t));
-    }
-
-    private static Vec3 axisUnit(net.minecraft.core.Direction.Axis a) {
-        return switch (a) {
-            case X -> new Vec3(1, 0, 0);
-            case Y -> new Vec3(0, 1, 0);
-            case Z -> new Vec3(0, 0, 1);
-        };
     }
 
     /**
@@ -656,25 +736,24 @@ public final class LineMarkers {
         return t.lengthSqr() < 1e-12 ? new Vec3(1, 0, 0) : t.normalize();
     }
 
-    private static void updateAim(Minecraft mc) {
+    private static void computeAim(Minecraft mc) {
         if (dragLine != null) {
             aimed = new Aim(dragLine, dragKind, dragIndex, 0);
             return;
         }
         Vec3 eye = Raycast.eye(mc), dir = Raycast.look(mc);
         Aim best = null;
-        Vec3[] cam = cameraAxes(mc);
         for (LineShape l : lines) {
             boolean sel = l == selected;
             List<LineCurve.Node> ns = l.curve.nodes;
             for (int i = 0; i < ns.size(); i++) {
-                best = closer(best, l, Kind.NODE, i, raySphere(eye, dir, ns.get(i).p, PICK));
+                best = closer(best, l, Kind.NODE, i, Gizmo.raySphere(eye, dir, ns.get(i).p, PICK));
                 if (sel) {
                     if (hasHandle(l, i, true)) {
-                        best = closer(best, l, Kind.HANDLE_IN, i, raySphere(eye, dir, handlePos(l, i, true), PICK));
+                        best = closer(best, l, Kind.HANDLE_IN, i, Gizmo.raySphere(eye, dir, handlePos(l, i, true), PICK));
                     }
                     if (hasHandle(l, i, false)) {
-                        best = closer(best, l, Kind.HANDLE_OUT, i, raySphere(eye, dir, handlePos(l, i, false), PICK));
+                        best = closer(best, l, Kind.HANDLE_OUT, i, Gizmo.raySphere(eye, dir, handlePos(l, i, false), PICK));
                     }
                 }
             }
@@ -682,16 +761,14 @@ public final class LineMarkers {
                 if (l.profile != LineProfile.NONE) {
                     for (int i = 0; i < ns.size(); i++) {
                         if (!cubesShown(l, i)) continue;
-                        best = closer(best, l, Kind.SIZE, i, rayCube(eye, dir, l.sizeNode(i), CTRL_HALF));
-                        best = closer(best, l, Kind.TWIST, i, rayCube(eye, dir, l.twistNode(i), CTRL_HALF));
+                        best = closer(best, l, Kind.SIZE, i, Gizmo.rayCube(eye, dir, l.sizeNode(i), CTRL_HALF));
+                        best = closer(best, l, Kind.TWIST, i, Gizmo.rayCube(eye, dir, l.twistNode(i), CTRL_HALF));
                     }
                 }
-                best = closer(best, l, Kind.MOVE, 0, rayCube(eye, dir, l.moveNode(), CTRL_HALF));
-                for (int k = 0; k < 2 * BUTTON_COUNT; k++) {
-                    // Buttons draw on top of everything, so they win over anything behind them.
-                    double t = rayButton(eye, dir, buttonCenter(l, k, cam), cam);
-                    if (t >= 0) best = new Aim(l, Kind.BUTTON, k, 0);
-                }
+                best = closer(best, l, Kind.MOVE, 0, Gizmo.rayCube(eye, dir, l.moveNode(), CTRL_HALF));
+            }
+            if (ShapeMarkers.cogShown(l)) {
+                best = closer(best, l, Kind.COG, 0, Gizmo.rayCube(eye, dir, l.cogNode(), CTRL_HALF));
             }
         }
         if (best == null) {
@@ -705,98 +782,17 @@ public final class LineMarkers {
                 }
             }
         }
-        // Newly hovered button: say what it does (once per hover, not every tick).
-        boolean onButton = best != null && best.kind == Kind.BUTTON;
-        if (onButton && (aimed == null || aimed.kind != Kind.BUTTON
-                || aimed.line != best.line || aimed.index != best.index)) {
-            overlay(mc, buttonLabel(best.line, best.index));
-        }
         aimed = best;
     }
 
     private static Aim closer(Aim best, LineShape l, Kind k, int i, double t) {
         if (t < 0) return best;
-        if (best != null && best.kind == Kind.BUTTON) return best;
         return best == null || t < best.dist ? new Aim(l, k, i, t) : best;
-    }
-
-    private static double raySphere(Vec3 o, Vec3 d, Vec3 c, double r) {
-        Vec3 oc = c.subtract(o);
-        double t = oc.dot(d);
-        if (t < 0) return -1;
-        double d2 = oc.lengthSqr() - t * t;
-        return d2 <= r * r ? t : -1;
-    }
-
-    private static double rayCube(Vec3 o, Vec3 d, Vec3 c, double h) {
-        return ShapeMath.rayBoxIntersect(o.x, o.y, o.z, d.x, d.y, d.z,
-                c.x - h, c.y - h, c.z - h, c.x + h, c.y + h, c.z + h);
-    }
-
-    /** Camera right/up axes for billboards: {right, up, forward}. */
-    private static Vec3[] cameraAxes(Minecraft mc) {
-        Vec3 f = Raycast.look(mc);
-        Vec3 right = f.cross(new Vec3(0, 1, 0));
-        right = right.lengthSqr() < 1e-6 ? new Vec3(1, 0, 0) : right.normalize();
-        Vec3 up = right.cross(f).normalize();
-        return new Vec3[]{right, up, f};
-    }
-
-    /**
-     * Button {@code k}: set k / BUTTON_COUNT (0 above the start, 1 above the end), slot
-     * k % BUTTON_COUNT — the top row, then the gradient row centred under it.
-     */
-    private static Vec3 buttonCenter(LineShape l, int k, Vec3[] cam) {
-        int slot = k % BUTTON_COUNT;
-        boolean top = slot < TOP_ROW;
-        int n = top ? TOP_ROW : BUTTON_COUNT - TOP_ROW, i = top ? slot : slot - TOP_ROW;
-        double width = n * BTN + (n - 1) * BTN_GAP;
-        double x = -width / 2 + BTN / 2 + i * (BTN + BTN_GAP);
-        LineCurve.Node end = l.curve.nodes.get(k >= BUTTON_COUNT ? l.curve.nodes.size() - 1 : 0);
-        double r = l.profile == LineProfile.NONE ? 0 : end.r + 0.5;
-        Vec3 c = end.p.add(0, r + 2.2, 0).add(cam[0].scale(x));
-        return top ? c : c.subtract(cam[1].scale(BTN + BTN_GAP));
-    }
-
-    /** What a button does, shown above the hotbar while it's hovered. */
-    private static String buttonLabel(LineShape l, int k) {
-        int slot = k % BUTTON_COUNT;
-        if (slot >= TOP_ROW) {
-            LineGradient g = BUTTON_GRADIENTS[slot - TOP_ROW];
-            String what = switch (g) {
-                case ACROSS -> "from the side you aim into, across to the far side";
-                case ALONG -> "from the start (turquoise) to the end (amber)";
-                case INSIDE_OUT -> "from the line out to the skin";
-                case OUTSIDE_IN -> "from the skin in to the line";
-            };
-            return "Gradient " + g.label.toLowerCase() + ": " + what + (l.gradient == g ? " (on)" : "");
-        }
-        if (slot == SLOT_HELP) return "Help: how lines work";
-        if (slot == SLOT_SOLID) return l.solid ? "Solid tube (click for shell)" : "Shell tube (click for solid)";
-        LineProfile p = BUTTON_PROFILES[slot];
-        String name = p.name().charAt(0) + p.name().substring(1).toLowerCase();
-        return l.profile == p ? name + " (click for a bare line)" : name + " tube";
-    }
-
-    /** Ray distance to a camera-facing button quad, or -1. */
-    private static double rayButton(Vec3 o, Vec3 d, Vec3 c, Vec3[] cam) {
-        Vec3 n = cam[2];
-        double den = d.dot(n);
-        if (Math.abs(den) < 1e-6) return -1;
-        double t = c.subtract(o).dot(n) / den;
-        if (t < 0) return -1;
-        Vec3 p = o.add(d.scale(t)).subtract(c);
-        double h = BTN / 2;
-        return Math.abs(p.dot(cam[0])) <= h && Math.abs(p.dot(cam[1])) <= h ? t : -1;
     }
 
     /** A radius for messages: "2", "2.5". */
     static String fmt(double v) {
         return v == Math.rint(v) ? String.valueOf((long) v) : String.format(java.util.Locale.ROOT, "%.1f", v);
-    }
-
-    private static void overlay(Minecraft mc, String msg) {
-        if (mc.player != null) mc.player.sendOverlayMessage(Component.literal(msg));
     }
 
     // ---- rendering ----------------------------------------------------------------------------
@@ -847,12 +843,13 @@ public final class LineMarkers {
             perfFrames++;
             perfReport();
         }
-        Vec3[] axes = cameraAxes(mc);
+        Vec3[] axes = Gizmo.cameraAxes(mc);
         PoseStack ps = new PoseStack();
         LineShape lookedTube = handles ? tubeLookedInto(mc) : null;
         for (LineShape l : lines) {
             boolean editing = handles && pm == PlacementMode.MARKER_LINE;
             boolean sel = editing && l == selected;
+            boolean cog = editing && ShapeMarkers.cogShown(l);
             l.ensureCells(false); // stale tubes rebuild in the background; the last one keeps drawing
             // The tube's edges go white only while it's looked at (crosshair in it, or on one of
             // its parts) — a selected line elsewhere in view keeps the plain amber edges.
@@ -860,39 +857,25 @@ public final class LineMarkers {
             drawTube(col, ps, cam, l, looked ? TUBE_EDGE_SELECTED : TUBE_EDGE, looked ? TUBE_GHOST_SELECTED : TUBE_GHOST);
             // Twice: depth-tested (weaves through terrain), then a faint on-top ghost so the
             // line and its controls stay readable — and grabbable — behind blocks.
-            col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(),
-                    (pose, vc) -> drawParts(new Em(pose, vc, cam, false), l, sel, editing, axes));
-            col.submitCustomGeometry(ps, WorldDraw.seeThrough(),
-                    (pose, vc) -> drawParts(new Em(pose, vc, cam, true), l, sel, editing, axes));
-            if (sel) drawButtons(col, ps, cam, l, axes);
+            Gizmo.twoPass(col, ps, cam, e -> drawParts(e, l, sel, editing, cog, axes));
         }
         if (dragLine != null && lockAxis != null && dragOrigin != null) {
             // Alt axis lock: the track the dragged node slides on, coloured by axis.
-            Vec3 u = axisUnit(lockAxis);
+            Vec3 u = Gizmo.axisUnit(lockAxis);
             Vec3 a = dragOrigin.subtract(u.scale(GUIDE_LEN)), b = dragOrigin.add(u.scale(GUIDE_LEN));
-            int c = switch (lockAxis) {
-                case X -> 0xE0FF5555;
-                case Y -> 0xE055FF55;
-                case Z -> 0xE05599FF;
-            };
-            for (boolean ghost : new boolean[]{false, true}) {
-                col.submitCustomGeometry(ps, ghost ? WorldDraw.seeThrough() : RenderTypes.debugFilledBox(),
-                        (pose, vc) -> segmentRibbon(new Em(pose, vc, cam, ghost), a, b, 0.025, c));
-            }
+            int c = Gizmo.axisColor(lockAxis);
+            Gizmo.twoPass(col, ps, cam, e -> Gizmo.segmentRibbon(e, a, b, 0.025, c));
         }
-        if (pm == PlacementMode.MARKER_LINE && handles && dragLine == null) {
+        if (pm == PlacementMode.MARKER_LINE && handles && dragLine == null && !ShapeMarkers.controlAimed()) {
             Vec3 p = aimPoint(mc);
             Vec3 start = pendingStart;
-            for (boolean ghost : new boolean[]{false, true}) {
-                col.submitCustomGeometry(ps, ghost ? WorldDraw.seeThrough() : RenderTypes.debugFilledBox(), (pose, vc) -> {
-                    Em e = new Em(pose, vc, cam, ghost);
-                    cube(e, p, NODE_HALF, start == null ? NODE_START : NODE_END);
-                    if (start != null) {
-                        cube(e, start, NODE_HALF, NODE_START);
-                        segmentRibbon(e, start, p, 0.035, PREVIEW);
-                    }
-                });
-            }
+            Gizmo.twoPass(col, ps, cam, e -> {
+                Gizmo.cube(e, p, NODE_HALF, start == null ? Gizmo.START : Gizmo.END);
+                if (start != null) {
+                    Gizmo.cube(e, start, NODE_HALF, Gizmo.START);
+                    Gizmo.segmentRibbon(e, start, p, 0.035, PREVIEW);
+                }
+            });
         }
     }
 
@@ -916,16 +899,18 @@ public final class LineMarkers {
         return null;
     }
 
-    /** The curve, nodes, and (selected) handles + end controls into one pass. */
-    private static void drawParts(Em e, LineShape l, boolean sel, boolean editing, Vec3[] axes) {
+    /** The curve, nodes, and (selected) handles + size/twist/move cubes into one pass. */
+    private static void drawParts(Gizmo.Em e, LineShape l, boolean sel, boolean editing, boolean cog, Vec3[] axes) {
         drawCurve(e, l.samples(), 0.035, sel ? LINE_SELECTED : LINE);
-        if (!editing) return; // outside Marker line mode: just the line (and its tube)
+        if (!editing) return; // outside Line mode: just the line (and its tube)
         List<LineCurve.Node> ns = l.curve.nodes;
         for (int i = 0; i < ns.size(); i++) {
-            int c = i == 0 ? NODE_START : i == ns.size() - 1 ? NODE_END : NODE_MID;
+            // Start and end nodes in the start / end colours, so the paint direction shows.
+            int c = i == 0 ? Gizmo.START : i == ns.size() - 1 ? Gizmo.END : Gizmo.MOVE;
             boolean a = isAimed(l, Kind.NODE, i);
-            cube(e, ns.get(i).p, a ? NODE_HALF * 1.3 : NODE_HALF, a ? AIMED : c);
+            Gizmo.cube(e, ns.get(i).p, a ? NODE_HALF * 1.3 : NODE_HALF, a ? Gizmo.AIMED : c);
         }
+        if (cog) Gizmo.cog(e, l.cogNode(), isAimed(l, Kind.COG, 0), axes);
         if (!sel) return;
         for (int i = 0; i < ns.size(); i++) {
             for (boolean in : new boolean[]{true, false}) {
@@ -933,40 +918,21 @@ public final class LineMarkers {
                 Kind k = in ? Kind.HANDLE_IN : Kind.HANDLE_OUT;
                 Vec3 hp = handlePos(l, i, in);
                 boolean parked = handleParked(l, i, in);
-                if (!parked) segmentRibbon(e, ns.get(i).p, hp, 0.015, STALK);
-                sphere(e, hp, HANDLE_R, isAimed(l, k, i) ? AIMED : parked ? HANDLE_PARKED : HANDLE);
+                if (!parked) Gizmo.segmentRibbon(e, ns.get(i).p, hp, 0.015, STALK);
+                Gizmo.sphere(e, hp, HANDLE_R, isAimed(l, k, i) ? Gizmo.AIMED : parked ? Gizmo.BEND_PARKED : Gizmo.BEND);
             }
         }
         if (l.profile != LineProfile.NONE) {
             for (int i = 0; i < ns.size(); i++) {
                 if (!cubesShown(l, i)) continue;
-                controlCube(e, l.sizeNode(i), isAimed(l, Kind.SIZE, i) ? AIMED : SIZE, RESIZE_ICON, axes);
-                controlCube(e, l.twistNode(i), isAimed(l, Kind.TWIST, i) ? AIMED : TWIST, ROTATE_ICON, axes);
+                Gizmo.controlCube(e, l.sizeNode(i), CTRL_HALF, isAimed(l, Kind.SIZE, i) ? Gizmo.AIMED : Gizmo.SIZE,
+                        Gizmo.RESIZE_ICON, axes);
+                Gizmo.controlCube(e, l.twistNode(i), CTRL_HALF, isAimed(l, Kind.TWIST, i) ? Gizmo.AIMED : Gizmo.TURN,
+                        Gizmo.ROTATE_ICON, axes);
             }
         }
-        controlCube(e, l.moveNode(), isAimed(l, Kind.MOVE, 0) ? AIMED : MOVE, MOVE_ICON, axes);
-    }
-
-    /**
-     * An end / move control: its cube, plus a small dark icon facing the camera, floated just
-     * in front of the cube so it reads on whichever side you see.
-     */
-    private static void controlCube(Em e, Vec3 c, int argb, String[] icon, Vec3[] ax) {
-        cube(e, c, CTRL_HALF, argb);
-        // Toward the eye (not along the view axis), so it stays centred on off-centre cubes.
-        Vec3 toEye = e.cam().subtract(c);
-        Vec3 front = toEye.lengthSqr() < 1e-6 ? c : c.add(toEye.normalize().scale(CTRL_HALF * 1.8));
-        double px = CTRL_HALF * 2 * 0.8 / icon[0].length(); // icon spans 80% of the cube
-        int cols = icon[0].length();
-        for (int ry = 0; ry < icon.length; ry++) {
-            for (int rx = 0; rx < cols; rx++) {
-                if (icon[ry].charAt(rx) != 'X') continue;
-                Vec3 p = front.add(ax[0].scale((rx - (cols - 1) / 2.0) * px))
-                        .add(ax[1].scale(((icon.length - 1) / 2.0 - ry) * px));
-                Vec3 r = ax[0].scale(px / 2), u = ax[1].scale(px / 2);
-                quad(e, CTRL_ICON, p.subtract(r).subtract(u), p.add(r).subtract(u), p.add(r).add(u), p.subtract(r).add(u));
-            }
-        }
+        Gizmo.controlCube(e, l.moveNode(), CTRL_HALF, isAimed(l, Kind.MOVE, 0) ? Gizmo.AIMED : Gizmo.MOVE,
+                Gizmo.MOVE_ICON, axes);
     }
 
     private static boolean isAimed(LineShape l, Kind k, int i) {
@@ -1006,172 +972,7 @@ public final class LineMarkers {
         });
     }
 
-    /** Camera-facing buttons drawn on top of everything (see-through pipeline). */
-    private static void drawButtons(SubmitNodeCollector col, PoseStack ps, Vec3 cam, LineShape l, Vec3[] ax) {
-        col.submitCustomGeometry(ps, WorldDraw.seeThrough(), (pose, vc) -> {
-            for (int k = 0; k < 2 * BUTTON_COUNT; k++) {
-                int slot = k % BUTTON_COUNT;
-                Vec3 c = buttonCenter(l, k, ax);
-                boolean active = slot < BUTTON_PROFILES.length ? l.profile == BUTTON_PROFILES[slot]
-                        : slot >= TOP_ROW && l.gradient == BUTTON_GRADIENTS[slot - TOP_ROW];
-                boolean hover = isAimed(l, Kind.BUTTON, k);
-                int bg = active ? BTN_ACTIVE : hover ? BTN_HOVER : BTN_BG;
-                billboardQuad(pose, vc, cam, c, ax, BTN / 2, BTN / 2, bg);
-                // Icon a hair toward the camera so it sorts over its background.
-                Vec3 ic = c.subtract(ax[2].scale(0.01));
-                int fg = active ? ICON_ON_ACTIVE : ICON;
-                double r = BTN * 0.32;
-                if (slot < BUTTON_PROFILES.length) {
-                    fan(pose, vc, cam, ic, ax, BUTTON_PROFILES[slot].outline(r), fg);
-                } else if (slot >= TOP_ROW) {
-                    pixelGlyph(pose, vc, cam, ic, ax, GRADIENT_GLYPHS[slot - TOP_ROW], BTN * 0.08, fg);
-                } else if (slot == SLOT_HELP) {
-                    pixelGlyph(pose, vc, cam, ic, ax, QUESTION, BTN * 0.11, fg);
-                } else if (l.solid) {
-                    fan(pose, vc, cam, ic, ax, LineProfile.CIRCLE.outline(r), fg);   // filled disc
-                } else {
-                    ring(pose, vc, cam, ic, ax, r, r * 0.6, fg);                     // hollow ring
-                }
-            }
-        });
-    }
-
-    // ---- geometry emitters (camera-relative, identity pose) ------------------------------------
-
-    /**
-     * Where geometry goes: the depth-tested pass, or the on-top ghost pass. The ghost pass rides
-     * the see-through text pipeline, so its vertices carry the white-texel UV, every quad is
-     * emitted in both windings (that pipeline culls back faces), and alpha is scaled down.
-     */
-    private record Em(PoseStack.Pose pose, VertexConsumer vc, Vec3 cam, boolean ghost) {}
-
-    private static void v(Em e, Vec3 p, int argb) {
-        VertexConsumer x = e.vc().addVertex(e.pose(),
-                (float) (p.x - e.cam().x), (float) (p.y - e.cam().y), (float) (p.z - e.cam().z));
-        if (e.ghost()) x = x.setUv(0.5f, 0.5f);
-        x.setColor(argb);
-    }
-
-    private static void vt(VertexConsumer vc, PoseStack.Pose pose, Vec3 cam, Vec3 p, int argb) {
-        vc.addVertex(pose, (float) (p.x - cam.x), (float) (p.y - cam.y), (float) (p.z - cam.z))
-                .setUv(0.5f, 0.5f).setColor(argb);
-    }
-
-    private static void quad(Em e, int argb, Vec3 a, Vec3 b, Vec3 c, Vec3 d) {
-        if (e.ghost()) {
-            int alpha = Math.round(((argb >>> 24) & 0xFF) * GHOST_ALPHA);
-            argb = (alpha << 24) | (argb & 0xFFFFFF);
-        }
-        v(e, a, argb);
-        v(e, b, argb);
-        v(e, c, argb);
-        v(e, d, argb);
-        if (e.ghost()) {
-            v(e, d, argb);
-            v(e, c, argb);
-            v(e, b, argb);
-            v(e, a, argb);
-        }
-    }
-
-    private static void drawCurve(Em e, List<LineCurve.Sample> ss, double w, int argb) {
-        for (int i = 0; i + 1 < ss.size(); i++) segmentRibbon(e, ss.get(i).pos(), ss.get(i + 1).pos(), w, argb);
-    }
-
-    /** A thin crossed ribbon a→b (reads as a line from any angle). */
-    private static void segmentRibbon(Em e, Vec3 a, Vec3 b, double w, int argb) {
-        Vec3 d = b.subtract(a);
-        if (d.lengthSqr() < 1e-12) return;
-        d = d.normalize();
-        Vec3 e1 = d.cross(Math.abs(d.y) > 0.9 ? new Vec3(1, 0, 0) : new Vec3(0, 1, 0)).normalize().scale(w);
-        Vec3 e2 = d.cross(e1).normalize().scale(w);
-        quad(e, argb, a.subtract(e1), b.subtract(e1), b.add(e1), a.add(e1));
-        quad(e, argb, a.subtract(e2), b.subtract(e2), b.add(e2), a.add(e2));
-    }
-
-    private static void cube(Em e, Vec3 c, double h, int argb) {
-        double x0 = c.x - h, x1 = c.x + h, y0 = c.y - h, y1 = c.y + h, z0 = c.z - h, z1 = c.z + h;
-        quad(e, argb, new Vec3(x0, y0, z0), new Vec3(x1, y0, z0), new Vec3(x1, y0, z1), new Vec3(x0, y0, z1));
-        quad(e, argb, new Vec3(x0, y1, z0), new Vec3(x0, y1, z1), new Vec3(x1, y1, z1), new Vec3(x1, y1, z0));
-        quad(e, argb, new Vec3(x0, y0, z0), new Vec3(x0, y1, z0), new Vec3(x1, y1, z0), new Vec3(x1, y0, z0));
-        quad(e, argb, new Vec3(x0, y0, z1), new Vec3(x1, y0, z1), new Vec3(x1, y1, z1), new Vec3(x0, y1, z1));
-        quad(e, argb, new Vec3(x0, y0, z0), new Vec3(x0, y0, z1), new Vec3(x0, y1, z1), new Vec3(x0, y1, z0));
-        quad(e, argb, new Vec3(x1, y0, z0), new Vec3(x1, y1, z0), new Vec3(x1, y1, z1), new Vec3(x1, y0, z1));
-    }
-
-    /** Low-poly UV sphere (8 slices × 6 stacks). */
-    private static void sphere(Em e, Vec3 c, double r, int argb) {
-        int slices = 8, stacks = 6;
-        for (int i = 0; i < stacks; i++) {
-            double p0 = Math.PI * i / stacks - Math.PI / 2, p1 = Math.PI * (i + 1) / stacks - Math.PI / 2;
-            for (int j = 0; j < slices; j++) {
-                double a0 = 2 * Math.PI * j / slices, a1 = 2 * Math.PI * (j + 1) / slices;
-                quad(e, argb,
-                        sp(c, r, p0, a0), sp(c, r, p0, a1), sp(c, r, p1, a1), sp(c, r, p1, a0));
-            }
-        }
-    }
-
-    private static Vec3 sp(Vec3 c, double r, double lat, double lon) {
-        double cl = Math.cos(lat);
-        return new Vec3(c.x + r * cl * Math.cos(lon), c.y + r * Math.sin(lat), c.z + r * cl * Math.sin(lon));
-    }
-
-    private static void billboardQuad(PoseStack.Pose pose, VertexConsumer vc, Vec3 cam, Vec3 c, Vec3[] ax,
-                                      double hw, double hh, int argb) {
-        Vec3 r = ax[0].scale(hw), u = ax[1].scale(hh);
-        vt(vc, pose, cam, c.subtract(r).subtract(u), argb);
-        vt(vc, pose, cam, c.add(r).subtract(u), argb);
-        vt(vc, pose, cam, c.add(r).add(u), argb);
-        vt(vc, pose, cam, c.subtract(r).add(u), argb);
-    }
-
-    /** Filled outline as a fan from the centre: (u, v) → (screen up, screen right). */
-    private static void fan(PoseStack.Pose pose, VertexConsumer vc, Vec3 cam, Vec3 c, Vec3[] ax, double[][] pts, int argb) {
-        for (int i = 0; i < pts.length; i++) {
-            double[] a = pts[i], b = pts[(i + 1) % pts.length];
-            Vec3 pa = c.add(ax[1].scale(a[0])).add(ax[0].scale(a[1]));
-            Vec3 pb = c.add(ax[1].scale(b[0])).add(ax[0].scale(b[1]));
-            // Wound counter-clockwise as seen from the camera (the see-through pipeline culls).
-            vt(vc, pose, cam, c, argb);
-            vt(vc, pose, cam, pb, argb);
-            vt(vc, pose, cam, pa, argb);
-            vt(vc, pose, cam, pa, argb);
-        }
-    }
-
-    /**
-     * A tiny pixel-art glyph, centred, each pixel a billboard square: 'X' is solid, '1'…'4' are
-     * faint → full alpha (gradient icons), anything else is empty.
-     */
-    private static void pixelGlyph(PoseStack.Pose pose, VertexConsumer vc, Vec3 cam, Vec3 c, Vec3[] ax,
-                                   String[] rows, double px, int argb) {
-        int cols = rows[0].length();
-        for (int ry = 0; ry < rows.length; ry++) {
-            for (int rx = 0; rx < cols; rx++) {
-                char ch = rows[ry].charAt(rx);
-                int a = ch == 'X' || ch == '4' ? 0xFF : ch == '3' ? 0xB0 : ch == '2' ? 0x70 : ch == '1' ? 0x38 : 0;
-                if (a == 0) continue;
-                int shade = (((argb >>> 24) * a / 0xFF) << 24) | (argb & 0xFFFFFF);
-                double ox = (rx - (cols - 1) / 2.0) * px, oy = ((rows.length - 1) / 2.0 - ry) * px;
-                billboardQuad(pose, vc, cam, c.add(ax[0].scale(ox)).add(ax[1].scale(oy)), ax, px / 2, px / 2, shade);
-            }
-        }
-    }
-
-    private static void ring(PoseStack.Pose pose, VertexConsumer vc, Vec3 cam, Vec3 c, Vec3[] ax,
-                             double ro, double ri, int argb) {
-        int n = 24;
-        for (int i = 0; i < n; i++) {
-            double a0 = 2 * Math.PI * i / n, a1 = 2 * Math.PI * (i + 1) / n;
-            vt(vc, pose, cam, ringPt(c, ax, ro, a0), argb);
-            vt(vc, pose, cam, ringPt(c, ax, ro, a1), argb);
-            vt(vc, pose, cam, ringPt(c, ax, ri, a1), argb);
-            vt(vc, pose, cam, ringPt(c, ax, ri, a0), argb);
-        }
-    }
-
-    private static Vec3 ringPt(Vec3 c, Vec3[] ax, double r, double a) {
-        return c.add(ax[0].scale(Math.cos(a) * r)).add(ax[1].scale(Math.sin(a) * r));
+    private static void drawCurve(Gizmo.Em e, List<LineCurve.Sample> ss, double w, int argb) {
+        for (int i = 0; i + 1 < ss.size(); i++) Gizmo.segmentRibbon(e, ss.get(i).pos(), ss.get(i + 1).pos(), w, argb);
     }
 }
