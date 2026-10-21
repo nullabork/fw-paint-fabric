@@ -23,8 +23,8 @@ public class GradientConfig {
     public PaintType activePaintType = PaintType.GRADIENT;
 
     /**
-     * Where blocks go (Marker / Single / Face / 3D Fill / Disabled) — one global mode shared by
-     * all paint types, cycled with the mode keybind.
+     * Where blocks go (Single / Face / 3D Fill / markers / shapes / Off — persisted as DISABLED) —
+     * one global mode shared by all paint types, picked on the Place tab or the wheel.
      */
     public PlacementMode placementMode = PlacementMode.DISABLED;
 
@@ -35,9 +35,9 @@ public class GradientConfig {
      */
     public boolean perceptualColor = true;
 
-    // ---- HUD helper text --------------------------------------------------------------------------
+    // ---- HUD --------------------------------------------------------------------------------------
 
-    /** Helper-text position (px from the top-left), movable via the "Move helper text" screen. */
+    /** HUD position (px from the top-left), movable via Settings › HUD › "Move HUD…". */
     public int hudX = 4;
     public int hudY = 4;
 
@@ -57,7 +57,7 @@ public class GradientConfig {
 
     // ---- markers --------------------------------------------------------------------------------
 
-    /** Max distance (blocks) allowed between a start and end marker. */
+    /** "Marker reach": max distance (blocks) allowed between a start and end marker. */
     public int maxMarkerDistance = 64;
     /**
      * When on, each placed start marker scans out from the clicked face and drops an end marker on
@@ -124,9 +124,4 @@ public class GradientConfig {
      */
     public co.fax.wang.palette.MissingBlockPolicy missingBlockPolicy =
             co.fax.wang.palette.MissingBlockPolicy.DONT_PAINT;
-
-    // ---- misc -----------------------------------------------------------------------------------
-
-    /** When on, the mod logs debug detail (e.g. the preview block order) to the game log. */
-    public boolean debug = false;
 }

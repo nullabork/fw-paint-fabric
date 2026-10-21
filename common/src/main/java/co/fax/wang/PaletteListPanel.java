@@ -2,6 +2,7 @@ package co.fax.wang;
 
 import co.fax.wang.palette.Palette;
 import co.fax.wang.palette.PaletteSegment;
+import co.fax.wang.ui.Ui;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.world.item.ItemStack;
@@ -10,11 +11,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The Palette tab's scrollable list of saved palettes: name on the left, the segment sprites lined
- * up on the right (Automatic segments as a crosshatch tile), a ▸ chevron when collapsed. Exactly
- * one row can be expanded — it shows a summary of every setting plus the vertical missing-blocks
- * list. Rows with missing blocks get a red border and a "missing blocks" line; the selected row a
- * white outline. The host owns the New/Use/Edit/Delete buttons and rebuilds entries on change.
+ * The Paint tab's scrollable library list — the gradient palettes (Gradient / Noise paint) or the
+ * patterns (Pattern paint), never both. Each row: the segment sprites (Automatic segments as a
+ * tinted crosshatch) or the pattern thumbnail, the name, and a state tag on the right. Row states
+ * use the kit's colours: the selected row a blue outline, the in-use one a green "● in use", and
+ * one with missing blocks a red border and "N missing". The host owns the buttons and the detail
+ * panel, rebuilds entries on change, and turns a double-click into Use.
  */
 public final class PaletteListPanel {
 
@@ -27,41 +29,25 @@ public final class PaletteListPanel {
         }
     }
 
-    private static final int ROW_H = 26;
-    private static final int MISSING_EXTRA = 11;  // extra height for the "missing blocks" line
-    private static final int ROW_GAP = 4;
+    private static final int ROW_H = 20;
+    private static final int ROW_GAP = 2;
     private static final int PAD = 4;
-
-    private static final int WHITE = 0xFFFFFFFF;
-    private static final int GREY = 0xFFA0A0A0;
-    private static final int RED = 0xFFFF5555;
-    private static final int YELLOW = 0xFFFFE34D;
-    private static final int ROW_BG = 0x66000000;
-    private static final int HOVER_BG = 0x33FFFFFF;
-    private static final int BORDER = 0x60FFFFFF;
-    private static final int SUMMARY_BG = 0x40000000;
+    private static final int ROW_LINE = 0xFF3E3E3E;
 
     private final Font font;
     private List<Entry> entries = new ArrayList<>();
     private String selectedId = "";
-    private String expandedId = "";
     private String activeId = "";
-    private String activePatternId = "";
     private int scroll;
     private int x, y, w, h;
 
-    /** The in-use GRADIENT palette (shown with a green tag). */
-    public void setActiveId(String id) {
-        activeId = id == null ? "" : id;
-    }
-
-    /** The in-use PATTERN (each kind keeps its own in-use marker). */
-    public void setActivePatternId(String id) {
-        activePatternId = id == null ? "" : id;
-    }
-
     public PaletteListPanel(Font font) {
         this.font = font;
+    }
+
+    /** The in-use item of the kind this list shows (green tag). */
+    public void setActiveId(String id) {
+        activeId = id == null ? "" : id;
     }
 
     public void setBounds(int x, int y, int w, int h) {
@@ -76,71 +62,62 @@ public final class PaletteListPanel {
         clampScroll();
     }
 
-    public String selectedId() {
-        return selectedId;
+    public List<Entry> entries() {
+        return entries;
     }
 
-    public String expandedId() {
-        return expandedId;
+    public String selectedId() {
+        return selectedId;
     }
 
     public void select(String id) {
         selectedId = id == null ? "" : id;
     }
 
-    /** Select + expand (the Use button's auto-expand); collapses any other row. */
-    public void expand(String id) {
-        selectedId = id == null ? "" : id;
-        expandedId = selectedId;
+    /** The selected row's entry, or null. */
+    public Entry selected() {
+        for (Entry e : entries) {
+            if (e.palette().id.equals(selectedId)) return e;
+        }
+        return null;
+    }
+
+    /** Scroll just enough that the selected row is visible. */
+    public void revealSelected() {
+        int ry = 0;
+        for (Entry e : entries) {
+            if (e.palette().id.equals(selectedId)) {
+                if (ry < scroll) scroll = ry;
+                else if (ry + ROW_H > scroll + h) scroll = ry + ROW_H - h;
+                clampScroll();
+                return;
+            }
+            ry += ROW_H + ROW_GAP;
+        }
     }
 
     // ---- geometry -------------------------------------------------------------------------------
 
-    private int rowHeight(Entry e) {
-        int base = ROW_H + (e.missing() ? MISSING_EXTRA : 0);
-        if (!e.palette().id.equals(expandedId)) return base;
-        return base + summaryHeight(e);
-    }
-
-    private int summaryHeight(Entry e) {
-        int lines = 4; // order/curve/sizing · variation/chaos/step len · noise · source
-        int hgt = PAD + lines * 11 + PAD;
-        if (e.missing()) hgt += 11 + e.missingNames().size() * 18 + PAD;
-        return hgt;
-    }
-
     private int contentHeight() {
-        int total = 0;
-        for (Entry e : entries) total += rowHeight(e) + ROW_GAP;
-        return total;
+        return entries.size() * (ROW_H + ROW_GAP);
     }
 
     private void clampScroll() {
         scroll = Math.max(0, Math.min(scroll, Math.max(0, contentHeight() - h)));
     }
 
-    /** Palette id of the row header at the given coords, or null. */
+    /** Palette id of the row at the given coords, or null. */
     public String rowIdAt(double mx, double my) {
         if (mx < x || mx > x + w || my < y || my > y + h) return null;
-        int ry = y - scroll;
-        for (Entry e : entries) {
-            int rh = rowHeight(e);
-            if (my >= ry && my < ry + rh) return e.palette().id;
-            ry += rh + ROW_GAP;
-        }
-        return null;
+        int idx = (int) ((my - y + scroll) / (ROW_H + ROW_GAP));
+        return idx >= 0 && idx < entries.size() ? entries.get(idx).palette().id : null;
     }
 
-    /**
-     * A left-click on a row: select it and toggle expansion (expanding collapses the previously
-     * expanded row; clicking the expanded row collapses it but keeps it selected).
-     */
-    public boolean click(double mx, double my) {
+    /** A left-click on a row selects it; returns the row's id, or null when it missed. */
+    public String click(double mx, double my) {
         String id = rowIdAt(mx, my);
-        if (id == null) return false;
-        selectedId = id;
-        expandedId = id.equals(expandedId) ? "" : id;
-        return true;
+        if (id != null) selectedId = id;
+        return id;
     }
 
     public boolean mouseScrolled(double mx, double my, double dir) {
@@ -157,9 +134,8 @@ public final class PaletteListPanel {
         g.enableScissor(x, y, x + w, y + h);
         int ry = y - scroll;
         for (Entry e : entries) {
-            int rh = rowHeight(e);
-            if (ry + rh >= y && ry <= y + h) renderRow(g, e, ry, rh, mouseX, mouseY);
-            ry += rh + ROW_GAP;
+            if (ry + ROW_H >= y && ry <= y + h) renderRow(g, e, ry, mouseX, mouseY);
+            ry += ROW_H + ROW_GAP;
         }
         g.disableScissor();
 
@@ -173,129 +149,57 @@ public final class PaletteListPanel {
         }
     }
 
-    private void renderRow(GuiGraphicsExtractor g, Entry e, int ry, int rh, int mouseX, int mouseY) {
+    private void renderRow(GuiGraphicsExtractor g, Entry e, int ry, int mouseX, int mouseY) {
         Palette p = e.palette();
         boolean selected = p.id.equals(selectedId);
-        boolean expanded = p.id.equals(expandedId);
-        boolean hover = mouseX >= x && mouseX <= x + w && mouseY >= ry && mouseY < ry + rh;
+        boolean hover = mouseX >= x && mouseX <= x + w && mouseY >= ry && mouseY < ry + ROW_H
+                && mouseY >= y && mouseY < y + h;
+        boolean inUse = p.id.equals(activeId);
 
-        g.fill(x, ry, x + w, ry + rh, ROW_BG);
-        if (hover && !expanded) g.fill(x, ry, x + w, ry + ROW_H, HOVER_BG);
-        int border = e.missing() ? RED : (selected ? WHITE : BORDER);
-        outline(g, x, ry, w, rh, border);
-        if (selected && e.missing()) outline(g, x - 1, ry - 1, w + 2, rh + 2, WHITE);
-
-        // Header: name left; sprites (gradients) or a grid thumbnail (patterns) right; chevron.
-        boolean isPattern = p.kind == co.fax.wang.palette.PaletteKind.PATTERN;
-        int textY = ry + (ROW_H - font.lineHeight) / 2;
-        int chevW = 12;
-        int spriteAreaW = isPattern ? 20 : Math.min(w / 2, e.sprites().size() * 17);
-        int spritesX = x + w - PAD - chevW - spriteAreaW;
-        boolean inUse = p.id.equals(isPattern ? activePatternId : activeId);
-        String tag = isPattern ? " · pattern" : "";
-        int nameMax = spritesX - x - 2 * PAD
-                - (inUse ? font.width(" · in use") : 0) - font.width(tag);
-        String name = font.plainSubstrByWidth(p.name, nameMax);
-        g.text(font, name, x + PAD + 1, textY, selected ? WHITE : 0xFFE0E0E0);
-        int nx = x + PAD + 1 + font.width(name);
-        if (!tag.isEmpty()) {
-            g.text(font, tag, nx, textY, GREY);
-            nx += font.width(tag);
+        if (selected) g.fill(x, ry, x + w, ry + ROW_H, Ui.SELECTED_FILL);
+        else if (hover) g.fill(x, ry, x + w, ry + ROW_H, Ui.HOVER);
+        Ui.outline(g, x, ry, w, ROW_H, e.missing() ? Ui.MISSING : ROW_LINE);
+        if (selected) {
+            Ui.outline(g, x, ry, w, ROW_H, Ui.SELECTED);
+            Ui.outline(g, x + 1, ry + 1, w - 2, ROW_H - 2, Ui.SELECTED);
         }
-        if (inUse) g.text(font, " · in use", nx, textY, 0xFF55FF55);
 
+        // Left: sprites (gradients, overlapped to fit) or the grid thumbnail (patterns).
+        boolean isPattern = p.kind == co.fax.wang.palette.PaletteKind.PATTERN;
+        int iconY = ry + (ROW_H - 16) / 2;
+        int iconsW;
         if (isPattern) {
-            PatternThumb.draw(g, p, spritesX, ry + (ROW_H - 20) / 2, 20);
+            PatternThumb.draw(g, p, x + PAD, iconY, 16);
+            iconsW = 16;
         } else {
             int n = e.sprites().size();
-            if (n > 0) {
-                int spacing = n == 1 ? 0 : Math.min(17, (spriteAreaW - 16) / Math.max(1, n - 1));
-                for (int i = 0; i < n; i++) {
-                    int sx = spritesX + i * spacing;
-                    if (e.auto().get(i)) drawCrosshatch(g, sx, ry + (ROW_H - 16) / 2, 16, e.tints().get(i));
-                    else g.item(e.sprites().get(i), sx, ry + (ROW_H - 16) / 2);
-                }
+            int spacing = n <= 1 ? 0 : Math.min(17, 40 / (n - 1));
+            iconsW = n == 0 ? 0 : 16 + spacing * (n - 1);
+            for (int i = 0; i < n; i++) {
+                int sx = x + PAD + i * spacing;
+                if (e.auto().get(i)) drawCrosshatch(g, sx, iconY, 16, e.tints().get(i));
+                else g.item(e.sprites().get(i), sx, iconY);
             }
         }
-        g.text(font, expanded ? "▾" : "▸", x + w - PAD - 8, textY, GREY);
 
-        int yy = ry + ROW_H;
+        // Right: state tags ("N missing" red, "● in use" green).
+        int textY = ry + (ROW_H - font.lineHeight) / 2 + 1;
+        int tx = x + w - PAD;
+        if (inUse) {
+            String t = "● in use";
+            tx -= font.width(t);
+            g.text(font, t, tx, textY, Ui.IN_USE);
+            tx -= 6;
+        }
         if (e.missing()) {
-            g.text(font, "missing blocks", x + PAD + 1, yy - 3, RED);
-            yy += MISSING_EXTRA;
+            String t = e.missingNames().size() + " missing";
+            tx -= font.width(t);
+            g.text(font, t, tx, textY, Ui.MISSING);
+            tx -= 6;
         }
-        if (expanded) renderSummary(g, e, yy);
-    }
-
-    private void renderSummary(GuiGraphicsExtractor g, Entry e, int sy) {
-        Palette p = e.palette();
-        int sx = x + PAD + 4;
-        int sw = w - 2 * (PAD + 4);
-        g.fill(sx - 2, sy, sx + sw + 2, sy + summaryHeight(e) - PAD, SUMMARY_BG);
-        int yy = sy + PAD;
-        if (p.kind == co.fax.wang.palette.PaletteKind.PATTERN) {
-            String[] plines = {
-                    "Pattern " + p.width + "×" + p.height + " · Tile: " + p.tiling.label(),
-                    "Variation: " + variationLabel(p),
-                    "Source: " + p.source.displayName(),
-                    "Paints under the Pattern paint type",
-            };
-            for (String line : plines) {
-                g.text(font, font.plainSubstrByWidth(line, sw), sx, yy, GREY);
-                yy += 11;
-            }
-            renderMissing(g, e, sx, sw, yy);
-            return;
-        }
-        String noiseScale = p.noiseLock
-                ? String.valueOf(Math.round(p.noiseScaleX))
-                : Math.round(p.noiseScaleX) + "/" + Math.round(p.noiseScaleY) + "/" + Math.round(p.noiseScaleZ);
-        String sizing = p.sizing.label() + (p.sizing == co.fax.wang.palette.SizingMode.SET_STEPS
-                ? " (" + p.steps + ")" : "");
-        String[] lines = {
-                "Order: " + p.order.label() + " · Curve: " + p.curve.displayName() + " · " + sizing,
-                "Variation " + variationLabel(p) + " · Chaos " + pct(p.chaos)
-                        + " · Step len " + pct(p.stepWobble),
-                "Noise: " + p.noiseType.displayName() + ", scale " + noiseScale
-                        + (p.noiseLock ? " (locked)" : "")
-                        + (p.noiseSeed == null || p.noiseSeed.isEmpty() ? "" : ", seed " + p.noiseSeed),
-                "Source: " + p.source.displayName(),
-        };
-        for (String line : lines) {
-            g.text(font, font.plainSubstrByWidth(line, sw), sx, yy, GREY);
-            yy += 11;
-        }
-        renderMissing(g, e, sx, sw, yy);
-    }
-
-    private void renderMissing(GuiGraphicsExtractor g, Entry e, int sx, int sw, int yy) {
-        if (!e.missing()) return;
-        g.text(font, "Missing blocks:", sx, yy + 2, RED);
-        yy += 13;
-        for (int i = 0; i < e.missingNames().size(); i++) {
-            ItemStack st = e.missingStacks().get(i);
-            if (!st.isEmpty()) g.item(st, sx, yy);
-            g.text(font, font.plainSubstrByWidth(e.missingNames().get(i), sw - 22),
-                    sx + 20, yy + 4, WHITE);
-            yy += 18;
-        }
-    }
-
-    private static String pct(double v) {
-        return Math.round(v * 100) + "%";
-    }
-
-    /** The unified variation window+chance, e.g. "±2 @ 35%" or "Off". */
-    private static String variationLabel(Palette p) {
-        return p.variationWindow == 0 || p.variationChance == 0
-                ? "Off" : "±" + p.variationWindow + " @ " + p.variationChance + "%";
-    }
-
-    private static void outline(GuiGraphicsExtractor g, int x, int y, int w, int h, int color) {
-        g.fill(x, y, x + w, y + 1, color);
-        g.fill(x, y + h - 1, x + w, y + h, color);
-        g.fill(x, y, x + 1, y + h, color);
-        g.fill(x + w - 1, y, x + w, y + h, color);
+        int nameX = x + PAD + iconsW + 6;
+        String name = font.plainSubstrByWidth(p.name, Math.max(0, tx - nameX));
+        g.text(font, name, nameX, textY, e.missing() ? Ui.MISSING : Ui.TEXT);
     }
 
     /** The 16×16 crosshatch (a gui-atlas sprite: textures/gui/sprites/crosshatch.png). */
