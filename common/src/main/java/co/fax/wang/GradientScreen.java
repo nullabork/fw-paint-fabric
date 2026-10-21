@@ -1207,7 +1207,7 @@ public class GradientScreen extends Screen {
         String use = o == null ? "RMB" : keyName(o.keyUse);
         String attack = o == null ? "LMB" : keyName(o.keyAttack);
         String pick = o == null ? "MMB" : keyName(o.keyPickItem);
-        String mod = Gradient.boundKey("clear");
+        String mod = Gradient.boundKey("modifier");
         List<String[]> out = new ArrayList<>();
         out.add(new String[] {Gradient.boundKey("open"), "Open / close this screen"});
         out.add(new String[] {Gradient.boundKey("wheel") + " (hold)", "Wheel"});

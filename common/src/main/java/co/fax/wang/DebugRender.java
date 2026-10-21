@@ -73,9 +73,9 @@ public final class DebugRender {
         c.nodes.get(1).in = new Vec3(0, -4, 0).add(right.scale(-2));
         LineShape l = new LineShape(c);
         l.profile = LineProfile.valueOf(LINE);
-        l.r0 = RADIUS;
-        l.r1 = Math.max(1, RADIUS * 0.6);
-        l.tw1 = Math.PI / 2;
+        c.nodes.get(0).r = RADIUS;
+        c.nodes.get(1).r = Math.max(1, RADIUS * 0.6);
+        c.nodes.get(1).tw = Math.PI / 2;
         LineMarkers.debugAdd(l);
     }
 }

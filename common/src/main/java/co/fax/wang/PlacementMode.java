@@ -13,8 +13,11 @@ public enum PlacementMode {
     MARKER("Marker", "Active: Marker", 0xFFFFAA00),                          // orange
     MARKER_BOX("Box", "Active: Box", 0xFFFFD24D),             // gold — one-piece box region
     MARKER_DRAW("Marker draw", "Active: Marker draw", 0xFFFFA07A),          // salmon
-    MARKER_CIRCLE("Circle", "Active: Circle", 0xFFFF8A3C),    // orange — donut ring region
-    MARKER_SQUARE("Square", "Active: Square", 0xFF7BD88A),    // green — square ring region
+    // Circle and Square merged into Ring (the ring's toolbar switches its outline). Configs
+    // saved with the old names load as Ring — Gson's enum adapter honours the alternates.
+    @com.google.gson.annotations.SerializedName(value = "MARKER_RING",
+            alternate = {"MARKER_CIRCLE", "MARKER_SQUARE"})
+    MARKER_RING("Ring", "Active: Ring", 0xFFFF8A3C),          // orange — circle/square donut region
     MARKER_LINE("Line", "Active: Line", 0xFFFFE066),          // yellow — curve / swept tube
     SINGLE("Single", "Active: Single", 0xFF55FF55),     // green
     // Persisted by enum name: FACE keeps its name so saved configs stay on it (label only changed).
@@ -62,7 +65,7 @@ public enum PlacementMode {
     /** True for the marker-selection modes (drag lines, box, freehand, shape regions). */
     public boolean isMarker() {
         return this == MARKER || this == MARKER_BOX || this == MARKER_DRAW
-                || this == MARKER_CIRCLE || this == MARKER_SQUARE || this == MARKER_LINE;
+                || this == MARKER_RING || this == MARKER_LINE;
     }
 
     /** A titled group of modes: the Place tab's sections and the wheel's Place ring share these. */
@@ -74,7 +77,7 @@ public enum PlacementMode {
             new Group("Markers", "Start and end blocks that aim and bound painting.",
                     java.util.List.of(MARKER, MARKER_DRAW, DISABLED)),
             new Group("Shapes", "Boxes, rings and lines that shape what gets painted.",
-                    java.util.List.of(MARKER_BOX, MARKER_CIRCLE, MARKER_SQUARE, MARKER_LINE)));
+                    java.util.List.of(MARKER_BOX, MARKER_RING, MARKER_LINE)));
 
     /** Every mode exactly once, in the order the Place tab and the wheel show them. */
     public static java.util.List<Group> groups() {

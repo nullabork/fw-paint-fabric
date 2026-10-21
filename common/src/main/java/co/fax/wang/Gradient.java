@@ -30,15 +30,13 @@ public final class Gradient {
     public static KeyMapping wheelKey;
     /** Next item for the current paint type: palette, pattern or Solid block (default B). */
     public static KeyMapping cyclePaletteKey;
-    /** Held modifier (default L-Ctrl): a marker-removing click clears the whole connected plane. */
-    public static KeyMapping clearConnectedKey;
     /**
-     * Held while dragging a line control (default L-Ctrl): mirrors curve handles and links both
-     * tube ends (same size / same twist). Sharing Ctrl with clear-connected is fine — 26.3 keeps a
-     * list of mappings per key, so both report down.
+     * The one marker modifier (default L-Ctrl): "the other way / both ends", never an action of
+     * its own — reverse an extrude, mirror curve handles, set or reset every line node at once,
+     * and with middle-click delete everything connected (a whole block-marker group or line).
      */
-    public static KeyMapping lineLinkKey;
-    /** Held while dragging a line node, handle or move node (default L-Alt): lock to one axis. */
+    public static KeyMapping modifierKey;
+    /** Held while dragging any marker control (default L-Alt): lock the drag to one axis. */
     public static KeyMapping axisLockKey;
 
     private Gradient() {}
@@ -57,9 +55,7 @@ public final class Gradient {
                 InputConstants.KEY_G, KEY_CATEGORY);
         cyclePaletteKey = new KeyMapping("key.gradient.cycle_palette", InputConstants.Type.KEYBOARD,
                 InputConstants.KEY_B, KEY_CATEGORY);
-        clearConnectedKey = new KeyMapping("key.gradient.clear_connected", InputConstants.Type.KEYBOARD,
-                InputConstants.KEY_LCONTROL, KEY_CATEGORY);
-        lineLinkKey = new KeyMapping("key.gradient.line_link", InputConstants.Type.KEYBOARD,
+        modifierKey = new KeyMapping("key.gradient.modifier", InputConstants.Type.KEYBOARD,
                 InputConstants.KEY_LCONTROL, KEY_CATEGORY);
         axisLockKey = new KeyMapping("key.gradient.axis_lock", InputConstants.Type.KEYBOARD,
                 InputConstants.KEY_LALT, KEY_CATEGORY);
@@ -289,14 +285,19 @@ public final class Gradient {
         return currentPlacement(Minecraft.getInstance()) != PlacementMode.DISABLED;
     }
 
-    /** True while the clear-connected modifier (default L-Ctrl) is held. */
-    public static boolean clearConnectedDown() {
-        return clearConnectedKey != null && clearConnectedKey.isDown();
+    /** True while the marker modifier (default L-Ctrl) is held. */
+    public static boolean modifierDown() {
+        return modifierKey != null && modifierKey.isDown();
     }
 
-    /** True while the line link modifier (default L-Ctrl) is held. */
+    /** Old name of {@link #modifierDown()} (clear-connected and line-link were merged into it). */
+    public static boolean clearConnectedDown() {
+        return modifierDown();
+    }
+
+    /** Old name of {@link #modifierDown()} (clear-connected and line-link were merged into it). */
     public static boolean lineLinkDown() {
-        return lineLinkKey != null && lineLinkKey.isDown();
+        return modifierDown();
     }
 
     /** True while the axis-lock modifier (default L-Alt) is held. */
@@ -305,8 +306,8 @@ public final class Gradient {
     }
 
     /**
-     * Display name of a mod keybind ("open" / "wheel" / "palette" / "clear" / "link" / "axis")
-     * as currently bound —
+     * Display name of a mod keybind ("open" / "wheel" / "palette" / "modifier" / "axis"; the
+     * retired "clear" and "link" name the modifier too) as currently bound —
      * UI text (e.g. the Help tab) uses this so rebinds always read correctly.
      */
     public static String boundKey(String id) {
@@ -314,8 +315,7 @@ public final class Gradient {
             case "open" -> openKey;
             case "wheel" -> wheelKey;
             case "palette" -> cyclePaletteKey;
-            case "clear" -> clearConnectedKey;
-            case "link" -> lineLinkKey;
+            case "modifier", "clear", "link" -> modifierKey;
             case "axis" -> axisLockKey;
             default -> null;
         };

@@ -21,7 +21,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  *
  * <p>FW Paint semantics on top of the fw-rule model: the shape is a paint REGION. The base
  * plane (layer 0 — where the shape was placed) is the gradient START side and the far end of
- * the extrusion is the END side; {@link #segmentFor} exposes a cell's position along that
+ * the extrusion is the END side ({@link #flip} swaps them); {@link #segmentFor} exposes a cell's position along that
  * axis for gradient anchoring, and {@link #contains} restricts placement to the band so
  * cylinders and square donuts paint with exactly the drawn wall thickness.
  */
@@ -29,7 +29,8 @@ public final class RingShape {
 
     public enum Kind { CIRCLE, SQUARE }
 
-    public final Kind kind;
+    /** Circle or square outline — switched from the ring's toolbar (see {@link #setKind}). */
+    public Kind kind;
     public BlockPos center;
     public final Direction.Axis normal;
     public BlockPos ctrlA;
@@ -40,6 +41,8 @@ public final class RingShape {
     public int height = 1;
     /** Rotation around the center in the shape plane, radians. Squares only; circles keep 0. */
     public double theta;
+    /** Flipped: the gradient runs from the far end of the extrusion back to the base plane. */
+    public boolean flip;
 
     public RingShape(Kind kind, BlockPos center, Direction.Axis normal, BlockPos ctrlA, BlockPos ctrlB) {
         this.kind = kind;
@@ -54,13 +57,24 @@ public final class RingShape {
     /** Rebuilds a shape from persisted state (see {@code ShapeStore}). */
     public static RingShape restore(Kind kind, BlockPos center, Direction.Axis normal,
                                     BlockPos ctrlA, BlockPos ctrlB, int rA, int rB,
-                                    int height, double theta) {
+                                    int height, double theta, boolean flip) {
         RingShape s = new RingShape(kind, center, normal, ctrlA, ctrlB);
         s.rA = rA;
         s.rB = rB;
         s.height = height == 0 ? 1 : height;
         s.theta = theta;
+        s.flip = flip;
         return s;
+    }
+
+    /**
+     * Switch between circle and square, keeping the band's radii (the same numbers in the new
+     * metric). A circle has no rotation, so going round drops it.
+     */
+    public void setKind(Kind k) {
+        if (k == kind) return;
+        kind = k;
+        if (k == Kind.CIRCLE) theta = 0;
     }
 
     /** The two in-plane axes spanning the shape's plane. */
@@ -142,6 +156,7 @@ public final class RingShape {
         if (far == 0) return null;
         BlockPos start = offset(cell, normal, -k);          // projection onto the base plane
         BlockPos end = offset(cell, normal, far - k);       // projection onto the far layer
+        if (flip) return new Segment(end, start, Math.abs(far - k), Math.abs(far));
         return new Segment(start, end, Math.abs(k), Math.abs(far));
     }
 

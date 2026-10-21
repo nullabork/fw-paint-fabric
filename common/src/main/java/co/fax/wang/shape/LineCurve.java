@@ -11,16 +11,28 @@ import java.util.List;
  * node i → node i+1 with control points (p_i, p_i + out_i, p_{i+1} + in_{i+1}, p_{i+1}); zero
  * handles give straight segments.
  *
+ * <p>Every node also carries the tube's radius and twist there; between nodes they ease with a
+ * smoothstep over the segment parameter ({@link #radiusAt}, {@link #twistAt}), so a line can
+ * bulge and pinch, not just taper.
+ *
  * <p>Pure geometry (no world access): sampling by arc length, rotation-minimising frames for the
  * tube sweep, closest point to a view ray, and shape-preserving node insertion.
  */
 public final class LineCurve {
 
-    /** A main node: position plus its in/out curve handles (relative offsets). */
+    /** A new node's tube radius (and what resetting a size cube goes back to). */
+    public static final double DEFAULT_RADIUS = 2;
+
+    /**
+     * A main node: position plus its in/out curve handles (relative offsets), and the tube's
+     * radius and twist (radians) at this node.
+     */
     public static final class Node {
         public Vec3 p;
         public Vec3 in = Vec3.ZERO;
         public Vec3 out = Vec3.ZERO;
+        public double r = DEFAULT_RADIUS;
+        public double tw;
 
         public Node(Vec3 p) {
             this.p = p;
@@ -33,7 +45,10 @@ public final class LineCurve {
         }
 
         Node copy() {
-            return new Node(p, in, out);
+            Node n = new Node(p, in, out);
+            n.r = r;
+            n.tw = tw;
+            return n;
         }
     }
 
@@ -72,6 +87,28 @@ public final class LineCurve {
                 w0 * p0.x + w1 * p1.x + w2 * p2.x + w3 * p3.x,
                 w0 * p0.y + w1 * p1.y + w2 * p2.y + w3 * p3.y,
                 w0 * p0.z + w1 * p1.z + w2 * p2.z + w3 * p3.z);
+    }
+
+    /** Smoothstep: 0 → 0, 1 → 1, flat at both ends so values ease out of and into each node. */
+    static double ease(double t) {
+        t = clamp01(t);
+        return t * t * (3 - 2 * t);
+    }
+
+    /** Tube radius at local parameter {@code t} of segment {@code seg}, eased between its nodes. */
+    public double radiusAt(int seg, double t) {
+        if (nodes.isEmpty()) return DEFAULT_RADIUS;
+        if (seg < 0 || seg >= segments()) return nodes.get(seg < 0 ? 0 : nodes.size() - 1).r;
+        double a = nodes.get(seg).r, b = nodes.get(seg + 1).r;
+        return a + (b - a) * ease(t);
+    }
+
+    /** Profile twist (radians) at local parameter {@code t} of segment {@code seg}, eased. */
+    public double twistAt(int seg, double t) {
+        if (nodes.isEmpty()) return 0;
+        if (seg < 0 || seg >= segments()) return nodes.get(seg < 0 ? 0 : nodes.size() - 1).tw;
+        double a = nodes.get(seg).tw, b = nodes.get(seg + 1).tw;
+        return a + (b - a) * ease(t);
     }
 
     /** Rough segment length from its control polygon (upper bound of the arc length). */
@@ -183,17 +220,22 @@ public final class LineCurve {
     /**
      * Insert a node at local parameter {@code t} of segment {@code seg} by de Casteljau
      * subdivision — the curve's shape is unchanged; the new node gets the split's handles and its
-     * neighbours' facing handles shrink to match. Returns the new node's index.
+     * neighbours' facing handles shrink to match. It takes the radius and twist already there,
+     * so the tube keeps its size at that spot. Returns the new node's index.
      */
     public int insertNode(int seg, double t) {
         Node a = nodes.get(seg), b = nodes.get(seg + 1);
+        double r = radiusAt(seg, t), tw = twistAt(seg, t);
         Vec3 p0 = a.p, p1 = a.p.add(a.out), p2 = b.p.add(b.in), p3 = b.p;
         Vec3 p01 = lerp(p0, p1, t), p12 = lerp(p1, p2, t), p23 = lerp(p2, p3, t);
         Vec3 p012 = lerp(p01, p12, t), p123 = lerp(p12, p23, t);
         Vec3 mid = lerp(p012, p123, t);
         a.out = p01.subtract(p0);
         b.in = p23.subtract(p3);
-        nodes.add(seg + 1, new Node(mid, p012.subtract(mid), p123.subtract(mid)));
+        Node n = new Node(mid, p012.subtract(mid), p123.subtract(mid));
+        n.r = r;
+        n.tw = tw;
+        nodes.add(seg + 1, n);
         return seg + 1;
     }
 

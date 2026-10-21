@@ -24,7 +24,7 @@ import java.util.List;
  * half the gap to its neighbours measured at the profile's rim, so slabs meet on the outside of
  * bends; the end slabs stop half a block past the ends — flat caps). Candidate cells come from a
  * grid laid across each slab; a cell is in when its centre is in some sample's slab and inside the
- * profile there (radius and twist interpolated). Shell keeps the cells with an outside neighbour.
+ * profile there (radius and twist eased between the nodes either side). Shell keeps the cells with an outside neighbour.
  *
  * <p>Geometry: exposed faces are greedy-merged into rectangles per plane, and convex edges are
  * merged into straight runs, so a big tube draws a few vertices per surface patch rather than
@@ -44,8 +44,7 @@ final class TubeBuild {
     static final float EDGE_W = 0.01f;  // half-width of the edge highlight quads
 
     /** Everything a build reads, copied so the worker never sees a half-edited line. */
-    record Params(LineCurve curve, LineProfile profile, boolean solid, double r0, double r1,
-                  double tw0, double tw1) {}
+    record Params(LineCurve curve, LineProfile profile, boolean solid) {}
 
     /** A finished build: cells (→ fraction along the line), geometry relative to origin. */
     record Result(Long2FloatOpenHashMap cells, BlockPos origin, float[] faces, float[] edges, long nanos) {
@@ -101,8 +100,9 @@ final class TubeBuild {
             LineCurve.Sample s = ss.get(i);
             Vec3 c = s.pos(), t = s.tan();
             double fr = frac(ss, i);
-            double r = p.r0() + (p.r1() - p.r0()) * fr;
-            double th = p.tw0() + (p.tw1() - p.tw0()) * fr, ct = Math.cos(th), st = Math.sin(th);
+            // Radius and twist come from the nodes either side, eased across the segment.
+            double r = p.curve().radiusAt(s.seg(), s.t());
+            double th = p.curve().twistAt(s.seg(), s.t()), ct = Math.cos(th), st = Math.sin(th);
             Vec3 nn = s.n().scale(ct).add(s.b().scale(st));
             Vec3 bb = s.b().scale(ct).subtract(s.n().scale(st));
             double ext = (r + 0.5) * Math.sqrt(2); // farthest profile point (square corner)

@@ -97,8 +97,6 @@ public final class PlaceOptions {
             case "MARKER_DRAW" -> "Drag a run";
             case "DISABLED" -> "Tool does nothing";
             case "MARKER_BOX" -> "Two corners";
-            case "MARKER_CIRCLE" -> "Round band";
-            case "MARKER_SQUARE" -> "Square band";
             case "MARKER_RING" -> "Round/square band";
             case "MARKER_LINE" -> "Nodes, tubes";
             default -> "";
@@ -117,8 +115,6 @@ public final class PlaceOptions {
             case "MARKER_DRAW" -> "A freehand marker pencil: drag a run of start markers.";
             case "DISABLED" -> "The paint tool does nothing; clicks work as normal.";
             case "MARKER_BOX" -> "Two corners mark a whole box region.";
-            case "MARKER_CIRCLE" -> "A round donut region with a wall thickness.";
-            case "MARKER_SQUARE" -> "A square donut region with a wall thickness.";
             case "MARKER_RING" -> "A round or square donut region with a wall thickness.";
             case "MARKER_LINE" -> "A curve you bend; give it a shape to make a tube.";
             default -> "";
