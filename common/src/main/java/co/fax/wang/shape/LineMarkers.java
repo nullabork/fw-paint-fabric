@@ -77,7 +77,8 @@ public final class LineMarkers {
     private static final double DEFAULT_DIST = 16;  // sky-aimed points land this far out
     private static final long DOUBLE_CLICK_MS = 350;
 
-    private enum Kind { NODE, HANDLE_IN, HANDLE_OUT, SIZE_START, SIZE_END, TWIST_START, TWIST_END, MOVE, BUTTON, BODY }
+    /** What the crosshair is on; SIZE / TWIST carry their node's index. */
+    private enum Kind { NODE, HANDLE_IN, HANDLE_OUT, SIZE, TWIST, MOVE, BUTTON, BODY }
 
     private record Aim(LineShape line, Kind kind, int index, double dist) {}
 
@@ -134,6 +135,8 @@ public final class LineMarkers {
     private static boolean dragRadial;
     private static Vec3 radialDir;
     private static LineShape lastBodyLine;
+    /** The selected line's node last aimed at: its size + twist cubes stay out. -1 = none. */
+    private static int selNode = -1;
     private static long frame;
 
     // ---- queries ------------------------------------------------------------------------------
@@ -200,7 +203,11 @@ public final class LineMarkers {
             return false;
         }
         updateAim(mc);
-        if (aimed != null && dragLine == null) selected = aimed.line;
+        if (aimed != null && dragLine == null) {
+            if (selected != aimed.line) selNode = -1;
+            selected = aimed.line;
+            if (aimed.kind == Kind.NODE) selNode = aimed.index;
+        }
 
         boolean saveNeeded = false;
         boolean consumed = false;
@@ -266,7 +273,7 @@ public final class LineMarkers {
             // Right-drag a handle: slide it in/out along its own direction (angle kept).
             beginDrag(mc, aimed, true);
             consumed = true;
-        } else if (useEdge && dragLine == null && aimed != null && resetEnd(mc, aimed)) {
+        } else if (useEdge && dragLine == null && aimed != null && resetNode(mc, aimed)) {
             saveNeeded = true;
             consumed = true;
         } else if (useEdge && create && pendingStart != null) {
@@ -279,7 +286,9 @@ public final class LineMarkers {
             LineShape l = aimed.line;
             int last = l.curve.nodes.size() - 1;
             if (aimed.kind == Kind.NODE && aimed.index > 0 && aimed.index < last) {
+                // The other nodes keep their own sizes; only this one's goes.
                 l.curve.nodes.remove(aimed.index);
+                if (l == selected) selNode = -1;
                 l.markDirty();
             } else {
                 lines.remove(l);
@@ -294,22 +303,23 @@ public final class LineMarkers {
     }
 
     /**
-     * Right-click a size cube: that end back to the default radius; a twist cube: that end's
-     * twist back to zero. Holding Link resets both ends. False when {@code a} isn't one of them.
+     * Right-click a size cube: that node back to the default radius; a twist cube: that node's
+     * twist back to zero. Holding the modifier resets every node. False when {@code a} isn't
+     * one of them.
      */
-    private static boolean resetEnd(Minecraft mc, Aim a) {
+    private static boolean resetNode(Minecraft mc, Aim a) {
         LineShape l = a.line;
-        boolean both = co.fax.wang.Gradient.lineLinkDown();
+        boolean all = co.fax.wang.Gradient.modifierDown();
         switch (a.kind) {
-            case SIZE_START, SIZE_END -> {
-                if (both || a.kind == Kind.SIZE_START) l.r0 = LineShape.DEFAULT_RADIUS;
-                if (both || a.kind == Kind.SIZE_END) l.r1 = LineShape.DEFAULT_RADIUS;
-                overlay(mc, both ? "Size reset (both ends)" : "Size reset");
+            case SIZE -> {
+                if (all) l.setAllRadii(LineShape.DEFAULT_RADIUS);
+                else l.curve.nodes.get(a.index).r = LineShape.DEFAULT_RADIUS;
+                overlay(mc, all ? "FW Paint · Line: every node's size reset" : "FW Paint · Line: node size reset");
             }
-            case TWIST_START, TWIST_END -> {
-                if (both || a.kind == Kind.TWIST_START) l.tw0 = 0;
-                if (both || a.kind == Kind.TWIST_END) l.tw1 = 0;
-                overlay(mc, both ? "Twist reset (both ends)" : "Twist reset");
+            case TWIST -> {
+                if (all) l.setAllTwists(0);
+                else l.curve.nodes.get(a.index).tw = 0;
+                overlay(mc, all ? "FW Paint · Line: every node's twist reset" : "FW Paint · Line: node twist reset");
             }
             default -> {
                 return false;
@@ -319,10 +329,34 @@ public final class LineMarkers {
         return true;
     }
 
-    /** Mouse wheel while dragging: push the dragged point a block further from / nearer to you. */
+    /**
+     * Mouse wheel. While dragging: push the dragged point a block further from / nearer to you.
+     * Aiming a node (or its size cube) without dragging: the modifier grows / shrinks that
+     * node's radius half a block a notch; plain scroll pushes the node itself.
+     */
     static boolean onScroll(double deltaY) {
-        if (dragLine == null) return false;
         Minecraft mc = Minecraft.getInstance();
+        if (dragLine == null && aimed != null && (aimed.kind == Kind.NODE || aimed.kind == Kind.SIZE)) {
+            LineShape l = aimed.line;
+            LineCurve.Node n = l.curve.nodes.get(aimed.index);
+            if (co.fax.wang.Gradient.modifierDown()) {
+                n.r = Math.max(LineShape.MIN_RADIUS, Math.min(LineShape.MAX_RADIUS, n.r + (deltaY > 0 ? 0.5 : -0.5)));
+                l.markDirty();
+                overlay(mc, "FW Paint · Line: node " + (aimed.index + 1) + " radius " + fmt(n.r));
+            } else if (aimed.kind == Kind.NODE) {
+                Vec3 away = n.p.subtract(Raycast.eye(mc));
+                if (away.lengthSqr() < 1e-6) return true;
+                Vec3 target = gridCenter(n.p.add(away.normalize().scale(deltaY > 0 ? 1 : -1)));
+                if (target.distanceTo(Raycast.eye(mc)) < 1) return true;
+                n.p = target;
+                l.markDirty();
+            } else {
+                return false;
+            }
+            ShapeMarkers.saveLines();
+            return true;
+        }
+        if (dragLine == null) return false;
         Vec3 anchor = controlPos(dragLine, dragKind, dragIndex);
         Vec3 away = anchor.subtract(Raycast.eye(mc));
         if (away.lengthSqr() < 1e-6) return true;
@@ -430,7 +464,7 @@ public final class LineMarkers {
             boolean in = dragKind == Kind.HANDLE_IN;
             if (in) n.in = h;
             else n.out = h;
-            if (co.fax.wang.Gradient.lineLinkDown()) {
+            if (co.fax.wang.Gradient.modifierDown()) {
                 if (in) n.out = h.scale(-1);
                 else n.in = h.scale(-1);
             }
@@ -474,50 +508,31 @@ public final class LineMarkers {
                 boolean in = dragKind == Kind.HANDLE_IN;
                 if (in) n.in = h;
                 else n.out = h;
-                if (co.fax.wang.Gradient.lineLinkDown()) { // link: the opposite handle mirrors
+                if (co.fax.wang.Gradient.modifierDown()) { // link: the opposite handle mirrors
                     if (in) n.out = h.scale(-1);
                     else n.in = h.scale(-1);
                 }
             }
-            case SIZE_START, SIZE_END -> {
-                boolean end = dragKind == Kind.SIZE_END;
-                LineCurve.Sample s = endSample(l, end);
+            case SIZE -> {
+                LineCurve.Sample s = l.samples().get(l.nodeSample(dragIndex));
                 Vec3 d = target.subtract(s.pos());
                 Vec3 inPlane = d.subtract(s.tan().scale(d.dot(s.tan())));
-                double r = Math.max(0.5, Math.min(64, inPlane.length() - 0.5));
-                if (co.fax.wang.Gradient.lineLinkDown()) { // link: both ends the same size
-                    l.r0 = r;
-                    l.r1 = r;
-                } else if (end) {
-                    l.r1 = r;
-                } else {
-                    l.r0 = r;
-                }
+                double r = Math.max(LineShape.MIN_RADIUS, Math.min(LineShape.MAX_RADIUS, inPlane.length() - 0.5));
+                if (co.fax.wang.Gradient.modifierDown()) l.setAllRadii(r); // modifier: every node
+                else ns.get(dragIndex).r = r;
             }
-            case TWIST_START, TWIST_END -> {
-                boolean end = dragKind == Kind.TWIST_END;
-                LineCurve.Sample s = endSample(l, end);
+            case TWIST -> {
+                LineCurve.Sample s = l.samples().get(l.nodeSample(dragIndex));
                 Vec3 d = target.subtract(s.pos());
                 // The twist node sits a quarter turn (+b') from the profile's +n' direction.
                 double angle = Math.atan2(d.dot(s.b()), d.dot(s.n())) - Math.PI / 2;
-                if (co.fax.wang.Gradient.lineLinkDown()) { // link: both ends turn together
-                    l.tw0 = angle;
-                    l.tw1 = angle;
-                } else if (end) {
-                    l.tw1 = angle;
-                } else {
-                    l.tw0 = angle;
-                }
+                if (co.fax.wang.Gradient.modifierDown()) l.setAllTwists(angle); // modifier: every node
+                else ns.get(dragIndex).tw = angle;
             }
             case MOVE -> l.curve.translate(target.subtract(l.moveNode()));
             default -> { }
         }
         l.markDirty();
-    }
-
-    private static LineCurve.Sample endSample(LineShape l, boolean end) {
-        List<LineCurve.Sample> ss = l.samples();
-        return ss.get(end ? ss.size() - 1 : 0);
     }
 
     /**
@@ -598,13 +613,21 @@ public final class LineMarkers {
             case NODE -> ns.get(index).p;
             case HANDLE_IN -> handlePos(l, index, true);
             case HANDLE_OUT -> handlePos(l, index, false);
-            case SIZE_START -> l.sizeNode(false);
-            case SIZE_END -> l.sizeNode(true);
-            case TWIST_START -> l.twistNode(false);
-            case TWIST_END -> l.twistNode(true);
+            case SIZE -> l.sizeNode(index);
+            case TWIST -> l.twistNode(index);
             case MOVE -> l.moveNode();
             default -> null;
         };
+    }
+
+    /**
+     * Whether node {@code i}'s size + twist cubes are out: always on the two ends, and on the
+     * node of the selected line that was last aimed at (or whose cube is being dragged).
+     */
+    private static boolean cubesShown(LineShape l, int i) {
+        if (i == 0 || i == l.curve.nodes.size() - 1) return true;
+        if (l != selected) return false;
+        return i == selNode || (dragLine == l && dragIndex == i);
     }
 
     /** True when node {@code i} has an in (or out) handle at all (ends have only one each). */
@@ -657,10 +680,11 @@ public final class LineMarkers {
             }
             if (sel) {
                 if (l.profile != LineProfile.NONE) {
-                    best = closer(best, l, Kind.SIZE_START, 0, rayCube(eye, dir, l.sizeNode(false), CTRL_HALF));
-                    best = closer(best, l, Kind.SIZE_END, 0, rayCube(eye, dir, l.sizeNode(true), CTRL_HALF));
-                    best = closer(best, l, Kind.TWIST_START, 0, rayCube(eye, dir, l.twistNode(false), CTRL_HALF));
-                    best = closer(best, l, Kind.TWIST_END, 0, rayCube(eye, dir, l.twistNode(true), CTRL_HALF));
+                    for (int i = 0; i < ns.size(); i++) {
+                        if (!cubesShown(l, i)) continue;
+                        best = closer(best, l, Kind.SIZE, i, rayCube(eye, dir, l.sizeNode(i), CTRL_HALF));
+                        best = closer(best, l, Kind.TWIST, i, rayCube(eye, dir, l.twistNode(i), CTRL_HALF));
+                    }
                 }
                 best = closer(best, l, Kind.MOVE, 0, rayCube(eye, dir, l.moveNode(), CTRL_HALF));
                 for (int k = 0; k < 2 * BUTTON_COUNT; k++) {
@@ -728,7 +752,9 @@ public final class LineMarkers {
         int n = top ? TOP_ROW : BUTTON_COUNT - TOP_ROW, i = top ? slot : slot - TOP_ROW;
         double width = n * BTN + (n - 1) * BTN_GAP;
         double x = -width / 2 + BTN / 2 + i * (BTN + BTN_GAP);
-        Vec3 c = l.buttonAnchor(k >= BUTTON_COUNT).add(cam[0].scale(x));
+        LineCurve.Node end = l.curve.nodes.get(k >= BUTTON_COUNT ? l.curve.nodes.size() - 1 : 0);
+        double r = l.profile == LineProfile.NONE ? 0 : end.r + 0.5;
+        Vec3 c = end.p.add(0, r + 2.2, 0).add(cam[0].scale(x));
         return top ? c : c.subtract(cam[1].scale(BTN + BTN_GAP));
     }
 
@@ -762,6 +788,11 @@ public final class LineMarkers {
         Vec3 p = o.add(d.scale(t)).subtract(c);
         double h = BTN / 2;
         return Math.abs(p.dot(cam[0])) <= h && Math.abs(p.dot(cam[1])) <= h ? t : -1;
+    }
+
+    /** A radius for messages: "2", "2.5". */
+    static String fmt(double v) {
+        return v == Math.rint(v) ? String.valueOf((long) v) : String.format(java.util.Locale.ROOT, "%.1f", v);
     }
 
     private static void overlay(Minecraft mc, String msg) {
@@ -907,10 +938,11 @@ public final class LineMarkers {
             }
         }
         if (l.profile != LineProfile.NONE) {
-            controlCube(e, l.sizeNode(false), isAimed(l, Kind.SIZE_START, 0) ? AIMED : SIZE, RESIZE_ICON, axes);
-            controlCube(e, l.sizeNode(true), isAimed(l, Kind.SIZE_END, 0) ? AIMED : SIZE, RESIZE_ICON, axes);
-            controlCube(e, l.twistNode(false), isAimed(l, Kind.TWIST_START, 0) ? AIMED : TWIST, ROTATE_ICON, axes);
-            controlCube(e, l.twistNode(true), isAimed(l, Kind.TWIST_END, 0) ? AIMED : TWIST, ROTATE_ICON, axes);
+            for (int i = 0; i < ns.size(); i++) {
+                if (!cubesShown(l, i)) continue;
+                controlCube(e, l.sizeNode(i), isAimed(l, Kind.SIZE, i) ? AIMED : SIZE, RESIZE_ICON, axes);
+                controlCube(e, l.twistNode(i), isAimed(l, Kind.TWIST, i) ? AIMED : TWIST, ROTATE_ICON, axes);
+            }
         }
         controlCube(e, l.moveNode(), isAimed(l, Kind.MOVE, 0) ? AIMED : MOVE, MOVE_ICON, axes);
     }

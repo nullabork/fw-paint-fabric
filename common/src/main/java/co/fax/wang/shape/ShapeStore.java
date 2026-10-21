@@ -50,13 +50,67 @@ public final class ShapeStore {
         String axis;
     }
 
-    /** Serialized line: nodes as [px,py,pz, inx,iny,inz, outx,outy,outz]. */
-    private static final class StoredLine {
+    /**
+     * Serialized line: nodes as [px,py,pz, inx,iny,inz, outx,outy,outz, radius, twist]. Saves
+     * from before per-node sizes have 9-number nodes and only the end values r0/r1/tw0/tw1,
+     * which are still written (first / last node) so an older build reads the ends back.
+     */
+    static final class StoredLine {
         double[][] nodes;
         String profile;
         boolean solid;
         String gradient;
         double r0, r1, tw0, tw1;
+    }
+
+    /** A stored line back to a shape (legacy end-only sizes spread over the nodes); null if < 2 nodes. */
+    static LineShape decodeLine(StoredLine sl) {
+        LineCurve c = new LineCurve();
+        boolean perNode = true;
+        for (double[] n : sl.nodes) {
+            LineCurve.Node node = new LineCurve.Node(new Vec3(n[0], n[1], n[2]),
+                    new Vec3(n[3], n[4], n[5]), new Vec3(n[6], n[7], n[8]));
+            if (n.length >= 11) {
+                node.r = n[9];
+                node.tw = n[10];
+            } else {
+                perNode = false;
+            }
+            c.nodes.add(node);
+        }
+        if (c.nodes.size() < 2) return null;
+        LineShape l = new LineShape(c);
+        l.profile = LineProfile.valueOf(sl.profile);
+        l.solid = sl.solid;
+        for (LineGradient g : LineGradient.values()) {
+            if (g.name().equals(sl.gradient)) l.gradient = g; // unknown/missing → default
+        }
+        if (!perNode) {
+            // No sizes saved at all (never written by a released build) → defaults, not radius 0.
+            boolean none = sl.r0 == 0 && sl.r1 == 0;
+            l.applyLegacyEnds(none ? LineShape.DEFAULT_RADIUS : sl.r0, none ? LineShape.DEFAULT_RADIUS : sl.r1,
+                    sl.tw0, sl.tw1);
+        }
+        return l;
+    }
+
+    static StoredLine encodeLine(LineShape l) {
+        StoredLine sl = new StoredLine();
+        List<LineCurve.Node> ns = l.curve.nodes;
+        sl.nodes = new double[ns.size()][];
+        for (int i = 0; i < sl.nodes.length; i++) {
+            LineCurve.Node n = ns.get(i);
+            sl.nodes[i] = new double[]{n.p.x, n.p.y, n.p.z, n.in.x, n.in.y, n.in.z,
+                    n.out.x, n.out.y, n.out.z, n.r, n.tw};
+        }
+        sl.profile = l.profile.name();
+        sl.solid = l.solid;
+        sl.gradient = l.gradient.name();
+        sl.r0 = ns.get(0).r;
+        sl.r1 = ns.get(ns.size() - 1).r;
+        sl.tw0 = ns.get(0).tw;
+        sl.tw1 = ns.get(ns.size() - 1).tw;
+        return sl;
     }
 
     private static final class WorldShapes {
@@ -98,23 +152,8 @@ public final class ShapeStore {
         if (stored.lines != null) {
             for (StoredLine sl : stored.lines) {
                 try {
-                    LineCurve c = new LineCurve();
-                    for (double[] n : sl.nodes) {
-                        c.nodes.add(new LineCurve.Node(new Vec3(n[0], n[1], n[2]),
-                                new Vec3(n[3], n[4], n[5]), new Vec3(n[6], n[7], n[8])));
-                    }
-                    if (c.nodes.size() < 2) continue;
-                    LineShape l = new LineShape(c);
-                    l.profile = LineProfile.valueOf(sl.profile);
-                    l.solid = sl.solid;
-                    for (LineGradient g : LineGradient.values()) {
-                        if (g.name().equals(sl.gradient)) l.gradient = g; // unknown/missing → default
-                    }
-                    l.r0 = sl.r0;
-                    l.r1 = sl.r1;
-                    l.tw0 = sl.tw0;
-                    l.tw1 = sl.tw1;
-                    lines.add(l);
+                    LineShape l = decodeLine(sl);
+                    if (l != null) lines.add(l);
                 } catch (Exception e) {
                     LOG.warn("Skipping malformed stored line in {}: {}", key, e.toString());
                 }
@@ -166,22 +205,7 @@ public final class ShapeStore {
                 stored.shapes.add(s);
             }
             stored.lines = new ArrayList<>(lines.size());
-            for (LineShape l : lines) {
-                StoredLine sl = new StoredLine();
-                sl.nodes = new double[l.curve.nodes.size()][];
-                for (int i = 0; i < sl.nodes.length; i++) {
-                    LineCurve.Node n = l.curve.nodes.get(i);
-                    sl.nodes[i] = new double[]{n.p.x, n.p.y, n.p.z, n.in.x, n.in.y, n.in.z, n.out.x, n.out.y, n.out.z};
-                }
-                sl.profile = l.profile.name();
-                sl.solid = l.solid;
-                sl.gradient = l.gradient.name();
-                sl.r0 = l.r0;
-                sl.r1 = l.r1;
-                sl.tw0 = l.tw0;
-                sl.tw1 = l.tw1;
-                stored.lines.add(sl);
-            }
+            for (LineShape l : lines) stored.lines.add(encodeLine(l));
             if (box != null) {
                 StoredBox b = new StoredBox();
                 b.cornerA = arr(box.cornerA);
