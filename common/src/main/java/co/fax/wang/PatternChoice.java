@@ -56,8 +56,7 @@ public final class PatternChoice {
     public static Prepared prepare(LocalPlayer player) {
         Palette active = PaletteStore.activePattern();
         if (active == null) {
-            return Prepared.fail(null, "Pattern: no pattern — press "
-                    + Gradient.boundKey("open") + " to set one up");
+            return Prepared.fail(null, Gradient.message("Pattern", "no pattern picked", "Paint"));
         }
         Palette pattern = active.copy();
         boolean any = false;
@@ -68,7 +67,8 @@ public final class PatternChoice {
             }
         }
         if (!any) {
-            return Prepared.fail(pattern, "'" + pattern.name + "' is empty — draw some cells");
+            return Prepared.fail(pattern, Gradient.message("Pattern",
+                    "'" + pattern.name + "' is empty, draw some cells with Edit", "Paint"));
         }
 
         record Entry(Block block, String id, int rgb) {}
@@ -87,8 +87,8 @@ public final class PatternChoice {
                     BlockTextures.gradientValue(b, null, GradientMode.COLOR, 0.5)));
         }
         if (source.isEmpty()) {
-            return Prepared.fail(pattern, "Pattern: no placeable blocks in "
-                    + pattern.source.displayName());
+            return Prepared.fail(pattern, Gradient.message("Pattern", "no placeable blocks in "
+                    + pattern.source.displayName(), null));
         }
 
         Set<String> available = new HashSet<>();
@@ -100,8 +100,8 @@ public final class PatternChoice {
             String name = b == null ? missing.get(0)
                     : new ItemStack(b.asItem()).getHoverName().getString();
             String more = missing.size() > 1 ? " (+" + (missing.size() - 1) + " more)" : "";
-            return Prepared.fail(pattern,
-                    "'" + pattern.name + "': missing " + name + more);
+            return Prepared.fail(pattern, Gradient.message("Pattern",
+                    "'" + pattern.name + "' is missing " + name + more, "Paint"));
         }
 
         source.sort(java.util.Comparator.comparingLong(e -> ColorOrder.colorSortKey(e.rgb())));

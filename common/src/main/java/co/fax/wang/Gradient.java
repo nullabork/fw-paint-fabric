@@ -28,7 +28,7 @@ public final class Gradient {
     public static KeyMapping openKey;
     /** Held (default G): shows the radial selector wheel for paint type + placement mode. */
     public static KeyMapping wheelKey;
-    /** Cycle the active palette through the saved list (default B). */
+    /** Next item for the current paint type: palette, pattern or Solid block (default B). */
     public static KeyMapping cyclePaletteKey;
     /** Held modifier (default L-Ctrl): a marker-removing click clears the whole connected plane. */
     public static KeyMapping clearConnectedKey;
@@ -83,7 +83,7 @@ public final class Gradient {
             if (holdingPaintTool(client)) {
                 client.setScreenAndShow(new co.fax.wang.wheel.WheelScreen());
             } else {
-                overlay(client, "FW Paint: hold your paint tool to use the selector wheel");
+                overlay(client, "FW Paint: hold your paint tool to use the wheel");
             }
         }
         wheelWasDown = down;
@@ -133,7 +133,6 @@ public final class Gradient {
         return ConfigManager.get().placementMode;
     }
 
-    /** Set the placement mode (wheel selection), persist it, and flash an action-bar message. */
     /**
      * Don't match palette: face selection skips blocks of the active palette / Solid block /
      * pattern, so a re-click doesn't spread over the layer just placed. Session-only on
@@ -143,14 +142,16 @@ public final class Gradient {
 
     public static void toggleDontMatchPalette() {
         dontMatchPalette = !dontMatchPalette;
-        overlay(Minecraft.getInstance(), "FW Paint — Don't match palette: " + (dontMatchPalette ? "on" : "off"));
+        overlay(Minecraft.getInstance(),
+                message("Place", "Don't match palette " + (dontMatchPalette ? "on" : "off"), null));
     }
 
+    /** Set the placement mode (wheel selection), persist it, and flash an action-bar message. */
     public static void setPlacementMode(PlacementMode mode) {
         GradientConfig cfg = ConfigManager.get();
         cfg.placementMode = mode;
         ConfigManager.save();
-        overlay(Minecraft.getInstance(), "FW Paint — Placement: " + mode.shortName());
+        overlay(Minecraft.getInstance(), message("Place", mode.shortName(), null));
     }
 
     /** Set the paint type (wheel selection), persist it, and flash an action-bar message. */
@@ -162,10 +163,10 @@ public final class Gradient {
         // Landing on a palette-driven paint with nothing of its kind set up → guide the user.
         co.fax.wang.palette.PaletteKind kind = kindFor(cfg.activePaintType);
         if (kind != null && co.fax.wang.palette.PaletteStore.allOf(kind).isEmpty()) {
-            overlay(mc, "FW Paint — " + cfg.activePaintType.label() + ": press "
-                    + boundKey("open") + " to set up a " + kind.label().toLowerCase(java.util.Locale.ROOT));
+            overlay(mc, message(cfg.activePaintType.label(),
+                    "no " + kind.label().toLowerCase(java.util.Locale.ROOT) + "s yet", "Paint"));
         } else {
-            overlay(mc, "FW Paint — Paint type: " + cfg.activePaintType.label());
+            overlay(mc, message("Paint", cfg.activePaintType.label(), null));
         }
     }
 
@@ -174,23 +175,23 @@ public final class Gradient {
         GradientConfig cfg = ConfigManager.get();
         cfg.solidMatch = match;
         ConfigManager.save();
-        overlay(Minecraft.getInstance(), "FW Paint — Solid: " + match.displayName());
+        overlay(Minecraft.getInstance(), message("Solid", match.displayName(), null));
     }
 
-    /** Solid paint via the wheel: place exactly this block (selects it, like the Solid tab). */
+    /** Solid paint via the wheel: place exactly this block (selects it, like the Paint tab's Solid list). */
     public static void setSolidBlock(String id) {
         GradientConfig cfg = ConfigManager.get();
         cfg.solidMatch = SolidMatch.SELECTED;
         cfg.solidExcludedBlocks.remove(id); // selecting an excluded block un-excludes it
         cfg.solidBlock = id;
         ConfigManager.save();
-        overlay(Minecraft.getInstance(), "FW Paint — Solid: " + toolDisplayName(id));
+        overlay(Minecraft.getInstance(), message("Solid", toolDisplayName(id), null));
     }
 
     /** Make a palette/pattern the active one of its kind (wheel selection). */
     public static void setActivePalette(co.fax.wang.palette.Palette p) {
         co.fax.wang.palette.PaletteStore.setActive(p.id);
-        overlay(Minecraft.getInstance(), "FW Paint — " + p.kind.label() + ": " + p.name);
+        overlay(Minecraft.getInstance(), message(p.kind.label(), p.name, null));
     }
 
     /** The palette kind a paint type consumes (null for Solid). */
@@ -203,22 +204,78 @@ public final class Gradient {
     }
 
     /**
-     * Step the active item through the saved list (the palette keybind) — filtered to the kind
-     * the current paint type consumes (patterns in Pattern paint, gradients otherwise).
+     * The B key: step to the next item for the current paint type — the next palette (Gradient,
+     * Noise), the next pattern (Pattern), or the next block from the Solid source (Solid; makes
+     * "This block" the match mode, like picking it on the Paint tab).
      */
     public static void cyclePalette() {
         Minecraft mc = Minecraft.getInstance();
         if (!holdingPaintTool(mc)) {
-            overlay(mc, "FW Paint: hold your paint tool to cycle palettes");
+            overlay(mc, "FW Paint: hold your paint tool to switch with " + boundKey("palette"));
             return;
         }
-        co.fax.wang.palette.PaletteKind kind = kindFor(ConfigManager.get().activePaintType);
-        if (kind == null) kind = co.fax.wang.palette.PaletteKind.GRADIENT; // Solid: cycle gradients
+        GradientConfig cfg = ConfigManager.get();
+        if (cfg.activePaintType == PaintType.SOLID) {
+            cycleSolidBlock(mc, cfg);
+            return;
+        }
+        co.fax.wang.palette.PaletteKind kind = kindFor(cfg.activePaintType);
         co.fax.wang.palette.Palette next = co.fax.wang.palette.PaletteStore.cycleActive(1, kind);
         overlay(mc, next == null
-                ? "FW Paint: no " + kind.label().toLowerCase(java.util.Locale.ROOT) + "s — press "
-                        + boundKey("open") + " to set one up"
-                : "FW Paint — " + kind.label() + ": " + next.name);
+                ? message(kind.label(), "no " + kind.label().toLowerCase(java.util.Locale.ROOT) + "s yet", "Paint")
+                : message(kind.label(), next.name, null));
+    }
+
+    /**
+     * Solid's B: the block after the current one among the source's non-excluded blocks. From
+     * another match mode, the first press switches back to the current block (or the first).
+     */
+    private static void cycleSolidBlock(Minecraft mc, GradientConfig cfg) {
+        java.util.List<String> ids = solidCandidates(mc, cfg);
+        if (ids.isEmpty()) {
+            overlay(mc, message("Solid", "no blocks in " + cfg.source.displayName(), "Paint"));
+            return;
+        }
+        int idx = ids.indexOf(cfg.solidBlock);
+        int next = cfg.solidMatch == SolidMatch.SELECTED || idx < 0 ? Math.floorMod(idx + 1, ids.size()) : idx;
+        setSolidBlock(ids.get(next));
+    }
+
+    /**
+     * Item ids of the unique placeable blocks in the Solid source range, in slot order, without
+     * the excluded ones — the Solid list's order, so B walks it top to bottom.
+     */
+    public static java.util.List<String> solidCandidates(Minecraft mc, GradientConfig cfg) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        if (mc.player == null) return out;
+        var items = mc.player.getInventory().getNonEquipmentItems();
+        int from = cfg.source == GradientSource.INVENTORY ? 9 : 0;
+        int to = Math.min(cfg.source == GradientSource.HOTBAR ? 9 : 36, items.size());
+        for (int slot = from; slot < to; slot++) {
+            ItemStack st = items.get(slot);
+            if (!(st.getItem() instanceof net.minecraft.world.item.BlockItem bi)) continue;
+            if (bi.getBlock().defaultBlockState().isAir()) continue;
+            Identifier id = BuiltInRegistries.ITEM.getKey(st.getItem());
+            if (id == null) continue;
+            String s = id.toString();
+            if (!out.contains(s) && !cfg.solidExcludedBlocks.contains(s)) out.add(s);
+        }
+        return out;
+    }
+
+    /**
+     * An action-bar message in the one format every FW Paint message uses:
+     * {@code FW Paint · <area>: <what happened> — <open key> › <tab>}. {@code fixTab} (the
+     * screen tab where it gets fixed) is null when there's nothing to fix.
+     */
+    public static String message(String area, String what, String fixTab) {
+        String msg = "FW Paint · " + area + ": " + what;
+        return fixTab == null ? msg : msg + " — " + fixIn(fixTab);
+    }
+
+    /** "K › Paint": where something is fixed, with the open key's live name. */
+    public static String fixIn(String tab) {
+        return boundKey("open") + " › " + tab;
     }
 
     private static void overlay(Minecraft mc, String msg) {

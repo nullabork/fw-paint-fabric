@@ -195,7 +195,7 @@ public final class PaintPlacer {
         if (bhr == null) {
             BlockPos air = airTarget(mc, cfg);
             if (air != null) startAir(mc, player, air);
-            else overlay(mc, type.label() + ": aim at a block face");
+            else overlay(mc, Gradient.message(type.label(), "aim at a block face", null));
             return;
         }
         BlockPos clicked = bhr.getBlockPos();
@@ -307,7 +307,8 @@ public final class PaintPlacer {
             case SOLID -> {
                 solidChosen = chooseSolidBlock(player, null);
                 if (solidChosen == null) {
-                    overlay(mc, "Solid: nothing to match in the air — aim at a block, or pick a ✓ block (K)");
+                    overlay(mc, Gradient.message("Solid",
+                            "nothing to match in the air, aim at a block or use This block", "Paint"));
                     return;
                 }
             }
@@ -485,7 +486,7 @@ public final class PaintPlacer {
 
     private static String cantResolveMessage() {
         String name = prepared != null && prepared.palette != null ? prepared.palette.name : "palette";
-        return "'" + name + "': can't resolve colours — add a block to the palette";
+        return Gradient.message("Palette", "'" + name + "' can't resolve colours, add a block", "Paint");
     }
 
     /** The block at {@code pos} as a colour anchor, or null when it's empty (air/fluid). */
@@ -844,7 +845,7 @@ public final class PaintPlacer {
             };
         }
         if (!Gradient.emptyCell(mc.level.getBlockState(seed))) {
-            overlay(mc, type.label() + ": no space to fill there");
+            overlay(mc, Gradient.message(type.label(), "no space to fill there", null));
             return;
         }
         beginGrowth(mc, seed);
@@ -1012,7 +1013,7 @@ public final class PaintPlacer {
         }
         regionFill = true;
         active = true;
-        overlay(mc, "Noise: filling " + cells.size() + " blocks");
+        overlay(mc, Gradient.message("Noise", "filling " + cells.size() + " blocks", null));
         return true;
     }
 
@@ -1088,8 +1089,8 @@ public final class PaintPlacer {
                 case SOLID -> {
                     slot = slotOf(player, solidChosen);
                     if (slot < 0) {
-                        overlay(mc, "Solid: out of "
-                                + new ItemStack(solidChosen.asItem()).getHoverName().getString());
+                        overlay(mc, Gradient.message("Solid", "out of "
+                                + new ItemStack(solidChosen.asItem()).getHoverName().getString(), null));
                         reset();
                         return;
                     }
@@ -1130,7 +1131,8 @@ public final class PaintPlacer {
                 String pal = type == PaintType.PATTERN
                         ? (patternPrep != null && patternPrep.pattern != null ? patternPrep.pattern.name : "pattern")
                         : (prepared != null && prepared.palette != null ? prepared.palette.name : "palette");
-                overlay(mc, "'" + pal + "': out of " + name);
+                overlay(mc, Gradient.message(type == PaintType.PATTERN ? "Pattern" : "Palette",
+                        "'" + pal + "' ran out of " + name, null));
                 reset();
                 return;
             }
@@ -1409,11 +1411,13 @@ public final class PaintPlacer {
 
     private static String noSolidBlockMessage(Block ref) {
         return switch (ConfigManager.get().solidMatch) {
-            case SELECTED -> "Solid: no ✓ block — pick one in settings (K)";
+            case SELECTED -> Gradient.message("Solid", "no block picked", "Paint");
             case EXACT -> isSolidExcluded(ref)
-                    ? "Solid: " + new ItemStack(ref.asItem()).getHoverName().getString() + " is excluded"
-                    : "Solid: can't match that block";
-            case CLOSEST_COLOR, CLOSEST_BRIGHTNESS -> "Solid: no placeable blocks in source";
+                    ? Gradient.message("Solid", new ItemStack(ref.asItem()).getHoverName().getString()
+                            + " is excluded", "Paint")
+                    : Gradient.message("Solid", "can't match that block", null);
+            case CLOSEST_COLOR, CLOSEST_BRIGHTNESS -> Gradient.message("Solid",
+                    "no placeable blocks in " + ConfigManager.get().source.displayName(), "Paint");
         };
     }
 
