@@ -55,7 +55,9 @@ upload() { # <jar> <loader name> <loader id> <relations json>
     return
   fi
   echo "Uploading $jar ..."
-  curl -sS --fail-with-body "${auth[@]}" -F "metadata=$meta" -F "file=@$jar" "$API/projects/$PROJECT_ID/upload-file"
+  # --form-string, not -F: with -F curl reads ';' in the value as the start of form options
+  # (;type=...), cutting the JSON short at the first semicolon in the changelog.
+  curl -sS --fail-with-body "${auth[@]}" --form-string "metadata=$meta" -F "file=@$jar" "$API/projects/$PROJECT_ID/upload-file"
   echo
 }
 
