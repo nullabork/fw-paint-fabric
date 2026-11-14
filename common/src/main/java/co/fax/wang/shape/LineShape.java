@@ -27,6 +27,8 @@ public final class LineShape {
     public boolean solid;
     /** Which way a Gradient fill runs through the tube. */
     public LineGradient gradient = LineGradient.ACROSS;
+    /** How this line's tube is drawn (its toolbar's Rendering page). */
+    public MarkerStyle style = new MarkerStyle();
     /** A new tube's radius (and what right-clicking a size cube resets to). */
     public static final double DEFAULT_RADIUS = LineCurve.DEFAULT_RADIUS;
     /** Size-cube drags keep a node's radius within this. */

@@ -891,7 +891,7 @@ public class PatternEditScreen extends Screen {
     @Override
     public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
         // The bar goes down first so the name box (a widget) draws over it.
-        g.fill(0, 0, this.width, this.height, 0x4D000000);
+        g.fill(0, 0, this.width, this.height, Ui.BACKDROP);
         chrome.render(g, this.font, mouseX, mouseY, dirty, nameError);
         super.extractRenderState(g, mouseX, mouseY, partialTick);
         boolean modal = pendingExit != null || confirmClear || previewExpanded;

@@ -43,6 +43,8 @@ public final class RingShape {
     public double theta;
     /** Flipped: the gradient runs from the far end of the extrusion back to the base plane. */
     public boolean flip;
+    /** How this ring is drawn (its toolbar's Rendering page). */
+    public MarkerStyle style = new MarkerStyle();
 
     public RingShape(Kind kind, BlockPos center, Direction.Axis normal, BlockPos ctrlA, BlockPos ctrlB) {
         this.kind = kind;

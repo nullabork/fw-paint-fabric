@@ -271,7 +271,11 @@ public final class HelpPanel {
             "Every ring ends in More… ({open}), which opens the screen on that tab. The wedge "
                 + "holding the current selection shows a blue tint; anything selected but no "
                 + "longer available shows red. Long lists become a carousel: step with the "
-                + "< > arrows or the mouse wheel.")),
+                + "< > arrows or the mouse wheel.",
+            "Recent, along the bottom, keeps your last picks (newest first, saved between "
+                + "sessions). Click one to set it again - it also switches whatever it needs, "
+                + "so a Solid block picked while you paint Gradient goes back to Solid. A pick "
+                + "whose block you no longer have shows as missing.")),
 
         t("HUD", "Top-left: what paints, where, and anything out of the ordinary.", List.of(
             "Line one is \"<Paint> · <Mode>\"; line two shows the palette strip, the pattern, "
@@ -363,6 +367,11 @@ public final class HelpPanel {
                     + "scaffolding. Aim at open sky and a green cell shows at the edge of your "
                     + "reach: click to put one block there. Turn it off on servers whose "
                     + "anti-cheat flags that - blocks then wait until a neighbour is placed.",
+                "Only place inside markers (every placing mode; off by default): a click that "
+                    + "would start outside every marker while right against one - the outer skin "
+                    + "of a box, ring or tube, or the blocks beside a start-to-end run - places "
+                    + "nothing, so a slip never spreads a blob over the outside. Clicks away from "
+                    + "markers paint as normal. The HUD says Outside the marker: nothing placed.",
                 "Perp snap 45° | 90° (Face perp, and the planes patterns paint on): the angle "
                     + "runs and pattern planes snap to."),
                 t("Don't match palette", "Stop face selection spreading over what you just painted.", List.of(
@@ -469,6 +478,15 @@ public final class HelpPanel {
                     + "closes it, and it hides while you drag. Delete on every toolbar is the "
                     + "same as MMB; hovering a button names it on the action bar; ? opens its "
                     + "Help page.",
+                "Rendering (the eye on a box, ring or line toolbar) swaps the buttons for that "
+                    + "marker's look; the arrow goes back. Filled squares colour its faces, "
+                    + "hollow squares its edge lines (click the lit one again for the default); "
+                    + "the lighter / heavier pairs set face and edge opacity in 10% steps. Show "
+                    + "as block opens a filterable block list and draws the marker with that "
+                    + "block's textures - a preview only, nothing is placed. The last two "
+                    + "buttons choose whether faces and edge lines still show where blocks are "
+                    + "in front of them (edges do by default, faces don't). The look is saved "
+                    + "with the marker.",
                 "While you make one, the action bar walks you through it (\"FW Paint · Ring · "
                     + "step 2 of 3 - LMB the outer radius (works over air) · RMB cancels\"), "
                     + "then says \"Ring set\", \"Ring cancelled\" or \"Ring removed\".",

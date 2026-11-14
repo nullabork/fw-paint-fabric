@@ -1055,6 +1055,10 @@ public class GradientScreen extends Screen {
         right.add(toggleRow(new Toggle("Place in air", "Paint at reach when aiming at nothing.", false,
                 () -> ConfigManager.get().placeInAir, v -> { ConfigManager.get().placeInAir = v; ConfigManager.save(); })
                 .applies(() -> PlaceOptions.placeInAirApplies(mode.get()))));
+        right.add(toggleRow(new Toggle("Only place inside markers", "A click on a marker's outside places nothing.", false,
+                () -> ConfigManager.get().onlyInsideMarkers,
+                v -> { ConfigManager.get().onlyInsideMarkers = v; ConfigManager.save(); })
+                .applies(() -> PlaceOptions.onlyInsideApplies(mode.get()))));
         BooleanSupplier perpApplies = () -> PlaceOptions.perpSnapApplies(mode.get(), ConfigManager.get().activePaintType);
         Segmented perp = new Segmented(List.of("45°", "90°"), cfg.perpSnapDegrees == 90 ? 1 : 0, i -> {
             ConfigManager.get().perpSnapDegrees = i == 1 ? 90 : 45;
@@ -1651,9 +1655,9 @@ public class GradientScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-        // Full-page rgba(0,0,0,0.3) underlay so every tab reads against any world (before super
+        // Full-page Ui.BACKDROP underlay so every tab reads against any world (before super
         // → beneath the widgets).
-        g.fill(0, 0, this.width, this.height, 0x4D000000);
+        g.fill(0, 0, this.width, this.height, Ui.BACKDROP);
         super.extractRenderState(g, mouseX, mouseY, partialTick);
         helpSpots.clear();
         hoveredMode = null;

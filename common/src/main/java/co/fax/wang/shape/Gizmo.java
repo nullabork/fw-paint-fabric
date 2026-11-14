@@ -85,7 +85,9 @@ final class Gizmo {
      * {@link #quad}-based shapes get the ghost alpha.
      */
     static void onTop(SubmitNodeCollector col, PoseStack ps, Vec3 cam, Consumer<Em> draw) {
-        col.submitCustomGeometry(ps, WorldDraw.seeThrough(), (pose, vc) -> draw.accept(new Em(pose, vc, cam, true)));
+        // A later order than everything else the markers submit: translucent marker faces and
+        // edges would otherwise blend over the toolbar wherever it overlaps a marker.
+        col.order(2).submitCustomGeometry(ps, WorldDraw.seeThrough(), (pose, vc) -> draw.accept(new Em(pose, vc, cam, true)));
     }
 
     static void v(Em e, Vec3 p, int argb) {

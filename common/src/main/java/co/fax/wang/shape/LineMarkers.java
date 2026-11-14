@@ -134,6 +134,12 @@ public final class LineMarkers {
         return dragLine != null ? dragLine : aimed != null ? aimed.line : null;
     }
 
+    /** The line looked at for the HUD: its curve or a control, else any of its tube's cells. */
+    static LineShape hudLine(Minecraft mc) {
+        LineShape l = lookedLine();
+        return l != null ? l : tubeLookedInto(mc);
+    }
+
     /** Another marker's control won the aim this tick: forget ours (unless dragging). */
     static void dropAim() {
         if (dragLine == null) aimed = null;
@@ -425,10 +431,17 @@ public final class LineMarkers {
 
     // ---- toolbar -------------------------------------------------------------------------------
 
-    /** The line's toolbar: profile · shell | solid, then the gradients · flip · delete · help. */
+    /** The line's toolbar: profile · shell | solid, then the gradients · flip · rendering · delete · help. */
     static MarkerToolbar.Spec toolbarSpec(LineShape l) {
         if (!lines.contains(l)) return null;
         List<MarkerToolbar.Button> top = new ArrayList<>(), bottom = new ArrayList<>();
+        List<List<MarkerToolbar.Button>> rows = List.of(top, bottom);
+        if (MarkerToolbar.stylePage()) {
+            rows = StylePage.rows(l, l.style, TUBE_FILL, TUBE_EDGE, () -> {
+                ShapeMarkers.touch(l);
+                ShapeMarkers.saveLines();
+            });
+        }
         for (LineProfile p : PROFILES) {
             MarkerToolbar.Icon icon = p == LineProfile.NONE ? MarkerToolbar.LINE_BARE : MarkerToolbar.outline(p.outline(1));
             String name = p == LineProfile.NONE ? "Bare line" : cap(p.name()) + " tube";
@@ -473,13 +486,14 @@ public final class LineMarkers {
                     l.reverse();
                     changed(l, "Line flipped — it now starts at the other end");
                 }));
+        bottom.add(StylePage.openButton(l.style));
         bottom.add(new MarkerToolbar.Button(MarkerToolbar.BIN, false, true,
                 "Delete this line (same as MMB)", () -> remove(l)));
         bottom.add(new MarkerToolbar.Button(MarkerToolbar.QUESTION, false, false,
                 "Help: how lines work", () -> Minecraft.getInstance()
                         .setScreenAndShow(co.fax.wang.GradientScreen.atHelpTopic("Marker line"))));
         Vec3[] b = l.bounds();
-        return new MarkerToolbar.Spec(null, List.of(top, bottom), l.cogNode(), b[0], b[1], controlsOf(l));
+        return new MarkerToolbar.Spec(null, rows, l.cogNode(), b[0], b[1], controlsOf(l));
     }
 
     private static void changed(LineShape l, String msg) {
@@ -858,7 +872,9 @@ public final class LineMarkers {
             // The tube's edges go white only while it's looked at (crosshair in it, or on one of
             // its parts) — a selected line elsewhere in view keeps the plain amber edges.
             boolean looked = l == lookedTube || (handles && aimed != null && aimed.line == l);
-            drawTube(col, ps, cam, l, looked ? TUBE_EDGE_SELECTED : TUBE_EDGE, looked ? TUBE_GHOST_SELECTED : TUBE_GHOST);
+            // The line's own look: looked-at edges stay white but keep its edge opacity.
+            drawTube(col, ps, cam, l, l.style.edge(looked ? TUBE_EDGE_SELECTED : TUBE_EDGE, !looked),
+                    l.style.ghost(looked ? TUBE_GHOST_SELECTED : TUBE_GHOST, !looked));
             // Twice: depth-tested (weaves through terrain), then a faint on-top ghost so the
             // line and its controls stay readable — and grabbable — behind blocks.
             Gizmo.twoPass(col, ps, cam, e -> drawParts(e, l, sel, editing, cog, axes));
@@ -953,12 +969,39 @@ public final class LineMarkers {
         if (fv.length == 0 && ev.length == 0) return;
         var o = l.renderOrigin();
         float ox = (float) (o.getX() - cam.x), oy = (float) (o.getY() - cam.y), oz = (float) (o.getZ() - cam.z);
+        BlockSkin.Skin found = BlockSkin.of(l.style.block);
+        BlockSkin.Skin skin = found != null && blockFaces(fv) <= BlockSkin.MAX_FACES ? found : null;
+        int fill = skin != null ? 0 : l.style.face(TUBE_FILL);
+        boolean through = l.style.facesThrough;
         col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(), (pose, vc) -> {
             long t0 = PERF ? System.nanoTime() : 0;
-            for (int i = 0; i < fv.length; i += 3) vc.addVertex(fv[i] + ox, fv[i + 1] + oy, fv[i + 2] + oz).setColor(TUBE_FILL);
-            for (int i = 0; i < ev.length; i += 3) vc.addVertex(ev[i] + ox, ev[i + 1] + oy, ev[i + 2] + oz).setColor(edge);
+            if (fill >>> 24 != 0 && !through) {
+                for (int i = 0; i < fv.length; i += 3) vc.addVertex(fv[i] + ox, fv[i + 1] + oy, fv[i + 2] + oz).setColor(fill);
+            }
+            if (edge >>> 24 != 0) {
+                for (int i = 0; i < ev.length; i += 3) vc.addVertex(ev[i] + ox, ev[i + 1] + oy, ev[i + 2] + oz).setColor(edge);
+            }
             if (PERF) perfEmitNanos += System.nanoTime() - t0;
         });
+        if (skin != null && l.style.blockAlpha() != 0) {
+            int alpha = l.style.blockAlpha();
+            ps.pushPose();
+            ps.translate(ox, oy, oz);
+            BlockSkin.submit(col, ps, skin, alpha, through, new Vec3(-ox, -oy, -oz), sink -> tubeBlocks(sink, fv));
+            ps.popPose();
+        }
+        if (through && fill >>> 24 != 0) {
+            // Faces shown when obscured: the tint over everything (both windings + texel UV).
+            col.submitCustomGeometry(ps, WorldDraw.seeThrough(), (pose, vc) -> {
+                for (int q = 0; q + 12 <= fv.length; q += 12) {
+                    for (int k = 0; k < 8; k++) {
+                        int i = q + (k < 4 ? k : 7 - k) * 3;
+                        vc.addVertex(fv[i] + ox, fv[i + 1] + oy, fv[i + 2] + oz).setUv(0.5f, 0.5f).setColor(fill);
+                    }
+                }
+            });
+        }
+        if (ghost >>> 24 == 0) return;
         col.submitCustomGeometry(ps, WorldDraw.seeThrough(), (pose, vc) -> {
             long t0 = PERF ? System.nanoTime() : 0;
             // The see-through pipeline culls, so each quad goes in both windings (+ texel UV).
@@ -974,6 +1017,55 @@ public final class LineMarkers {
             }
             if (PERF) perfEmitNanos += System.nanoTime() - t0;
         });
+    }
+
+    /** How many block squares the merged face rectangles {@code fv} cover. */
+    private static long blockFaces(float[] fv) {
+        long n = 0;
+        int[] r = new int[6];
+        for (int q = 0; q + 12 <= fv.length; q += 12) {
+            faceRect(fv, q, r);
+            n += (long) (r[3] - r[2]) * (r[5] - r[4]);
+        }
+        return n;
+    }
+
+    /**
+     * One merged face rectangle (4 vertices from {@code q}) back as cells: {@code r} gets
+     * {side as Direction.ordinal(), unused, a0, a1, b0, b1} on the two in-plane axes (x, y, z
+     * order), and the plane coordinate is returned. TubeBuild lifts faces {@code EXPAND} off the
+     * cells: just above a whole number is a positive-facing side, just below a negative one.
+     */
+    private static float faceRect(float[] fv, int q, int[] r) {
+        int axis = 0;
+        for (int a = 0; a < 3; a++) {
+            if (fv[q + a] == fv[q + 3 + a] && fv[q + a] == fv[q + 6 + a] && fv[q + a] == fv[q + 9 + a]) axis = a;
+        }
+        float w = fv[q + axis];
+        boolean positive = w - Math.floor(w) < 0.5;
+        r[0] = axis == 1 ? (positive ? 1 : 0) : axis == 2 ? (positive ? 3 : 2) : (positive ? 5 : 4);
+        int pa = axis == 0 ? 1 : 0, pb = axis == 2 ? 1 : 2;
+        float a0 = Float.MAX_VALUE, a1 = -Float.MAX_VALUE, b0 = Float.MAX_VALUE, b1 = -Float.MAX_VALUE;
+        for (int k = 0; k < 4; k++) {
+            a0 = Math.min(a0, fv[q + k * 3 + pa]);
+            a1 = Math.max(a1, fv[q + k * 3 + pa]);
+            b0 = Math.min(b0, fv[q + k * 3 + pb]);
+            b1 = Math.max(b1, fv[q + k * 3 + pb]);
+        }
+        r[2] = Math.round(a0);
+        r[3] = Math.round(a1);
+        r[4] = Math.round(b0);
+        r[5] = Math.round(b1);
+        return w;
+    }
+
+    /** The tube shown as a block: every merged face rectangle as one textured square per cell. */
+    private static void tubeBlocks(BlockSkin.RectSink sink, float[] fv) {
+        int[] r = new int[6];
+        for (int q = 0; q + 12 <= fv.length; q += 12) {
+            float w = faceRect(fv, q, r);
+            sink.rect(r[0], w, r[2], r[3], r[4], r[5]);
+        }
     }
 
     private static void drawCurve(Gizmo.Em e, List<LineCurve.Sample> ss, double w, int argb) {

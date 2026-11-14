@@ -42,12 +42,14 @@ public final class ShapeStore {
         int height;
         double theta;
         boolean flip; // absent in older saves → false
+        MarkerStyle style; // absent (older saves, default look) → the default
     }
 
     private static final class StoredBox {
         int[] cornerA;
         int[] cornerB;
         String axis;
+        MarkerStyle style;
     }
 
     /**
@@ -61,6 +63,7 @@ public final class ShapeStore {
         boolean solid;
         String gradient;
         double r0, r1, tw0, tw1;
+        MarkerStyle style;
     }
 
     /** A stored line back to a shape (legacy end-only sizes spread over the nodes); null if < 2 nodes. */
@@ -85,6 +88,7 @@ public final class ShapeStore {
         for (LineGradient g : LineGradient.values()) {
             if (g.name().equals(sl.gradient)) l.gradient = g; // unknown/missing → default
         }
+        if (sl.style != null) l.style = sl.style;
         if (!perNode) {
             // No sizes saved at all (never written by a released build) → defaults, not radius 0.
             boolean none = sl.r0 == 0 && sl.r1 == 0;
@@ -106,6 +110,7 @@ public final class ShapeStore {
         sl.profile = l.profile.name();
         sl.solid = l.solid;
         sl.gradient = l.gradient.name();
+        sl.style = stored(l.style);
         sl.r0 = ns.get(0).r;
         sl.r1 = ns.get(ns.size() - 1).r;
         sl.tw0 = ns.get(0).tw;
@@ -142,10 +147,14 @@ public final class ShapeStore {
         return data;
     }
 
-    /** Loads the shapes, lines + box saved for {@code key} (null key → empty/none). */
+    /**
+     * Loads the shapes, lines + box saved for {@code key} (null key → empty/none). The look of
+     * the box goes straight to {@link BoxMarkers#style}.
+     */
     public static BoxRegion loadInto(String key, List<RingShape> shapes, List<LineShape> lines) {
         shapes.clear();
         lines.clear();
+        BoxMarkers.style = new MarkerStyle();
         if (key == null) return null;
         WorldShapes stored = data().get(key);
         if (stored == null) return null;
@@ -162,10 +171,12 @@ public final class ShapeStore {
         if (stored.shapes != null) {
             for (StoredShape s : stored.shapes) {
                 try {
-                    shapes.add(RingShape.restore(
+                    RingShape ring = RingShape.restore(
                             RingShape.Kind.valueOf(s.kind),
                             pos(s.center), Direction.Axis.valueOf(s.axis),
-                            pos(s.ctrlA), pos(s.ctrlB), s.rA, s.rB, s.height, s.theta, s.flip));
+                            pos(s.ctrlA), pos(s.ctrlB), s.rA, s.rB, s.height, s.theta, s.flip);
+                    if (s.style != null) ring.style = s.style;
+                    shapes.add(ring);
                 } catch (Exception e) {
                     LOG.warn("Skipping malformed stored shape in {}: {}", key, e.toString());
                 }
@@ -173,8 +184,10 @@ public final class ShapeStore {
         }
         if (stored.box != null) {
             try {
-                return new BoxRegion(pos(stored.box.cornerA), pos(stored.box.cornerB),
+                BoxRegion region = new BoxRegion(pos(stored.box.cornerA), pos(stored.box.cornerB),
                         Direction.Axis.valueOf(stored.box.axis));
+                if (stored.box.style != null) BoxMarkers.style = stored.box.style;
+                return region;
             } catch (Exception e) {
                 LOG.warn("Skipping malformed stored box in {}: {}", key, e.toString());
             }
@@ -202,6 +215,7 @@ public final class ShapeStore {
                 s.height = shape.height;
                 s.theta = shape.theta;
                 s.flip = shape.flip;
+                s.style = stored(shape.style);
                 stored.shapes.add(s);
             }
             stored.lines = new ArrayList<>(lines.size());
@@ -211,6 +225,7 @@ public final class ShapeStore {
                 b.cornerA = arr(box.cornerA);
                 b.cornerB = arr(box.cornerB);
                 b.axis = box.axis.name();
+                b.style = stored(BoxMarkers.style);
                 stored.box = b;
             }
             data().put(key, stored);
@@ -225,6 +240,11 @@ public final class ShapeStore {
         } catch (IOException e) {
             LOG.warn("Failed to write {}: {}", path(), e.toString());
         }
+    }
+
+    /** A style as saved: left out entirely while it is the default look. */
+    private static MarkerStyle stored(MarkerStyle st) {
+        return st == null || st.isDefault() ? null : st;
     }
 
     private static BlockPos pos(int[] p) {

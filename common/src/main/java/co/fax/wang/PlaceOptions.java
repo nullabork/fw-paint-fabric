@@ -9,13 +9,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The Place options (Don't match palette, Fill voids first, Place in air, Perp snap) and the mode
+ * The Place options (Don't match palette, Fill voids first, Place in air, Only place inside
+ * markers, Perp snap) and the mode
  * descriptions, shared by the Place tab, the wheel's Place ring and the HUD so all three agree on
  * which option applies to which mode and what each mode is called.
  *
  * <p>Which options apply follows {@link PaintPlacer}: Don't match palette filters the Face modes'
  * selection (Face any, Face target, Face perp); Fill voids first levels in-marker Face any/target
- * fills; Place in air works in every placing mode; Perp snap sets the Face perp run direction and
+ * fills; Place in air and Only place inside markers work in every placing mode; Perp snap sets the Face perp run direction and
  * the plane of any Pattern placement.
  */
 public final class PlaceOptions {
@@ -31,6 +32,10 @@ public final class PlaceOptions {
     }
 
     public static boolean placeInAirApplies(PlacementMode m) {
+        return m.places();
+    }
+
+    public static boolean onlyInsideApplies(PlacementMode m) {
         return m.places();
     }
 
@@ -75,6 +80,7 @@ public final class PlaceOptions {
         if (Gradient.dontMatchPalette && dontMatchApplies(mode)) out.add("● Don't match palette");
         if (!cfg.faceFillVoids && fillVoidsApplies(mode)) out.add("Fill voids first: off");
         if (!cfg.placeInAir && placeInAirApplies(mode)) out.add("Place in air: off");
+        if (cfg.onlyInsideMarkers && onlyInsideApplies(mode)) out.add("Only inside markers: on");
         if (cfg.perpSnapDegrees != 45 && perpSnapApplies(mode, cfg.activePaintType)) {
             out.add("Perp snap " + cfg.perpSnapDegrees + "°");
         }

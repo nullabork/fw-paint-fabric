@@ -15,6 +15,8 @@ import net.minecraft.world.item.ItemStack;
  *   <li>the selection — palette strip, pattern thumbnail or Solid block (or where to set one up);</li>
  *   <li>yellow lines only for Place options switched from their default, or session-only and on
  *       ({@link PlaceOptions#attentionLines});</li>
+ *   <li>while you look at a line marker or any block of its tube (or its toolbar is open), its
+ *       length and node count;</li>
  *   <li>grey sourcing lines (where the gradient endpoints come from) in the placing modes.</li>
  * </ol>
  * Position comes from config ({@code hudX}/{@code hudY}), movable via {@link HudPlacementScreen},
@@ -26,6 +28,12 @@ public final class HudOverlay {
     public static final int TYPE_COLOR = 0xFFFFFFFF;
     /** ARGB colour of the selection name and the sourcing lines. */
     public static final int SOURCE_COLOR = 0xFFC8C8C8;
+    /** Backing panel so the HUD text reads over snow, sky or sand. */
+    private static final int BACKING = 0x90000000;
+    private static final int PAD = 3;
+
+    /** Size of the rows drawn last frame: the panel goes down first, before this frame's rows. */
+    private static int lastW, lastH;
 
     private HudOverlay() {}
 
@@ -40,6 +48,7 @@ public final class HudOverlay {
         // First-run guidance: with no paint tool assigned at all the HUD (only in this case)
         // points at the Settings tab, where the tool picker lives.
         if (cfg.paintTool.isEmpty()) {
+            backing(g, x, y, mc.font.width(noToolLine()), mc.font.lineHeight);
             g.text(mc.font, noToolLine(), x, y, Ui.ATTENTION);
             return;
         }
@@ -61,6 +70,7 @@ public final class HudOverlay {
         GradientConfig cfg = ConfigManager.get();
         Font font = mc.font;
         int lh = font.lineHeight + 1;
+        if (lastW > 0) backing(g, x, y, lastW, lastH);
 
         String type = cfg.activePaintType.label();
         String sep = " · ";
@@ -78,12 +88,24 @@ public final class HudOverlay {
             w = Math.max(w, font.width(line));
             lineY += lh;
         }
+        String lineInfo = co.fax.wang.shape.ShapeMarkers.hudLineInfo();
+        if (lineInfo != null) {
+            g.text(font, lineInfo, x, lineY, TYPE_COLOR);
+            w = Math.max(w, font.width(lineInfo));
+            lineY += lh;
+        }
         for (String line : PaintPlacer.sourcingLines()) {
             g.text(font, line, x, lineY, SOURCE_COLOR);
             w = Math.max(w, font.width(line));
             lineY += lh;
         }
+        lastW = w;
+        lastH = lineY - y;
         return new int[] {w, lineY - y};
+    }
+
+    private static void backing(GuiGraphicsExtractor g, int x, int y, int w, int h) {
+        g.fill(x - PAD, y - PAD, x + w + PAD, y + h + PAD - 2, BACKING);
     }
 
     /**

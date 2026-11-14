@@ -1,142 +1,141 @@
 package co.fax.wang.wheel;
 
+import co.fax.wang.wheel.WheelLayout.Arc;
 import co.fax.wang.wheel.WheelLayout.RingSpec;
+
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The layout's contract: rings are ordered and non-overlapping, and at the solved radii no two
- * item boxes (same ring, cross ring, or item vs the center text block) can collide in any
- * expansion state. The collision check reconstructs slot positions with the same content-driven
- * slot-width rule the wheel renders with, and rect-tests all pairs.
+ * The layout's contract: the rings sit exactly {@link WheelLayout#GAP} apart, every item box lies
+ * wholly inside its ring band (with padding) at its slot angle, adjacent boxes on a ring don't
+ * overlap, and the hole fits the centre text — in every expansion state. Slot positions are
+ * rebuilt with the same content-driven slot-width rule the wheel renders with.
  */
 class WheelLayoutTest {
 
-    private static final int LINE_H = 9;
     private static final int CENTER_W = 84;
-    private static final int CENTER_H = 2 * LINE_H + 2;
+    private static final int CENTER_H = 20;
 
-    /** Roughly the real wheel: Paint / Place / Palette, Place fanning three mode groups. */
-    private static final int[] ROOT_W = {30, 33, 42};
-    private static final RingSpec[] LEVEL1 = {
-            new RingSpec(4, 48),    // paints
-            new RingSpec(3, 84),    // Blocks / Markers / Shape markers
-            new RingSpec(14, 84),   // palette (merged variants)
-    };
-    private static final RingSpec[][] LEVEL2 = {
-            {null, null, null, null},
-            {new RingSpec(4, 57), new RingSpec(2, 66), new RingSpec(3, 81)},
-            {new RingSpec(30, 16), null, null, null, null, null, null, null, null, null, null, null, null, null},
-    };
+    /** Roughly the real wheel: Paint / Palette / Place, wrapped two-line labels, an icon ring. */
+    private static final int[] ROOT_W = {30, 42, 33};
+    private static final int[] ROOT_H = {9, 9, 9};
+
+    private static RingSpec ring(int count, int w, int h) {
+        int[] ws = new int[count], hs = new int[count];
+        java.util.Arrays.fill(ws, w);
+        java.util.Arrays.fill(hs, h);
+        return new RingSpec(ws, hs);
+    }
+
+    private static final Arc PAINTS = Arc.level1(0, ring(5, 48, 9));
+    private static final Arc PALETTES = Arc.level1(1, ring(6, 48, 27));   // two lines plus "2 missing"
+    private static final Arc SOLID = Arc.level1(1, ring(5, 54, 19));
+    private static final Arc PLACE = Arc.level1(2, ring(6, 48, 19));      // Blocks … Off, More…
+    private static final List<Arc> ARCS = List.of(PAINTS, PALETTES, SOLID, PLACE,
+            Arc.level2(SOLID, 0, ring(30, 16, 25)),
+            Arc.level2(PLACE, 0, ring(5, 48, 19)),
+            Arc.level2(PLACE, 1, ring(2, 48, 9)),
+            Arc.level2(PLACE, 2, ring(3, 40, 9)),
+            Arc.level2(PLACE, 3, ring(4, 48, 19)));
 
     private static WheelLayout layout() {
-        return WheelLayout.compute(LINE_H, CENTER_W, CENTER_H, ROOT_W, LEVEL1, LEVEL2);
+        return WheelLayout.compute(CENTER_W, CENTER_H, ROOT_W, ROOT_H, ARCS);
     }
 
     @Test
-    void ringsAreOrderedAndDisjoint() {
+    void ringsSitAConstantGapApart() {
         WheelLayout l = layout();
         assertTrue(l.r0In > 0);
-        assertTrue(l.r0Out > l.r0In);
-        assertTrue(l.r1In > l.r0Out, "level-1 ring must start outside the root ring");
-        assertTrue(l.r1Out > l.r1In);
-        assertTrue(l.r2In > l.r1Out, "level-2 ring must start outside the level-1 ring");
-        assertTrue(l.r2Out > l.r2In);
+        assertTrue(l.r0Out - l.r0In >= WheelLayout.MIN_THICKNESS);
+        assertEquals(WheelLayout.GAP, l.r1In - l.r0Out);
+        assertEquals(WheelLayout.GAP, l.r2In - l.r1Out);
+        assertTrue(l.r1Out - l.r1In >= WheelLayout.MIN_THICKNESS);
+        assertTrue(l.r2Out - l.r2In >= WheelLayout.MIN_THICKNESS);
+        assertTrue(l.hasLevel2);
+        assertEquals(l.r2Out, l.maxRadius());
+    }
+
+    @Test
+    void reachBoxCoversTheRootAndStaysInsideTheOuterRing() {
+        WheelLayout l = layout();
+        for (int e : new int[] {l.up, l.down, l.left, l.right}) {
+            assertTrue(e >= l.r0Out, "the root ring shows in every direction");
+            assertTrue(e <= l.maxRadius(), "nothing reaches past the outermost ring");
+        }
     }
 
     @Test
     void holeFitsCenterText() {
-        assertTrue(layout().r0In >= CENTER_W / 2, "hole radius must cover half the center text width");
-    }
-
-    @Test
-    void longerLabelsGrowTheWheelFromTheStart() {
-        WheelLayout small = WheelLayout.compute(LINE_H, 40, CENTER_H,
-                new int[] {30, 30, 30},
-                new RingSpec[] {new RingSpec(2, 30), new RingSpec(2, 30), null},
-                new RingSpec[][] {{null, null}, {null, null}, null});
-        WheelLayout big = WheelLayout.compute(LINE_H, 160, CENTER_H,
-                new int[] {120, 140, 30},
-                new RingSpec[] {new RingSpec(2, 150), new RingSpec(2, 30), null},
-                new RingSpec[][] {{null, null}, {null, null}, null});
-        assertTrue(big.r0Out > small.r0Out);
-        assertTrue(big.r1Out > small.r1Out);
-    }
-
-    @Test
-    void blockIconRingSitsAtTheNormalRingGap() {
-        // Regression: the icon ring's constant adjacent spacing used to fail a radius-independent
-        // same-ring check, driving the ring to the sanity cap (visibly miles away in-game). The
-        // remaining gap is only what clearing the inner ring's widest sideways-protruding label
-        // genuinely needs (~half its width), never a runaway.
         WheelLayout l = layout();
-        assertTrue(l.r2In - l.r1Out <= LEVEL1[2].maxItemWidth(),
-                "level-2 icon ring should hug the level-1 ring, gap was " + (l.r2In - l.r1Out));
+        assertTrue(l.r0In >= Math.hypot(CENTER_W / 2.0, CENTER_H / 2.0),
+                "the centre text's corners must sit inside the hole");
     }
 
     @Test
-    void iconRingsDontInflateTheRadius() {
-        // A 30-icon ring should not need a materially bigger radius than a 4-label ring:
-        // narrow slots absorb the count.
-        WheelLayout icons = WheelLayout.compute(LINE_H, 40, CENTER_H,
-                new int[] {30, 30, 30},
-                new RingSpec[] {new RingSpec(30, 16), null, null},
-                new RingSpec[][] {null, null, null});
-        assertTrue(icons.r1Out < 160, "icon ring should stay compact, was " + icons.r1Out);
+    void widerLabelsMakeThickerRings() {
+        WheelLayout narrow = WheelLayout.compute(CENTER_W, CENTER_H, ROOT_W, ROOT_H,
+                List.of(Arc.level1(1, ring(4, 30, 9))));
+        WheelLayout wide = WheelLayout.compute(CENTER_W, CENTER_H, ROOT_W, ROOT_H,
+                List.of(Arc.level1(1, ring(4, 64, 19))));
+        assertTrue(wide.r1Out - wide.r1In > narrow.r1Out - narrow.r1In);
+        assertEquals(narrow.r1In, wide.r1In, "the inner rings don't move");
     }
 
     @Test
-    void noBoxesCollideAtTheSolvedRadiiInAnyExpansionState() {
+    void iconRingStaysThin() {
+        WheelLayout l = WheelLayout.compute(CENTER_W, CENTER_H, ROOT_W, ROOT_H,
+                List.of(Arc.level1(1, ring(30, 16, 16))));
+        assertTrue(l.r1Out - l.r1In <= 16 + 2 * WheelLayout.PAD + 12,
+                "a ring of 16px icons should stay thin, was " + (l.r1Out - l.r1In));
+    }
+
+    @Test
+    void everyBoxSitsInsideItsBandWithoutTouchingItsNeighbours() {
         WheelLayout l = layout();
-        double r0 = (l.r0In + l.r0Out) / 2.0;
-        int r1 = (l.r1In + l.r1Out) / 2;
-        int r2 = (l.r2In + l.r2Out) / 2;
+        double mid0 = (l.r0In + l.r0Out) / 2.0, mid1 = (l.r1In + l.r1Out) / 2.0, mid2 = (l.r2In + l.r2Out) / 2.0;
         int n = ROOT_W.length;
-
-        for (int expanded = 0; expanded < n; expanded++) {
-            RingSpec spec1 = LEVEL1[expanded];
-            if (spec1 == null) continue;
-            RingSpec[] subs = LEVEL2[expanded];
-            int groups = subs == null ? 0 : subs.length;
-            for (int sub = -1; sub < groups; sub++) {
-                RingSpec spec2 = sub >= 0 ? subs[sub] : null;
-                if (sub >= 0 && spec2 == null) continue;
-                java.util.List<double[]> boxes = new java.util.ArrayList<>(); // {x, y, w, h}
-                boxes.add(new double[] {0, 0, CENTER_W, CENTER_H});           // center text block
-                for (int i = 0; i < n; i++) {
-                    double a = WheelMath.rootSlotCenter(i, n);
-                    boxes.add(new double[] {Math.sin(a) * r0, -Math.cos(a) * r0, ROOT_W[i], LINE_H});
-                }
-                double rootA = WheelMath.rootSlotCenter(expanded, n);
-                addArc(boxes, spec1, rootA, r1);
-                if (spec2 != null) {
-                    double w1 = WheelMath.slotWidthFor(spec1.maxItemWidth(), r1);
-                    int slots1 = Math.min(spec1.count(), WheelMath.arcCapacity(w1));
-                    double parent = WheelMath.arcSlotCenter(rootA, slots1, w1, Math.min(sub, slots1 - 1));
-                    addArc(boxes, spec2, parent, r2);
-                }
-                for (int i = 0; i < boxes.size(); i++) {
-                    for (int j = i + 1; j < boxes.size(); j++) {
-                        double[] a = boxes.get(i), b = boxes.get(j);
-                        boolean overlap = Math.abs(a[0] - b[0]) < (a[2] + b[2]) / 2
-                                && Math.abs(a[1] - b[1]) < (a[3] + b[3]) / 2;
-                        assertTrue(!overlap, "expanded=" + expanded + " sub=" + sub
-                                + " boxes " + i + "," + j + " collide");
-                    }
-                }
-            }
+        for (int i = 0; i < n; i++) {
+            assertInside(WheelMath.rootSlotCenter(i, n), mid0, ROOT_W[i], ROOT_H[i], l.r0In, l.r0Out, "root " + i);
+        }
+        for (Arc arc : ARCS) {
+            boolean two = arc.parent() != null;
+            double around = WheelLayout.parentAngle(arc, n, mid1);
+            checkArc(arc.spec(), around, two ? mid2 : mid1, two ? l.r2In : l.r1In, two ? l.r2Out : l.r1Out,
+                    (two ? "level2 " : "level1 ") + arc.rootSlot() + "/" + arc.childIndex());
         }
     }
 
-    /** Slot-center boxes of one arc at {@code radius}, using the render-time slot-width rule. */
-    private static void addArc(java.util.List<double[]> boxes, RingSpec spec, double parentAngle, int radius) {
-        double w = WheelMath.slotWidthFor(spec.maxItemWidth(), radius);
-        int slots = Math.min(spec.count(), WheelMath.arcCapacity(w));
+    private static void checkArc(RingSpec spec, double parentAngle, double mid, int rIn, int rOut, String what) {
+        double w = WheelMath.slotWidthFor(spec.span(), mid);
+        int capacity = WheelMath.arcCapacity(w);
+        if (spec.count() > capacity) spec = ring(capacity, spec.maxItemWidth(), spec.maxItemHeight());
+        int slots = spec.count();
+        double[][] boxes = new double[slots][];
         for (int k = 0; k < slots; k++) {
             double a = WheelMath.arcSlotCenter(parentAngle, slots, w, k);
-            boxes.add(new double[] {Math.sin(a) * radius, -Math.cos(a) * radius,
-                    spec.maxItemWidth(), LINE_H});
+            assertInside(a, mid, spec.widths()[k], spec.heights()[k], rIn, rOut, what + " slot " + k);
+            boxes[k] = new double[] {Math.sin(a) * mid, -Math.cos(a) * mid};
         }
+        for (int k = 0; k + 1 < slots; k++) {
+            double[] p = boxes[k], q = boxes[k + 1];
+            boolean overlap = Math.abs(p[0] - q[0]) < spec.maxItemWidth()
+                    && Math.abs(p[1] - q[1]) < spec.maxItemHeight();
+            assertTrue(!overlap, what + " slots " + k + "," + (k + 1) + " overlap");
+        }
+    }
+
+    /** The box's nearest and furthest points from the centre lie inside [rIn, rOut]. */
+    private static void assertInside(double angle, double mid, double w, double h, int rIn, int rOut, String what) {
+        double x = Math.sin(angle) * mid, y = -Math.cos(angle) * mid;
+        double nx = Math.max(Math.abs(x) - w / 2, 0), ny = Math.max(Math.abs(y) - h / 2, 0);
+        double near = Math.hypot(nx, ny);
+        double far = Math.hypot(Math.abs(x) + w / 2, Math.abs(y) + h / 2);
+        // The radial projection ignores the slight bulge of a corner off the radius; allow 2px of it.
+        assertTrue(near >= rIn, what + ": reaches inside the ring (" + near + " < " + rIn + ")");
+        assertTrue(far <= rOut + 2, what + ": reaches outside the ring (" + far + " > " + rOut + ")");
     }
 }

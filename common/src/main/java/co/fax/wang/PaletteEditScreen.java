@@ -52,7 +52,7 @@ import java.util.function.Supplier;
 public class PaletteEditScreen extends Screen {
 
     private static final int WHITE = 0xFFFFFFFF;
-    private static final int GREY = 0xFFA0A0A0;
+    private static final int GREY = Ui.HINT;
     private static final int RED = 0xFFFF5555;
     private static final int YELLOW = 0xFFFFE34D;
     private static final int BAR_H = EditorChrome.H;
@@ -1283,9 +1283,9 @@ public class PaletteEditScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-        // Full-page rgba(0,0,0,0.3) underlay so the UI reads against any world. The bar goes down
+        // Full-page Ui.BACKDROP underlay so the UI reads against any world. The bar goes down
         // first so the name box (a widget) draws over it; scrolled widgets hide under the bar.
-        g.fill(0, 0, this.width, this.height, 0x4D000000);
+        g.fill(0, 0, this.width, this.height, Ui.BACKDROP);
         chrome.render(g, this.font, mouseX, mouseY, dirty, nameError);
         super.extractRenderState(g, mouseX, mouseY, partialTick);
         g.enableScissor(0, BAR_H + 1, this.width, viewBottom());

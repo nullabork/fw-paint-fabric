@@ -1,186 +1,217 @@
 package co.fax.wang.wheel;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Label-driven ring sizing for the selector wheel, solved once when the wheel opens. Slots are
- * content-sized ({@link WheelMath#slotWidthFor}): adjacent items on a ring can never collide
- * because each slot's arc already spans its ring's widest item — the solver's job is the rest:
- * the hole must fit the center text, and every ring must sit far enough out that its items
- * clear the center block, the inner rings' labels, and each other across the circle, in any
- * expansion state. Longer labels therefore mean a bigger wheel from the start; nothing
- * resizes while the wheel is open.
+ * Ring sizing for the wheel, solved once when it opens. The rule is containment: every ring is
+ * thick enough that each item's box (its wrapped label, or icon, plus any "N missing" note) sits
+ * wholly inside the ring band at the item's angle, with {@link #PAD} to spare at both edges. So
+ * text never crosses into the gap or a neighbouring ring, and the rings can sit a constant
+ * {@link #GAP} apart: the gaps look the same everywhere, in every expansion state.
  *
- * <p>Three rings: the root (evenly divided), the level-1 arc (children of a root category),
- * and the level-2 arc (children of a level-1 category, fanned around that slot's angle). Each
- * level's radius is shared: the max any of its categories needs.
+ * <p>An item box at angle {@code a} reaches {@code hw·|sin a| + hh·|cos a|} out from its centre
+ * along the radius (its projection onto the radial direction), so a wide label at 3 o'clock
+ * needs a thicker ring than the same label at 12. Each item is measured at the angle it actually
+ * lands on (a scrolling carousel's items at every visible slot), and each level's thickness is
+ * the most any of its arcs need, never below {@link #MIN_THICKNESS}. Adjacent slots are spaced by
+ * the content-driven slot width ({@link WheelMath#slotWidthFor}).
  *
- * <p>Pure math (no Minecraft classes) so it unit-tests headlessly.
+ * <p>Three levels: the root (evenly divided), level 1 (the arcs root categories fan out — one
+ * {@link Arc} per variant, e.g. each paint type's Palette ring) and level 2 (arcs a level-1
+ * category fans out around its slot). Pure math (no Minecraft classes) so it unit-tests headlessly.
  */
 public final class WheelLayout {
 
-    /** Radial thickness of each ring, px. */
-    public static final int THICKNESS = 24;
-    /** Gap between one ring's outside and the next ring's inside. */
-    static final int RING_GAP = 4;
-    /** Padding between the center text block and the hole edge. */
-    static final int HOLE_PAD = 8;
-    /** Minimum clearance between two labels (and between a label and the center text). */
-    static final int LABEL_GAP = 8;
-    /** The hole never shrinks below this even with tiny center text. */
-    static final int MIN_HOLE = 26;
-    /** Sanity cap; beyond this we accept overlap rather than fill the screen. */
-    static final int MAX_RADIUS = 400;
+    /** Space between one ring's outside and the next ring's inside. Constant everywhere. */
+    public static final int GAP = 5;
+    /** Clearance between an item's box and its ring's inner and outer edges. */
+    public static final int PAD = 3;
+    /** Thinnest a ring may be (a 16px icon plus padding). */
+    public static final int MIN_THICKNESS = 24;
+    /** Padding between the centre text block's corners and the hole edge. */
+    static final int HOLE_PAD = 4;
+    /** The hole never shrinks below this even with tiny centre text. */
+    static final int MIN_HOLE = 24;
 
-    /** One ring's content summary: how many items, and how wide the widest one is. */
-    public record RingSpec(int count, int maxItemWidth) {}
+    /** One ring's items, in order: each box's width and height. */
+    public record RingSpec(int[] widths, int[] heights) {
+        public int count() {
+            return widths.length;
+        }
 
-    public final int r0In, r0Out, r1In, r1Out, r2In, r2Out;
+        public int maxItemWidth() {
+            int m = 0;
+            for (int w : widths) m = Math.max(m, w);
+            return m;
+        }
 
-    private WheelLayout(int r0Mid, int r1Mid, int r2Mid) {
-        this.r0In = r0Mid - THICKNESS / 2;
-        this.r0Out = r0Mid + THICKNESS / 2;
-        this.r1In = r1Mid - THICKNESS / 2;
-        this.r1Out = r1Mid + THICKNESS / 2;
-        this.r2In = r2Mid - THICKNESS / 2;
-        this.r2Out = r2Mid + THICKNESS / 2;
+        public int maxItemHeight() {
+            int m = 0;
+            for (int h : heights) m = Math.max(m, h);
+            return m;
+        }
+
+        /** What a slot must hold along the circle: the larger side of the biggest box. */
+        public int span() {
+            return Math.max(maxItemWidth(), maxItemHeight());
+        }
     }
 
     /**
-     * @param lineHeight font line height, px
-     * @param centerW    widest text the donut hole can show
-     * @param centerH    total height of the hole text block
-     * @param rootWidths label pixel widths of the root items, in slot order
-     * @param level1     per root slot, that category's ring content (null for leaves)
-     * @param level2     per root slot, per child index, that sub-category's ring content
-     *                   (null for leaves / no level-2 ring)
+     * One arc the wheel can show: fanned from root slot {@code rootSlot} (level 1, {@code parent}
+     * null) or from child {@code childIndex} of the level-1 arc {@code parent} (level 2).
      */
-    public static WheelLayout compute(int lineHeight, int centerW, int centerH,
-                                      int[] rootWidths, RingSpec[] level1, RingSpec[][] level2) {
-        int n = rootWidths.length;
-        double[] ux = new double[n], uy = new double[n]; // unit position of each root label
-        for (int i = 0; i < n; i++) {
-            double a = WheelMath.rootSlotCenter(i, n);
-            ux[i] = Math.sin(a);
-            uy[i] = -Math.cos(a);
+    public record Arc(int rootSlot, RingSpec spec, Arc parent, int childIndex) {
+        public static Arc level1(int rootSlot, RingSpec spec) {
+            return new Arc(rootSlot, spec, null, -1);
         }
 
-        // Root ring: the hole must fit the center text; then push out until no two root labels,
-        // nor a root label and the center block, can collide (all closed-form: linear in R).
-        double r0 = Math.max(MIN_HOLE, centerW / 2.0 + HOLE_PAD) + THICKNESS / 2.0;
-        for (int i = 0; i < n; i++) {
-            for (int j = i + 1; j < n; j++) {
-                r0 = Math.max(r0, minApart(ux[i] - ux[j], uy[i] - uy[j],
-                        (rootWidths[i] + rootWidths[j]) / 2.0 + LABEL_GAP,
-                        lineHeight + LABEL_GAP));
-            }
-            r0 = Math.max(r0, minApart(ux[i], uy[i],
-                    (rootWidths[i] + centerW) / 2.0 + LABEL_GAP,
-                    (lineHeight + centerH) / 2.0 + LABEL_GAP));
+        public static Arc level2(Arc parent, int childIndex, RingSpec spec) {
+            return new Arc(parent.rootSlot, spec, parent, childIndex);
         }
-        int r0Mid = (int) Math.ceil(Math.min(r0, MAX_RADIUS));
-
-        // Fixed root-label boxes for the outer rings to clear.
-        List<double[]> rootBoxes = new ArrayList<>();
-        for (int i = 0; i < n; i++) {
-            rootBoxes.add(new double[] {ux[i] * r0Mid, uy[i] * r0Mid, rootWidths[i] / 2.0});
-        }
-
-        // Level-1 ring: each category solves at its own adaptive slot width; radius is shared.
-        int r1Mid = r0Mid + THICKNESS + RING_GAP;
-        for (int i = 0; i < n; i++) {
-            RingSpec spec = level1 == null ? null : level1[i];
-            if (spec == null || spec.count() == 0) continue;
-            r1Mid = Math.max(r1Mid, solveRing(r0Mid + THICKNESS + RING_GAP, spec,
-                    WheelMath.rootSlotCenter(i, n), lineHeight, centerW, centerH, rootBoxes));
-        }
-
-        // Level-2 ring: cleared against the root labels AND its own category's level-1 labels
-        // (a level-2 group only ever shows alongside those).
-        int r2Mid = r1Mid + THICKNESS + RING_GAP;
-        for (int i = 0; i < n; i++) {
-            RingSpec parentSpec = level1 == null ? null : level1[i];
-            RingSpec[] subs = level2 == null ? null : level2[i];
-            if (parentSpec == null || subs == null) continue;
-            double rootA = WheelMath.rootSlotCenter(i, n);
-            List<double[]> fixed = new ArrayList<>(rootBoxes);
-            fixed.addAll(arcBoxes(parentSpec, rootA, r1Mid));
-            for (int j = 0; j < subs.length; j++) {
-                RingSpec sub = subs[j];
-                if (sub == null || sub.count() == 0) continue;
-                double parent = arcAngleOf(parentSpec, rootA, r1Mid, j);
-                r2Mid = Math.max(r2Mid, solveRing(r1Mid + THICKNESS + RING_GAP, sub,
-                        parent, lineHeight, centerW, centerH, fixed));
-            }
-        }
-        return new WheelLayout(r0Mid, r1Mid, r2Mid);
     }
 
-    /** The slot-center angle of child {@code j} of an arc with {@code spec} at {@code radius}. */
-    private static double arcAngleOf(RingSpec spec, double parentAngle, int radius, int j) {
-        double w = WheelMath.slotWidthFor(spec.maxItemWidth(), radius);
-        int slots = Math.min(spec.count(), WheelMath.arcCapacity(w));
-        return WheelMath.arcSlotCenter(parentAngle, slots, w, Math.min(j, slots - 1));
+    public final int r0In, r0Out, r1In, r1Out, r2In, r2Out;
+    /** False when no arc reaches level 2 (the wheel then ends at r1Out). */
+    public final boolean hasLevel2;
+    /**
+     * How far the wheel can reach from its centre up, down, left and right, over every arc it can
+     * fan out. Arcs fan towards their parent, so these are usually well under {@link #maxRadius}
+     * on most sides — the screen fits this box, not a full circle.
+     */
+    public final int up, down, left, right;
+
+    private WheelLayout(int r0In, int r0Out, int r1In, int r1Out, int r2In, int r2Out, boolean hasLevel2,
+                        int[] extent) {
+        this.r0In = r0In;
+        this.r0Out = r0Out;
+        this.r1In = r1In;
+        this.r1Out = r1Out;
+        this.r2In = r2In;
+        this.r2Out = r2Out;
+        this.hasLevel2 = hasLevel2;
+        this.up = extent[0];
+        this.down = extent[1];
+        this.left = extent[2];
+        this.right = extent[3];
     }
 
-    /** {@code {x, y, halfWidth}} boxes of an arc's items at {@code radius}. */
-    private static List<double[]> arcBoxes(RingSpec spec, double parentAngle, int radius) {
-        List<double[]> out = new ArrayList<>();
-        double w = WheelMath.slotWidthFor(spec.maxItemWidth(), radius);
-        int slots = Math.min(spec.count(), WheelMath.arcCapacity(w));
+    /** Outermost radius the wheel can reach in any expansion state. */
+    public int maxRadius() {
+        return hasLevel2 ? r2Out : r1Out;
+    }
+
+    /**
+     * @param centerW widest text the donut hole shows
+     * @param centerH height of the hole's text block
+     * @param rootW   root item box widths, in slot order
+     * @param rootH   root item box heights
+     * @param arcs    every arc the wheel can fan out, level 1 and level 2
+     */
+    public static WheelLayout compute(int centerW, int centerH, int[] rootW, int[] rootH, List<Arc> arcs) {
+        int n = rootW.length;
+        int r0In = (int) Math.ceil(Math.max(MIN_HOLE, Math.hypot(centerW / 2.0, centerH / 2.0) + HOLE_PAD));
+        double reach0 = 0;
+        for (int i = 0; i < n; i++) {
+            reach0 = Math.max(reach0, reach(WheelMath.rootSlotCenter(i, n), rootW[i], rootH[i]));
+        }
+        int r0Out = r0In + thickness(reach0);
+
+        // Each level: slot angles depend on the ring's radius, which depends on its thickness —
+        // iterate to a fixed point (it settles in a few rounds).
+        int r1In = r0Out + GAP;
+        int t1 = solveThickness(r1In, arcs, n, false, 0);
+        int r1Out = r1In + t1;
+        double mid1 = (r1In + r1Out) / 2.0;
+        boolean any2 = arcs.stream().anyMatch(a -> a.parent() != null && a.spec().count() > 0);
+        int r2In = r1Out + GAP;
+        int t2 = any2 ? solveThickness(r2In, arcs, n, true, mid1) : MIN_THICKNESS;
+        int r2Out = r2In + t2;
+
+        // Reach in each direction: the root circle, then every arc's outer edge.
+        double[] ext = {r0Out, r0Out, r0Out, r0Out}; // up, down, left, right
+        double mid2 = (r2In + r2Out) / 2.0;
+        for (Arc arc : arcs) {
+            if (arc.spec().count() == 0) continue;
+            boolean two = arc.parent() != null;
+            double mid = two ? mid2 : mid1;
+            double w = WheelMath.slotWidthFor(arc.spec().span(), mid);
+            int slots = Math.min(arc.spec().count(), WheelMath.arcCapacity(w));
+            double span = Math.min(WheelMath.TAU, slots * w);
+            double start = parentAngle(arc, n, mid1) - span / 2;
+            int rOut = two ? r2Out : r1Out;
+            for (int k = 0; k <= 48; k++) {
+                double a = start + span * k / 48;
+                double x = Math.sin(a) * rOut, y = -Math.cos(a) * rOut;
+                ext[0] = Math.max(ext[0], -y);
+                ext[1] = Math.max(ext[1], y);
+                ext[2] = Math.max(ext[2], -x);
+                ext[3] = Math.max(ext[3], x);
+            }
+        }
+        int[] extent = new int[4];
+        for (int i = 0; i < 4; i++) extent[i] = (int) Math.ceil(ext[i]);
+        return new WheelLayout(r0In, r0Out, r1In, r1Out, r2In, r2Out, any2, extent);
+    }
+
+    private static int solveThickness(int rIn, List<Arc> arcs, int n, boolean level2, double mid1) {
+        int t = MIN_THICKNESS;
+        for (int round = 0; round < 20; round++) {
+            double mid = rIn + t / 2.0;
+            double reach = 0;
+            for (Arc arc : arcs) {
+                if ((arc.parent() != null) != level2 || arc.spec().count() == 0) continue;
+                reach = Math.max(reach, arcReach(arc.spec(), parentAngle(arc, n, mid1), mid));
+            }
+            int need = thickness(reach);
+            if (need <= t) return t;
+            t = need;
+        }
+        return t;
+    }
+
+    /** The angle an arc fans around: its root slot, or its parent arc's child slot. */
+    static double parentAngle(Arc arc, int rootCount, double mid1) {
+        double rootA = WheelMath.rootSlotCenter(arc.rootSlot(), rootCount);
+        if (arc.parent() == null) return rootA;
+        return arcAngleOf(arc.parent().spec(), rootA, mid1, arc.childIndex());
+    }
+
+    /** Ring thickness that holds items reaching {@code reach} either side of the mid radius. */
+    private static int thickness(double reach) {
+        return Math.max(MIN_THICKNESS, (int) Math.ceil(2 * (reach + PAD)));
+    }
+
+    /** How far a {@code w}×{@code h} box centred on the ring reaches along the radius at {@code angle}. */
+    static double reach(double angle, double w, double h) {
+        return w / 2.0 * Math.abs(Math.sin(angle)) + h / 2.0 * Math.abs(Math.cos(angle));
+    }
+
+    /**
+     * The furthest any item of an arc reaches along the radius. A fixed arc measures each item at
+     * its own slot; a carousel (items scroll through the slots) measures every item at every slot.
+     */
+    private static double arcReach(RingSpec spec, double parentAngle, double radius) {
+        double w = WheelMath.slotWidthFor(spec.span(), radius);
+        int capacity = WheelMath.arcCapacity(w);
+        boolean carousel = spec.count() > capacity;
+        int slots = carousel ? capacity : spec.count();
+        double out = 0;
         for (int k = 0; k < slots; k++) {
             double a = WheelMath.arcSlotCenter(parentAngle, slots, w, k);
-            out.add(new double[] {Math.sin(a) * radius, -Math.cos(a) * radius,
-                    spec.maxItemWidth() / 2.0});
+            out = carousel ? Math.max(out, reach(a, spec.maxItemWidth(), spec.maxItemHeight()))
+                    : Math.max(out, reach(a, spec.widths()[k], spec.heights()[k]));
         }
         return out;
     }
 
-    /**
-     * Smallest radius ≥ {@code rLo} where the arc's items (at their content-driven slot width
-     * for that radius) clear the center block and the fixed inner labels. Items on the SAME
-     * ring never need checking: content-sized slots space adjacent centers by the widest item
-     * plus {@link WheelMath#SLOT_ARC_PAD} along the circle (and non-adjacent pairs sit even
-     * further apart), which no two item boxes can bridge in both axes at once.
-     */
-    private static int solveRing(int rLo, RingSpec spec, double parentAngle,
-                                 int lineHeight, int centerW, int centerH, List<double[]> fixed) {
-        double halfW = spec.maxItemWidth() / 2.0;
-        for (int r = rLo; r < MAX_RADIUS; r++) {
-            double w = WheelMath.slotWidthFor(spec.maxItemWidth(), r);
-            int slots = Math.min(spec.count(), WheelMath.arcCapacity(w));
-            boolean ok = true;
-            for (int k = 0; k < slots && ok; k++) {
-                double a = WheelMath.arcSlotCenter(parentAngle, slots, w, k);
-                double x = Math.sin(a) * r, y = -Math.cos(a) * r;
-                if (Math.abs(x) < halfW + centerW / 2.0 + LABEL_GAP
-                        && Math.abs(y) < (lineHeight + centerH) / 2.0 + LABEL_GAP) {
-                    ok = false;
-                    break;
-                }
-                for (double[] f : fixed) {
-                    if (Math.abs(x - f[0]) < halfW + f[2] + LABEL_GAP
-                            && Math.abs(y - f[1]) < lineHeight + LABEL_GAP) {
-                        ok = false;
-                        break;
-                    }
-                }
-            }
-            if (ok) return r;
-        }
-        return MAX_RADIUS;
-    }
-
-    /**
-     * Smallest radius R at which two labels at {@code R*(x1,y1)} and {@code R*(x2,y2)} are
-     * separated by {@code needX} horizontally or {@code needY} vertically (either suffices —
-     * horizontal text boxes don't collide when one axis is clear). The deltas are per unit
-     * radius; a fixed point (the center block) contributes {@code (0, 0)}.
-     */
-    private static double minApart(double dxPerR, double dyPerR, double needX, double needY) {
-        double byX = Math.abs(dxPerR) < 1e-9 ? Double.MAX_VALUE : needX / Math.abs(dxPerR);
-        double byY = Math.abs(dyPerR) < 1e-9 ? Double.MAX_VALUE : needY / Math.abs(dyPerR);
-        return Math.min(byX, byY);
+    /** Slot-centre angle of child {@code j} of an arc with {@code spec} at {@code radius}. */
+    static double arcAngleOf(RingSpec spec, double parentAngle, double radius, int j) {
+        double w = WheelMath.slotWidthFor(spec.span(), radius);
+        int capacity = WheelMath.arcCapacity(w);
+        boolean carousel = spec.count() > capacity;
+        int slots = carousel ? capacity : spec.count();
+        int slot = carousel ? Math.min(j + 1, slots - 2) : Math.min(j, slots - 1);
+        return WheelMath.arcSlotCenter(parentAngle, slots, w, slot);
     }
 }

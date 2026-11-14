@@ -100,6 +100,8 @@ public final class ShapeMarkers {
 
     /** The marker last created / edited / clicked (keeps its cog out). */
     private static Object lastTouched;
+    /** A marker whose toolbar reopens on its Rendering page once no screen is up (see {@link #reopenStyle}). */
+    private static Object reopenOwner;
     /** The marker last under the crosshair; lingers {@link #HOVER_LINGER} ticks after. */
     private static Object hoverOwner;
     private static int hoverTicks;
@@ -183,6 +185,7 @@ public final class ShapeMarkers {
     public static void clearAll() {
         shapes.clear();
         BoxMarkers.box = null;
+        BoxMarkers.style = new MarkerStyle();
         BoxMarkers.reset();
         LineMarkers.clear();
         clearPending();
@@ -200,6 +203,7 @@ public final class ShapeMarkers {
         barHover = false;
         lastTouched = null;
         hoverOwner = null;
+        reopenOwner = null;
         MarkerToolbar.close();
     }
 
@@ -214,6 +218,14 @@ public final class ShapeMarkers {
     public static void touchGroup(BlockPos pos) {
         GroupMarkers.Group g = GroupMarkers.at(pos, null);
         if (g != null) lastTouched = g.owner();
+    }
+
+    /**
+     * The block list opened from {@code owner}'s Rendering page has closed: put its toolbar back
+     * up on that page (a screen closes the toolbar), so the look can be tuned further.
+     */
+    static void reopenStyle(Object owner) {
+        reopenOwner = owner;
     }
 
     /** Whether {@code owner}'s cog shows: under the crosshair (lingering), last touched, or open. */
@@ -266,7 +278,9 @@ public final class ShapeMarkers {
         if (mc.level == null) return null;
         String dim = mc.level.dimension().identifier().toString();
         var singleplayer = mc.getSingleplayerServer();
-        if (singleplayer != null) return "sp:" + singleplayer.getWorldData().getLevelName() + "|" + dim;
+        if (singleplayer != null) {
+            return co.fax.wang.DebugScript.worldKeyPrefix() + "sp:" + singleplayer.getWorldData().getLevelName() + "|" + dim;
+        }
         var server = mc.getCurrentServer();
         if (server != null) return "mp:" + server.ip + "|" + dim;
         return "local|" + dim;
@@ -373,6 +387,16 @@ public final class ShapeMarkers {
         GroupMarkers.updateAim(mc, groupMode);
         resolveAim();
         updateLookedShape(mc);
+        if (reopenOwner != null) {
+            Object o = reopenOwner;
+            reopenOwner = null;
+            MarkerToolbar.Spec s = specFor(o, mc, pm, groupMode);
+            if (s != null) {
+                if (!MarkerToolbar.isOpen(o)) MarkerToolbar.toggle(o, s);
+                MarkerToolbar.showStyle(true);
+                touch(o);
+            }
+        }
         MarkerToolbar.refresh(specFor(MarkerToolbar.owner(), mc, pm, groupMode));
         boolean dragging = LineMarkers.dragging() || dragShape != null || BoxMarkers.dragging();
         if (dragging) MarkerToolbar.close(); // the toolbar gets out of the way of a drag
@@ -549,6 +573,64 @@ public final class ShapeMarkers {
         };
     }
 
+    /**
+     * Dev-only ({@link co.fax.wang.DebugScript}'s {@code aim}): where something of the marker whose
+     * toolbar is open (else the last touched one) is — {@code what} is {@code cog}, {@code control}
+     * (index {@code k} of its controls) or {@code button} (index {@code k} on its open toolbar).
+     * Null when there's no such thing.
+     */
+    public static Vec3 debugAimPoint(Minecraft mc, String what, int k) {
+        if ("button".equals(what)) return MarkerToolbar.debugButton(mc, k);
+        MarkerToolbar.Spec spec = debugSpec(mc);
+        if (spec == null) return null;
+        if ("cog".equals(what)) return spec.cog();
+        return k >= 0 && k < spec.controls().size() ? spec.controls().get(k) : null;
+    }
+
+    /**
+     * Dev-only ({@link co.fax.wang.DebugScript}'s {@code style}): set a {@link MarkerStyle} field
+     * of the marker whose toolbar is open (else the last touched one). False when there is none.
+     */
+    public static boolean debugStyle(String field, String value) {
+        Object owner = MarkerToolbar.owner() != null ? MarkerToolbar.owner() : lastTouched;
+        MarkerStyle st = owner instanceof RingShape r ? r.style : owner instanceof LineShape l ? l.style
+                : owner == BoxMarkers.OWNER ? BoxMarkers.style : null;
+        if (st == null) return false;
+        switch (field) {
+            case "block" -> st.block = "none".equals(value) ? "" : value;
+            case "faceColor" -> st.faceColor = Integer.parseInt(value, 16);
+            case "edgeColor" -> st.edgeColor = Integer.parseInt(value, 16);
+            case "faceOpacity" -> st.faceOpacity = Integer.parseInt(value);
+            case "edgeOpacity" -> st.edgeOpacity = Integer.parseInt(value);
+            case "edgesThrough" -> st.edgesThrough = Boolean.parseBoolean(value);
+            case "facesThrough" -> st.facesThrough = Boolean.parseBoolean(value);
+            default -> {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static MarkerToolbar.Spec debugSpec(Minecraft mc) {
+        PlacementMode pm = co.fax.wang.Gradient.currentPlacement(mc);
+        boolean groupMode = pm == PlacementMode.MARKER || pm == PlacementMode.MARKER_DRAW;
+        Object owner = MarkerToolbar.owner() != null ? MarkerToolbar.owner() : lastTouched;
+        return specFor(owner, mc, pm, groupMode);
+    }
+
+    /**
+     * The HUD's line readout while you look at a line — its curve, a control, or any block of its
+     * tube — or its toolbar is open: its length along the curve and its node count, e.g.
+     * "Line · 23.5 blocks long · 3 nodes". Null otherwise.
+     */
+    public static String hudLineInfo() {
+        LineShape l = LineMarkers.hudLine(Minecraft.getInstance());
+        if (l == null && MarkerToolbar.owner() instanceof LineShape open) l = open;
+        if (l == null) return null;
+        int nodes = l.curve.nodes.size();
+        return "Line · " + LineMarkers.fmt(l.length()) + " blocks long · " + nodes + (nodes == 1 ? " node" : " nodes");
+    }
+
     /** The open marker's toolbar for this tick, or null when it's gone / not editable now. */
     private static MarkerToolbar.Spec specFor(Object owner, Minecraft mc, PlacementMode pm, boolean groupMode) {
         if (owner == null) return null;
@@ -613,9 +695,16 @@ public final class ShapeMarkers {
 
     // ---- ring toolbar ------------------------------------------------------------------------
 
-    /** Ring toolbar: Circle | Square · Flip (once it has depth) · Delete · ?. */
+    /** Ring toolbar: Circle | Square · Flip (once it has depth) · Rendering · Delete · ?. */
     private static MarkerToolbar.Spec ringSpec(RingShape s) {
         List<MarkerToolbar.Button> row = new ArrayList<>();
+        List<List<MarkerToolbar.Button>> rows = List.of(row);
+        if (MarkerToolbar.stylePage()) {
+            rows = StylePage.rows(s, s.style, RING_FILL, RING_EDGE, () -> {
+                touch(s);
+                saveCurrent();
+            });
+        }
         for (RingShape.Kind k : RingShape.Kind.values()) {
             String name = k == RingShape.Kind.CIRCLE ? "Circle" : "Square";
             LineProfile outline = k == RingShape.Kind.CIRCLE ? LineProfile.CIRCLE : LineProfile.SQUARE;
@@ -638,6 +727,7 @@ public final class ShapeMarkers {
                                 : "Ring: the gradient starts at the base again");
                     }));
         }
+        row.add(StylePage.openButton(s.style));
         row.add(new MarkerToolbar.Button(MarkerToolbar.BIN, false, true,
                 "Delete this ring (same as MMB)", () -> removeRing(s)));
         row.add(new MarkerToolbar.Button(MarkerToolbar.QUESTION, false, false,
@@ -655,7 +745,7 @@ public final class ShapeMarkers {
         if (s.kind == RingShape.Kind.SQUARE) {
             for (int i = 0; i < 4; i++) controls.add(Vec3.atCenterOf(s.cornerCell(i)));
         }
-        return new MarkerToolbar.Spec(null, List.of(row), ringCog(s),
+        return new MarkerToolbar.Spec(null, rows, ringCog(s),
                 new Vec3(Math.min(lo.getX(), hi.getX()), Math.min(lo.getY(), hi.getY()), Math.min(lo.getZ(), hi.getZ())),
                 new Vec3(Math.max(lo.getX(), hi.getX()) + 1, Math.max(lo.getY(), hi.getY()) + 1,
                         Math.max(lo.getZ(), hi.getZ()) + 1),
@@ -905,14 +995,26 @@ public final class ShapeMarkers {
             // deletable. Rebuilding the cached geometry is throttled while dragging.
             boolean looked = handles && (shape == lookedShape || shape == aimedShape);
             boolean allowRebuild = shape != dragShape || frame % 4 == 0;
-            drawRing(col, ps, cam, shape, shape.layerLo(), shape.layerHi(), RING_FILL,
-                    looked ? RING_EDGE_LOOKED : RING_EDGE, allowRebuild);
-            if (looked) {
+            // The ring's own look (its toolbar's Rendering page): looked-at edges stay white
+            // but keep its edge opacity, so edges turned off stay off.
+            MarkerStyle st = shape.style;
+            BlockSkin.Skin skin = BlockSkin.of(st.block);
+            if (skin != null && (long) shape.rasterSize() * (shape.layerHi() - shape.layerLo() + 1) * 4 > BlockSkin.MAX_FACES) {
+                skin = null; // too big to show as blocks: the flat tint instead
+            }
+            int edge = st.edge(looked ? RING_EDGE_LOOKED : RING_EDGE, !looked);
+            int fill = skin != null ? 0 : st.face(RING_FILL);
+            drawRing(col, ps, cam, shape, shape.layerLo(), shape.layerHi(), st.facesThrough ? 0 : fill,
+                    edge, allowRebuild);
+            if (skin != null) drawRingBlocks(col, ps, cam, shape, skin, st.blockAlpha(), st.facesThrough);
+            else if (st.facesThrough && fill >>> 24 != 0) drawRingFacesThrough(col, ps, cam, shape, fill);
+            if (looked && edge >>> 24 != 0) {
                 WorldDraw.compositeOutline(col, ps, cam, shape.silhouetteOrigin(),
-                        shape.silhouette(false), RING_EDGE_LOOKED);
+                        shape.silhouette(false), edge);
             }
             // Faint on-top edge cage, always visible, so a buried shape never gets lost.
-            drawRingGhost(col, ps, cam, shape, looked ? RING_GHOST_LOOKED : RING_GHOST);
+            int ghost = st.ghost(looked ? RING_GHOST_LOOKED : RING_GHOST, !looked);
+            if (ghost >>> 24 != 0) drawRingGhost(col, ps, cam, shape, ghost);
             drawControl(col, ps, cam, shape, ControlKind.RADIUS_A, -1, shape.ctrlA, handles);
             drawControl(col, ps, cam, shape, ControlKind.RADIUS_B, -1, shape.ctrlB, handles);
             drawControl(col, ps, cam, shape, ControlKind.CENTER, -1, shape.center, handles);
@@ -975,7 +1077,9 @@ public final class ShapeMarkers {
         if (aimed) {
             WorldDraw.regionOutline(col, ps, cam, colLo, sx, sy, sz, CONTROL_OUTLINE);
         }
-        // Faint on-top cage, always visible, so buried controls stay findable and targetable.
+        // Faint on-top cage, so buried controls stay findable and targetable — unless the ring is
+        // set not to show its edge lines when obscured.
+        if (!shape.style.edgesThrough) return;
         WorldDraw.boxEdgesSeeThrough(col, ps, cam, colLo, sx, sy, sz,
                 aimed ? Gizmo.alpha(Gizmo.lighten(base), 0x99) : Gizmo.alpha(base, 0x66));
     }
@@ -1029,13 +1133,71 @@ public final class ShapeMarkers {
                             float ox = cellOffset(Direction.Axis.X, normal, uAxis, k, du, dv);
                             float oy = cellOffset(Direction.Axis.Y, normal, uAxis, k, du, dv);
                             float oz = cellOffset(Direction.Axis.Z, normal, uAxis, k, du, dv);
-                            WorldDraw.emitCellFaces(pose, vc, ox, oy, oz, fillArgb, mask);
-                            if (edgeArgb != 0) {
+                            if (fillArgb >>> 24 != 0) WorldDraw.emitCellFaces(pose, vc, ox, oy, oz, fillArgb, mask);
+                            if (edgeArgb >>> 24 != 0) {
                                 WorldDraw.emitCellEdges(pose, vc, ox, oy, oz, edgeArgb, mask, false);
                             }
                         }
                     }
                 });
+        ps.popPose();
+    }
+
+    /**
+     * The band's outer surface as block faces (see {@link BlockSkin}): the ring shown as a block,
+     * one textured square per visible cell face. Call after {@link #drawRing} (it builds the raster).
+     */
+    private static void drawRingBlocks(SubmitNodeCollector col, PoseStack ps, Vec3 cam, RingShape shape,
+                                       BlockSkin.Skin skin, int alpha, boolean through) {
+        int n = shape.rasterSize();
+        if (n == 0 || alpha == 0) return;
+        int hLo = shape.layerLo(), hHi = shape.layerHi();
+        Direction.Axis normal = shape.normal;
+        Direction.Axis uAxis = shape.uAxis();
+        BlockPos c = shape.center;
+        ps.pushPose();
+        ps.translate(c.getX() - cam.x, c.getY() - cam.y, c.getZ() - cam.z);
+        Vec3 camLocal = new Vec3(cam.x - c.getX(), cam.y - c.getY(), cam.z - c.getZ());
+        BlockSkin.submit(col, ps, skin, alpha, through, camLocal, sink -> {
+            for (int i = 0; i < n; i++) {
+                int du = shape.rasterDu(i), dv = shape.rasterDv(i), m4 = shape.rasterMask(i);
+                for (int k = hLo; k <= hHi; k++) {
+                    int mask = faceMask(normal, uAxis, k, hLo, hHi, m4);
+                    if (mask == 0) continue;
+                    BlockSkin.cell(sink,
+                            (int) cellOffset(Direction.Axis.X, normal, uAxis, k, du, dv),
+                            (int) cellOffset(Direction.Axis.Y, normal, uAxis, k, du, dv),
+                            (int) cellOffset(Direction.Axis.Z, normal, uAxis, k, du, dv), mask);
+                }
+            }
+        });
+        ps.popPose();
+    }
+
+    /** The band's tinted faces drawn over everything (a ring set to show its faces when obscured). */
+    private static void drawRingFacesThrough(SubmitNodeCollector col, PoseStack ps, Vec3 cam,
+                                             RingShape shape, int argb) {
+        int n = shape.rasterSize();
+        if (n == 0) return;
+        int hLo = shape.layerLo(), hHi = shape.layerHi();
+        Direction.Axis normal = shape.normal;
+        Direction.Axis uAxis = shape.uAxis();
+        BlockPos c = shape.center;
+        ps.pushPose();
+        ps.translate(c.getX() - cam.x, c.getY() - cam.y, c.getZ() - cam.z);
+        col.submitCustomGeometry(ps, WorldDraw.seeThrough(), (pose, vc) -> {
+            for (int i = 0; i < n; i++) {
+                int du = shape.rasterDu(i), dv = shape.rasterDv(i), m4 = shape.rasterMask(i);
+                for (int k = hLo; k <= hHi; k++) {
+                    int mask = faceMask(normal, uAxis, k, hLo, hHi, m4);
+                    if (mask == 0) continue;
+                    WorldDraw.emitCellFacesThrough(pose, vc,
+                            cellOffset(Direction.Axis.X, normal, uAxis, k, du, dv),
+                            cellOffset(Direction.Axis.Y, normal, uAxis, k, du, dv),
+                            cellOffset(Direction.Axis.Z, normal, uAxis, k, du, dv), argb, mask);
+                }
+            }
+        });
         ps.popPose();
     }
 

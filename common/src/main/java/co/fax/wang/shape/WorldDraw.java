@@ -105,6 +105,38 @@ public final class WorldDraw {
     }
 
     /**
+     * {@link #filledRegion}'s walls drawn over everything, blocks in front included (a marker set
+     * to show its faces when obscured). One shell, through the depth-ignoring pipeline.
+     */
+    public static void filledRegionThrough(SubmitNodeCollector col, PoseStack ps, Vec3 cam,
+                                           BlockPos min, int sx, int sy, int sz, int argb) {
+        ps.pushPose();
+        ps.translate(min.getX() - cam.x, min.getY() - cam.y, min.getZ() - cam.z);
+        col.submitCustomGeometry(ps, seeThrough(), (pose, vc) -> emitBoxThrough(pose, vc, argb, 0x3F,
+                -EXPAND, -EXPAND, -EXPAND, sx + EXPAND, sy + EXPAND, sz + EXPAND));
+        ps.popPose();
+    }
+
+    /** {@link #emitCellFaces} for the see-through pipeline (white-texel UV, both windings). */
+    public static void emitCellFacesThrough(PoseStack.Pose pose, VertexConsumer vc,
+                                            float ox, float oy, float oz, int argb, int mask) {
+        emitBoxThrough(pose, vc, argb, mask, ox - EXPAND, oy - EXPAND, oz - EXPAND,
+                ox + 1 + EXPAND, oy + 1 + EXPAND, oz + 1 + EXPAND);
+    }
+
+    private static void emitBoxThrough(PoseStack.Pose pose, VertexConsumer vc, int argb, int mask,
+                                       float ax, float ay, float az, float bx, float by, float bz) {
+        Vec3 a = new Vec3(ax, ay, az), b = new Vec3(bx, ay, az), c = new Vec3(bx, ay, bz), d = new Vec3(ax, ay, bz);
+        Vec3 e = new Vec3(ax, by, az), f = new Vec3(bx, by, az), g = new Vec3(bx, by, bz), h = new Vec3(ax, by, bz);
+        if ((mask & 0x01) != 0) quadDS(vc, pose, argb, true, a, b, c, d); // down
+        if ((mask & 0x02) != 0) quadDS(vc, pose, argb, true, e, h, g, f); // up
+        if ((mask & 0x04) != 0) quadDS(vc, pose, argb, true, a, e, f, b); // north
+        if ((mask & 0x08) != 0) quadDS(vc, pose, argb, true, d, c, g, h); // south
+        if ((mask & 0x10) != 0) quadDS(vc, pose, argb, true, a, d, h, e); // west
+        if ((mask & 0x20) != 0) quadDS(vc, pose, argb, true, b, f, g, c); // east
+    }
+
+    /**
      * 1px edge outline of the block-aligned box from {@code min} — outer + inset layer,
      * drawn after translucent terrain.
      */

@@ -123,7 +123,9 @@ public final class MarkerManager {
         if (mc.level == null) return null;
         String dim = mc.level.dimension().identifier().toString();
         var singleplayer = mc.getSingleplayerServer();
-        if (singleplayer != null) return "sp:" + singleplayer.getWorldData().getLevelName() + "|" + dim;
+        if (singleplayer != null) {
+            return co.fax.wang.DebugScript.worldKeyPrefix() + "sp:" + singleplayer.getWorldData().getLevelName() + "|" + dim;
+        }
         var server = mc.getCurrentServer();
         if (server != null) return "mp:" + server.ip + "|" + dim;
         return "local|" + dim;

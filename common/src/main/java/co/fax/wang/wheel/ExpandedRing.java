@@ -25,11 +25,11 @@ final class ExpandedRing {
     private int offset;
 
     ExpandedRing(WheelItem category, List<WheelItem> items, double parentAngle,
-                 int maxItemWidth, double radius) {
+                 int span, double radius) {
         this.category = category;
         this.items = items;
         this.parentAngle = parentAngle;
-        this.slotWidth = WheelMath.slotWidthFor(maxItemWidth, radius);
+        this.slotWidth = WheelMath.slotWidthFor(span, radius);
         int capacity = WheelMath.arcCapacity(slotWidth);
         this.visibleItems = items.size() > capacity ? Math.max(1, capacity - 2) : items.size();
         // Start the carousel window on the current selection so it's visible without scrolling.

@@ -46,6 +46,8 @@ public final class DebugRender {
 
     /** Called each client tick from MarkerManager. */
     public static void tick(Minecraft mc) {
+        DebugTour.tick(mc);
+        DebugScript.tick(mc);
         if (LINE == null || mc.player == null || mc.level == null) return;
         if (spawned) {
             if (WIGGLE) LineMarkers.debugWiggle(wiggleTicks++);

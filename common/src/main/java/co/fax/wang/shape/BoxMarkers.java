@@ -23,7 +23,7 @@ import java.util.List;
  * the whole box (Alt locks it to an axis), scroll pushes / pulls the box along the aimed face's
  * axis (its gradient axis from the move cube) and modifier+scroll grows / shrinks that face. The
  * first corner shows the start colour and the opposite corner the end colour. The cog opens the
- * box's toolbar: gradient axis X | Y | Z, flip, delete.
+ * box's toolbar: gradient axis X | Y | Z, flip, rendering (its {@link MarkerStyle}), delete.
  */
 final class BoxMarkers {
 
@@ -49,6 +49,8 @@ final class BoxMarkers {
     private enum Kind { FACE, MOVE, COG }
 
     static BoxRegion box;
+    /** How the box is drawn (the Rendering page of its toolbar); a new box starts with the default look. */
+    static MarkerStyle style = new MarkerStyle();
 
     // Creation (Box mode): the first corner, pending until the second LMB.
     private static BlockPos pendingA;
@@ -103,6 +105,7 @@ final class BoxMarkers {
 
     static void remove() {
         box = null;
+        style = new MarkerStyle();
         dragKind = null;
         aimedKind = null;
         MarkerText.say("Box removed");
@@ -302,6 +305,7 @@ final class BoxMarkers {
             return;
         }
         box = new BoxRegion(pendingA, p, pendingAxis);
+        style = new MarkerStyle();
         cancelCreation();
         ShapeMarkers.touch(OWNER);
         ShapeMarkers.saveLines();
@@ -336,6 +340,13 @@ final class BoxMarkers {
         if (box == null) return null;
         BoxRegion b = box;
         List<MarkerToolbar.Button> row = new ArrayList<>();
+        List<List<MarkerToolbar.Button>> rows = List.of(row);
+        if (MarkerToolbar.stylePage()) {
+            rows = StylePage.rows(OWNER, style, BOX_WALL, BOX_EDGE, () -> {
+                ShapeMarkers.touch(OWNER);
+                ShapeMarkers.saveLines();
+            });
+        }
         for (Direction.Axis a : Direction.Axis.values()) {
             String name = a.getName().toUpperCase(java.util.Locale.ROOT);
             row.add(new MarkerToolbar.Button(MarkerToolbar.letter(name.charAt(0)), b.axis == a, false,
@@ -349,6 +360,7 @@ final class BoxMarkers {
                     box = box.flipped();
                     changed("Box flipped — the gradient starts on the other side");
                 }));
+        row.add(StylePage.openButton(style));
         row.add(new MarkerToolbar.Button(MarkerToolbar.BIN, false, true,
                 "Delete this box (same as MMB)", BoxMarkers::remove));
         row.add(new MarkerToolbar.Button(MarkerToolbar.QUESTION, false, false,
@@ -358,7 +370,7 @@ final class BoxMarkers {
         List<Vec3> controls = new ArrayList<>();
         for (Direction d : Direction.values()) controls.add(facePos(b, d));
         controls.add(centre(b));
-        return new MarkerToolbar.Spec(null, List.of(row), cogPos(b, Raycast.eye(mc)),
+        return new MarkerToolbar.Spec(null, rows, cogPos(b, Raycast.eye(mc)),
                 new Vec3(mn.getX(), mn.getY(), mn.getZ()), new Vec3(mx.getX() + 1, mx.getY() + 1, mx.getZ() + 1),
                 controls);
     }
@@ -391,17 +403,32 @@ final class BoxMarkers {
         int sx = mx.getX() - mn.getX() + 1;
         int sy = mx.getY() - mn.getY() + 1;
         int sz = mx.getZ() - mn.getZ() + 1;
-        WorldDraw.filledRegion(col, ps, cam, mn, sx, sy, sz, BOX_WALL);
+        // A half-made box keeps the default look; the committed one wears its style.
+        MarkerStyle st = pending ? new MarkerStyle() : style;
+        BlockSkin.Skin found = BlockSkin.of(st.block);
+        boolean tooBig = 2L * ((long) sx * sy + (long) sy * sz + (long) sx * sz) > BlockSkin.MAX_FACES;
+        BlockSkin.Skin skin = tooBig ? null : found;
+        if (skin != null) {
+            drawBlocks(col, ps, cam, mn, sx, sy, sz, skin, st.blockAlpha(), st.facesThrough);
+        } else {
+            int wall = st.face(BOX_WALL);
+            if (wall >>> 24 == 0) { // faces hidden
+            } else if (st.facesThrough) WorldDraw.filledRegionThrough(col, ps, cam, mn, sx, sy, sz, wall);
+            else WorldDraw.filledRegion(col, ps, cam, mn, sx, sy, sz, wall);
+        }
         // The white outline shows while placing the second corner, or while the tool is in
         // hand and the crosshair is on the box; a faint ghost always reads through terrain.
-        if (pending || (handles && (rayHits(mc, draw) || controlAimed()))) {
-            WorldDraw.regionOutline(col, ps, cam, mn, sx, sy, sz, BOX_EDGE);
+        int edge = st.edge(BOX_EDGE, true);
+        if ((pending || (handles && (rayHits(mc, draw) || controlAimed()))) && edge >>> 24 != 0) {
+            WorldDraw.regionOutline(col, ps, cam, mn, sx, sy, sz, edge);
         }
-        WorldDraw.boxEdgesSeeThrough(col, ps, cam, mn, sx, sy, sz, BOX_GHOST);
+        int ghost = st.ghost(BOX_GHOST, true);
+        if (ghost >>> 24 != 0) WorldDraw.boxEdgesSeeThrough(col, ps, cam, mn, sx, sy, sz, ghost);
 
-        // Start/end plane slabs (skip when the box is flat on its axis — no direction).
+        // Start/end plane slabs (skip when the box is flat on its axis — no direction — and
+        // when it is shown as a block: they would tint the preview).
         int a = draw.cornerA.get(draw.axis), b = draw.cornerB.get(draw.axis);
-        if (a != b) {
+        if (a != b && skin == null) {
             drawPlaneSlab(col, ps, cam, draw, a, BOX_START);
             drawPlaneSlab(col, ps, cam, draw, b, BOX_END);
         }
@@ -427,6 +454,25 @@ final class BoxMarkers {
             int argb = Gizmo.axisColor(lockAxis);
             Gizmo.twoPass(col, ps, cam, e -> Gizmo.segmentRibbon(e, c.subtract(u.scale(96)), c.add(u.scale(96)), 0.025, argb));
         }
+    }
+
+    /** The six sides of the box as block faces (see {@link BlockSkin}), one textured square per cell. */
+    private static void drawBlocks(SubmitNodeCollector col, PoseStack ps, Vec3 cam, BlockPos mn,
+                                   int sx, int sy, int sz, BlockSkin.Skin skin, int alpha, boolean through) {
+        if (alpha == 0) return;
+        float e = TubeBuild.EXPAND;
+        ps.pushPose();
+        ps.translate(mn.getX() - cam.x, mn.getY() - cam.y, mn.getZ() - cam.z);
+        Vec3 camLocal = new Vec3(cam.x - mn.getX(), cam.y - mn.getY(), cam.z - mn.getZ());
+        BlockSkin.submit(col, ps, skin, alpha, through, camLocal, sink -> {
+            sink.rect(0, -e, 0, sx, 0, sz);      // down
+            sink.rect(1, sy + e, 0, sx, 0, sz);  // up
+            sink.rect(2, -e, 0, sx, 0, sy);      // north
+            sink.rect(3, sz + e, 0, sx, 0, sy);  // south
+            sink.rect(4, -e, 0, sy, 0, sz);      // west
+            sink.rect(5, sx + e, 0, sy, 0, sz);  // east
+        });
+        ps.popPose();
     }
 
     /** A one-block-thick tinted slab of the box at {@code plane} along the box axis. */

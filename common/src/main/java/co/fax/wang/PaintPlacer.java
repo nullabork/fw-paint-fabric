@@ -194,12 +194,17 @@ public final class PaintPlacer {
         virtualWalls = bhr != null && shapeHit;
         if (bhr == null) {
             BlockPos air = airTarget(mc, cfg);
-            if (air != null) startAir(mc, player, air);
+            if (air != null && cfg.onlyInsideMarkers && againstMarkerOutside(air)) overlay(mc, outsideMessage());
+            else if (air != null) startAir(mc, player, air);
             else overlay(mc, Gradient.message(type.label(), "aim at a block face", null));
             return;
         }
         BlockPos clicked = bhr.getBlockPos();
         dir = bhr.getDirection();
+        if (startsOutsideMarker(mc, cfg, pm, clicked, dir)) {
+            overlay(mc, outsideMessage());
+            return;
+        }
 
         if (!prepareChoice(mc, player, clicked)) return;
 
@@ -218,6 +223,50 @@ public final class PaintPlacer {
         double reach = Math.min(REACH, mc.player.blockInteractionRange()) - 0.5;
         BlockPos cell = BlockPos.containing(mc.player.getEyePosition().add(mc.player.getViewVector(1f).scale(reach)));
         return Gradient.emptyCell(mc.level.getBlockState(cell)) ? cell : null;
+    }
+
+    // ---- only place inside markers ------------------------------------------------------------------
+
+    /** Inside a marker: a box, ring or line tube, or strictly between a start marker and its end. */
+    private static boolean inMarker(BlockPos cell) {
+        return co.fax.wang.shape.ShapeMarkers.contains(cell) || segmentForCell(cell) != null;
+    }
+
+    /** {@code cell} is outside every marker but touches one (face to face). */
+    private static boolean againstMarkerOutside(BlockPos cell) {
+        if (inMarker(cell)) return false;
+        for (Direction n : Direction.values()) {
+            if (inMarker(cell.relative(n))) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Only place inside markers (the Place option): true when a click on {@code clicked}'s
+     * {@code d} face would start painting outside every marker while right against one — the
+     * outer skin of a box, ring or tube (or blocks already built in it), or the blocks beside a
+     * start→end run. Such a click is almost always a slip, and it would spread a blob over the
+     * outside. A click whose first block lands inside a marker, or one nowhere near a marker,
+     * is left alone.
+     */
+    private static boolean startsOutsideMarker(Minecraft mc, GradientConfig cfg, PlacementMode pm,
+                                               BlockPos clicked, Direction d) {
+        if (!cfg.onlyInsideMarkers) return false;
+        if (!co.fax.wang.shape.ShapeMarkers.any() && MarkerManager.endMarkers.isEmpty()) return false;
+        BlockPos front = clicked.relative(d);
+        if (inMarker(front)) return false;
+        if (pm == PlacementMode.FILL3D) {
+            // A 3D fill grows from the clicked block: it fills the marker if an open side is in one.
+            for (Direction n : Direction.values()) {
+                BlockPos c = clicked.relative(n);
+                if (Gradient.emptyCell(mc.level.getBlockState(c)) && inMarker(c)) return false;
+            }
+        }
+        return inMarker(clicked) || againstMarkerOutside(front) || againstMarkerOutside(clicked);
+    }
+
+    private static String outsideMessage() {
+        return Gradient.message("Place", "that is outside the marker (Only place inside markers is on)", "Place");
     }
 
     /** Set by {@link #paintHit}: the hit it returned is a shape-boundary face, not a block. */
@@ -1229,7 +1278,10 @@ public final class PaintPlacer {
         // Paint stays at normal block reach (the crosshair hit) — only markers target further.
         BlockHitResult hit = paintHit(mc);
         virtualWalls = hit != null && shapeHit; // the preview selects exactly what a click would
-        if (hit != null) {
+        if (hit != null && startsOutsideMarker(mc, cfg, pm, hit.getBlockPos(), hit.getDirection())) {
+            // Only place inside markers: no green face, the click would place nothing.
+            src.add("Outside the marker: nothing placed");
+        } else if (hit != null) {
             BlockPos b = hit.getBlockPos();
             Direction d = hit.getDirection();
             switch (pm) {
@@ -1265,7 +1317,11 @@ public final class PaintPlacer {
                     && (pm == PlacementMode.SINGLE || pm.isFace() || pm == PlacementMode.FACE_PERP)) {
                 src.addAll(gradientSourcingAt(mc, cfg, b, d));
             }
-        } else if ((airPreview = airTarget(mc, cfg)) != null) {
+        } else if ((airPreview = airTarget(mc, cfg)) != null
+                && cfg.onlyInsideMarkers && againstMarkerOutside(airPreview)) {
+            airPreview = null;
+            src.add("Outside the marker: nothing placed");
+        } else if (airPreview != null) {
             src.add(pm == PlacementMode.FILL3D ? "Place in air: 3D Fill grows from the green cell"
                     : "Place in air: one block at reach");
         } else {

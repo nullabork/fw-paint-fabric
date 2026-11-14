@@ -18,9 +18,9 @@ public final class Ui {
     /** Primary text. */
     public static final int TEXT = 0xFFEDEDED;
     /** Secondary text: hints, captions, descriptions. */
-    public static final int HINT = 0xFFA8A8A8;
+    public static final int HINT = 0xFFBDBDBD;
     /** Disabled / not applicable. */
-    public static final int DIM = 0xFF6A6A6A;
+    public static final int DIM = 0xFF8C8C8C;
     /** Selected — what you clicked here. */
     public static final int SELECTED = 0xFF6C9BF2;
     public static final int SELECTED_FILL = 0x336C9BF2;
@@ -35,6 +35,11 @@ public final class Ui {
     public static final int BORDER = 0xFF6A6A6A;
     public static final int HOVER = 0x22FFFFFF;
     public static final int PANEL = 0x60000000;
+    /**
+     * Full-page underlay behind every FW Paint screen: dark enough that text keeps WCAG AA
+     * contrast (HINT about 7:1, DIM 4:1) even over snow or sky, while a hint of the world shows.
+     */
+    public static final int BACKDROP = 0xD0000000;
 
     // In-world marker colours, by what a control does when dragged.
     public static final int START = 0xFF2BB5B0;

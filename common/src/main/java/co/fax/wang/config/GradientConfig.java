@@ -85,6 +85,13 @@ public class GradientConfig {
     public boolean placeInAir = true;
 
     /**
+     * Only place inside markers: a click that would start painting outside every marker while
+     * right against one (the outer skin of a box, ring or tube, or beside a start→end run) places
+     * nothing. Clicks away from markers paint as normal. Off by default.
+     */
+    public boolean onlyInsideMarkers = false;
+
+    /**
      * "Paint memory": idle seconds before free-hand paint progress is forgotten — gradient
      * columns, 3D fills, AND pattern placements all share this timer (the session caches drop
      * and the next click starts fresh). Also cleared when the active palette/pattern changes.
@@ -115,6 +122,11 @@ public class GradientConfig {
      * player's facing: the pattern plane's width axis and the Face Perpendicular run.
      */
     public int perpSnapDegrees = 45;
+
+    // ---- wheel ----------------------------------------------------------------------------------
+
+    /** The wheel's Recent bar: the last picks, newest first (at most 20). */
+    public List<WheelPress> wheelHistory = new ArrayList<>();
 
     // ---- palettes -------------------------------------------------------------------------------
 
