@@ -9,8 +9,9 @@ import it.unimi.dsi.fastutil.longs.LongSet;
 import java.util.List;
 
 /**
- * One line marker: its {@link LineCurve}, the profile swept along it (with per-end radius and
- * twist), and the block cells that sweep selects — the region painting is constrained to.
+ * One line marker: its {@link LineCurve}, the profile swept along it (radius and twist set per
+ * node, eased between them), and the block cells that sweep selects — the region painting is
+ * constrained to.
  *
  * <p>The cells and their draw geometry are built by {@link TubeBuild} from a snapshot of this
  * line — synchronously when painting needs them, on a worker thread while the line is being
@@ -26,17 +27,19 @@ public final class LineShape {
     public boolean solid;
     /** Which way a Gradient fill runs through the tube. */
     public LineGradient gradient = LineGradient.ACROSS;
-    /** Profile radius at the start / end (interpolated along the line). */
-    public double r0 = DEFAULT_RADIUS, r1 = DEFAULT_RADIUS;
+    /** How this line's tube is drawn (its toolbar's Rendering page). */
+    public MarkerStyle style = new MarkerStyle();
     /** A new tube's radius (and what right-clicking a size cube resets to). */
-    public static final double DEFAULT_RADIUS = 2;
-    /** Profile twist (radians) at the start / end (interpolated along the line). */
-    public double tw0, tw1;
+    public static final double DEFAULT_RADIUS = LineCurve.DEFAULT_RADIUS;
+    /** Size-cube drags keep a node's radius within this. */
+    public static final double MIN_RADIUS = 0.5, MAX_RADIUS = 64;
 
     /** Dev perf counters (read + reset by LineMarkers' FWPAINT_PERF log). */
     static long perfRebuilds, perfRebuildNanos, perfSamples, perfSampleNanos, perfForced;
 
     private List<LineCurve.Sample> samples;
+    /** Sample index sitting on each main node (rebuilt with the samples). */
+    private int[] nodeSamples = new int[0];
     private double length;
     private boolean samplesDirty = true;
 
@@ -66,9 +69,23 @@ public final class LineShape {
             perfSamples++;
             perfSampleNanos += System.nanoTime() - t0;
             length = samples.isEmpty() ? 0 : samples.get(samples.size() - 1).s();
+            // Node i > 0 ends segment i-1: the last sample of a segment ≤ i-1 sits on it (a
+            // dropped duplicate leaves the previous sample, at the same spot).
+            nodeSamples = new int[curve.nodes.size()];
+            for (int i = 1; i < nodeSamples.length; i++) {
+                int k = nodeSamples[i - 1];
+                while (k + 1 < samples.size() && samples.get(k + 1).seg() <= i - 1) k++;
+                nodeSamples[i] = k;
+            }
             samplesDirty = false;
         }
         return samples;
+    }
+
+    /** Index of the sample on main node {@code node}. */
+    public int nodeSample(int node) {
+        samples();
+        return nodeSamples[Math.max(0, Math.min(nodeSamples.length - 1, node))];
     }
 
     public double length() {
@@ -82,18 +99,61 @@ public final class LineShape {
         return l <= 0 ? 0 : samples().get(i).s() / l;
     }
 
-    public double radiusAt(double f) {
-        return r0 + (r1 - r0) * f;
+    /** Tube radius at sample {@code i} (eased between the nodes either side). */
+    public double radiusAt(int i) {
+        LineCurve.Sample s = samples().get(i);
+        return curve.radiusAt(s.seg(), s.t());
     }
 
-    public double twistAt(double f) {
-        return tw0 + (tw1 - tw0) * f;
+    /** Profile twist (radians) at sample {@code i}. */
+    public double twistAt(int i) {
+        LineCurve.Sample s = samples().get(i);
+        return curve.twistAt(s.seg(), s.t());
+    }
+
+    /** Every node to radius {@code r} (the modifier on a size drag). */
+    public void setAllRadii(double r) {
+        for (LineCurve.Node n : curve.nodes) n.r = r;
+        markDirty();
+    }
+
+    /** Every node to twist {@code tw}. */
+    public void setAllTwists(double tw) {
+        for (LineCurve.Node n : curve.nodes) n.tw = tw;
+        markDirty();
+    }
+
+    /** Reverse the line: start and end swap, the curve and every node's size stay put. */
+    public void reverse() {
+        java.util.Collections.reverse(curve.nodes);
+        for (LineCurve.Node n : curve.nodes) {
+            Vec3 in = n.in;
+            n.in = n.out;
+            n.out = in;
+        }
+        markDirty();
+    }
+
+    /**
+     * Saves from before per-node sizes kept one radius and twist per END. Spread them over the
+     * nodes: the ends get them exactly, middle nodes the old linear blend at their distance
+     * along the line — so an old line keeps its start and end sizes.
+     */
+    public void applyLegacyEnds(double r0, double r1, double tw0, double tw1) {
+        markDirty();
+        List<LineCurve.Node> ns = curve.nodes;
+        for (int i = 0; i < ns.size(); i++) {
+            double f = i == 0 ? 0 : i == ns.size() - 1 ? 1 : frac(nodeSample(i));
+            ns.get(i).r = r0 + (r1 - r0) * f;
+            ns.get(i).tw = tw0 + (tw1 - tw0) * f;
+        }
+        markDirty();
     }
 
     /** Twist-rotated in-plane axes (n', b') of sample {@code i}. */
     public Vec3[] rotatedFrame(int i) {
         LineCurve.Sample s = samples().get(i);
-        double th = twistAt(frac(i)), c = Math.cos(th), sn = Math.sin(th);
+        double th = twistAt(i), c = Math.cos(th), sn = Math.sin(th);
         Vec3 n = s.n().scale(c).add(s.b().scale(sn));
         Vec3 b = s.b().scale(c).subtract(s.n().scale(sn));
         return new Vec3[]{n, b};
@@ -110,7 +170,7 @@ public final class LineShape {
             });
 
     private TubeBuild.Params snapshot() {
-        return new TubeBuild.Params(curve.copy(), profile, solid, r0, r1, tw0, tw1);
+        return new TubeBuild.Params(curve.copy(), profile, solid);
     }
 
     private void apply(TubeBuild.Result r, long forVersion) {
@@ -204,7 +264,7 @@ public final class LineShape {
                 best = i;
             }
         }
-        double r = profile == LineProfile.NONE ? 1 : Math.max(0.5, radiusAt(frac(best)));
+        double r = profile == LineProfile.NONE ? 1 : Math.max(0.5, radiusAt(best));
         return Math.min(1, Math.sqrt(bestD) / r);
     }
 
@@ -235,29 +295,46 @@ public final class LineShape {
 
     // ---- control positions ------------------------------------------------------------------
 
-    /** Size node at the start (end=false) or end: on the profile rim along n'. */
-    public Vec3 sizeNode(boolean end) {
-        int i = end ? samples().size() - 1 : 0;
-        return samples().get(i).pos().add(rotatedFrame(i)[0].scale(radiusAt(end ? 1 : 0) + 0.5));
+    /** Size cube of main node {@code node}: on the profile rim along n'. */
+    public Vec3 sizeNode(int node) {
+        int i = nodeSample(node);
+        return samples().get(i).pos().add(rotatedFrame(i)[0].scale(curve.nodes.get(node).r + 0.5));
     }
 
-    /** Twist node at the start/end: on the rim along b', a quarter turn from the size node. */
-    public Vec3 twistNode(boolean end) {
-        int i = end ? samples().size() - 1 : 0;
-        return samples().get(i).pos().add(rotatedFrame(i)[1].scale(radiusAt(end ? 1 : 0) + 0.5));
+    /** Twist cube of main node {@code node}: on the rim along b', a quarter turn from its size cube. */
+    public Vec3 twistNode(int node) {
+        int i = nodeSample(node);
+        return samples().get(i).pos().add(rotatedFrame(i)[1].scale(curve.nodes.get(node).r + 0.5));
     }
 
     /** Move node: beside the middle of the line, clear of the tube. */
     public Vec3 moveNode() {
         List<LineCurve.Sample> ss = samples();
         int i = ss.size() / 2;
-        double r = profile == LineProfile.NONE ? 0 : radiusAt(frac(i)) + 0.5;
+        double r = profile == LineProfile.NONE ? 0 : radiusAt(i) + 0.5;
         return ss.get(i).pos().add(rotatedFrame(i)[0].scale(-(r + 1.5)));
     }
 
-    /** Where a floating button row is centred: above the start (or end), clear of the tube. */
-    public Vec3 buttonAnchor(boolean end) {
-        double r = profile == LineProfile.NONE ? 0 : (end ? r1 : r0) + 0.5;
-        return curve.nodes.get(end ? curve.nodes.size() - 1 : 0).p.add(0, r + 2.2, 0);
+    /** Cog (options) cube: just past the move node along the line, so the two sit together. */
+    public Vec3 cogNode() {
+        List<LineCurve.Sample> ss = samples();
+        return moveNode().add(ss.get(ss.size() / 2).tan().scale(0.8));
+    }
+
+    /** World-space bounds of the line and its tube (for placing the toolbar): {min, max}. */
+    public Vec3[] bounds() {
+        double x0 = Double.MAX_VALUE, y0 = x0, z0 = x0, x1 = -x0, y1 = x1, z1 = x1;
+        List<LineCurve.Sample> ss = samples();
+        for (int i = 0; i < ss.size(); i++) {
+            Vec3 p = ss.get(i).pos();
+            double r = profile == LineProfile.NONE ? 0.2 : radiusAt(i) + 0.5;
+            x0 = Math.min(x0, p.x - r);
+            y0 = Math.min(y0, p.y - r);
+            z0 = Math.min(z0, p.z - r);
+            x1 = Math.max(x1, p.x + r);
+            y1 = Math.max(y1, p.y + r);
+            z1 = Math.max(z1, p.z + r);
+        }
+        return new Vec3[]{new Vec3(x0, y0, z0), new Vec3(x1, y1, z1)};
     }
 }

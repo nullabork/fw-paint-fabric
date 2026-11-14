@@ -41,21 +41,81 @@ public final class ShapeStore {
         int rB;
         int height;
         double theta;
+        boolean flip; // absent in older saves → false
+        MarkerStyle style; // absent (older saves, default look) → the default
     }
 
     private static final class StoredBox {
         int[] cornerA;
         int[] cornerB;
         String axis;
+        MarkerStyle style;
     }
 
-    /** Serialized line: nodes as [px,py,pz, inx,iny,inz, outx,outy,outz]. */
-    private static final class StoredLine {
+    /**
+     * Serialized line: nodes as [px,py,pz, inx,iny,inz, outx,outy,outz, radius, twist]. Saves
+     * from before per-node sizes have 9-number nodes and only the end values r0/r1/tw0/tw1,
+     * which are still written (first / last node) so an older build reads the ends back.
+     */
+    static final class StoredLine {
         double[][] nodes;
         String profile;
         boolean solid;
         String gradient;
         double r0, r1, tw0, tw1;
+        MarkerStyle style;
+    }
+
+    /** A stored line back to a shape (legacy end-only sizes spread over the nodes); null if < 2 nodes. */
+    static LineShape decodeLine(StoredLine sl) {
+        LineCurve c = new LineCurve();
+        boolean perNode = true;
+        for (double[] n : sl.nodes) {
+            LineCurve.Node node = new LineCurve.Node(new Vec3(n[0], n[1], n[2]),
+                    new Vec3(n[3], n[4], n[5]), new Vec3(n[6], n[7], n[8]));
+            if (n.length >= 11) {
+                node.r = n[9];
+                node.tw = n[10];
+            } else {
+                perNode = false;
+            }
+            c.nodes.add(node);
+        }
+        if (c.nodes.size() < 2) return null;
+        LineShape l = new LineShape(c);
+        l.profile = LineProfile.valueOf(sl.profile);
+        l.solid = sl.solid;
+        for (LineGradient g : LineGradient.values()) {
+            if (g.name().equals(sl.gradient)) l.gradient = g; // unknown/missing → default
+        }
+        if (sl.style != null) l.style = sl.style;
+        if (!perNode) {
+            // No sizes saved at all (never written by a released build) → defaults, not radius 0.
+            boolean none = sl.r0 == 0 && sl.r1 == 0;
+            l.applyLegacyEnds(none ? LineShape.DEFAULT_RADIUS : sl.r0, none ? LineShape.DEFAULT_RADIUS : sl.r1,
+                    sl.tw0, sl.tw1);
+        }
+        return l;
+    }
+
+    static StoredLine encodeLine(LineShape l) {
+        StoredLine sl = new StoredLine();
+        List<LineCurve.Node> ns = l.curve.nodes;
+        sl.nodes = new double[ns.size()][];
+        for (int i = 0; i < sl.nodes.length; i++) {
+            LineCurve.Node n = ns.get(i);
+            sl.nodes[i] = new double[]{n.p.x, n.p.y, n.p.z, n.in.x, n.in.y, n.in.z,
+                    n.out.x, n.out.y, n.out.z, n.r, n.tw};
+        }
+        sl.profile = l.profile.name();
+        sl.solid = l.solid;
+        sl.gradient = l.gradient.name();
+        sl.style = stored(l.style);
+        sl.r0 = ns.get(0).r;
+        sl.r1 = ns.get(ns.size() - 1).r;
+        sl.tw0 = ns.get(0).tw;
+        sl.tw1 = ns.get(ns.size() - 1).tw;
+        return sl;
     }
 
     private static final class WorldShapes {
@@ -87,33 +147,22 @@ public final class ShapeStore {
         return data;
     }
 
-    /** Loads the shapes, lines + box saved for {@code key} (null key → empty/none). */
+    /**
+     * Loads the shapes, lines + box saved for {@code key} (null key → empty/none). The look of
+     * the box goes straight to {@link BoxMarkers#style}.
+     */
     public static BoxRegion loadInto(String key, List<RingShape> shapes, List<LineShape> lines) {
         shapes.clear();
         lines.clear();
+        BoxMarkers.style = new MarkerStyle();
         if (key == null) return null;
         WorldShapes stored = data().get(key);
         if (stored == null) return null;
         if (stored.lines != null) {
             for (StoredLine sl : stored.lines) {
                 try {
-                    LineCurve c = new LineCurve();
-                    for (double[] n : sl.nodes) {
-                        c.nodes.add(new LineCurve.Node(new Vec3(n[0], n[1], n[2]),
-                                new Vec3(n[3], n[4], n[5]), new Vec3(n[6], n[7], n[8])));
-                    }
-                    if (c.nodes.size() < 2) continue;
-                    LineShape l = new LineShape(c);
-                    l.profile = LineProfile.valueOf(sl.profile);
-                    l.solid = sl.solid;
-                    for (LineGradient g : LineGradient.values()) {
-                        if (g.name().equals(sl.gradient)) l.gradient = g; // unknown/missing → default
-                    }
-                    l.r0 = sl.r0;
-                    l.r1 = sl.r1;
-                    l.tw0 = sl.tw0;
-                    l.tw1 = sl.tw1;
-                    lines.add(l);
+                    LineShape l = decodeLine(sl);
+                    if (l != null) lines.add(l);
                 } catch (Exception e) {
                     LOG.warn("Skipping malformed stored line in {}: {}", key, e.toString());
                 }
@@ -122,10 +171,12 @@ public final class ShapeStore {
         if (stored.shapes != null) {
             for (StoredShape s : stored.shapes) {
                 try {
-                    shapes.add(RingShape.restore(
+                    RingShape ring = RingShape.restore(
                             RingShape.Kind.valueOf(s.kind),
                             pos(s.center), Direction.Axis.valueOf(s.axis),
-                            pos(s.ctrlA), pos(s.ctrlB), s.rA, s.rB, s.height, s.theta));
+                            pos(s.ctrlA), pos(s.ctrlB), s.rA, s.rB, s.height, s.theta, s.flip);
+                    if (s.style != null) ring.style = s.style;
+                    shapes.add(ring);
                 } catch (Exception e) {
                     LOG.warn("Skipping malformed stored shape in {}: {}", key, e.toString());
                 }
@@ -133,8 +184,10 @@ public final class ShapeStore {
         }
         if (stored.box != null) {
             try {
-                return new BoxRegion(pos(stored.box.cornerA), pos(stored.box.cornerB),
+                BoxRegion region = new BoxRegion(pos(stored.box.cornerA), pos(stored.box.cornerB),
                         Direction.Axis.valueOf(stored.box.axis));
+                if (stored.box.style != null) BoxMarkers.style = stored.box.style;
+                return region;
             } catch (Exception e) {
                 LOG.warn("Skipping malformed stored box in {}: {}", key, e.toString());
             }
@@ -161,30 +214,18 @@ public final class ShapeStore {
                 s.rB = shape.rB;
                 s.height = shape.height;
                 s.theta = shape.theta;
+                s.flip = shape.flip;
+                s.style = stored(shape.style);
                 stored.shapes.add(s);
             }
             stored.lines = new ArrayList<>(lines.size());
-            for (LineShape l : lines) {
-                StoredLine sl = new StoredLine();
-                sl.nodes = new double[l.curve.nodes.size()][];
-                for (int i = 0; i < sl.nodes.length; i++) {
-                    LineCurve.Node n = l.curve.nodes.get(i);
-                    sl.nodes[i] = new double[]{n.p.x, n.p.y, n.p.z, n.in.x, n.in.y, n.in.z, n.out.x, n.out.y, n.out.z};
-                }
-                sl.profile = l.profile.name();
-                sl.solid = l.solid;
-                sl.gradient = l.gradient.name();
-                sl.r0 = l.r0;
-                sl.r1 = l.r1;
-                sl.tw0 = l.tw0;
-                sl.tw1 = l.tw1;
-                stored.lines.add(sl);
-            }
+            for (LineShape l : lines) stored.lines.add(encodeLine(l));
             if (box != null) {
                 StoredBox b = new StoredBox();
                 b.cornerA = arr(box.cornerA);
                 b.cornerB = arr(box.cornerB);
                 b.axis = box.axis.name();
+                b.style = stored(BoxMarkers.style);
                 stored.box = b;
             }
             data().put(key, stored);
@@ -199,6 +240,11 @@ public final class ShapeStore {
         } catch (IOException e) {
             LOG.warn("Failed to write {}: {}", path(), e.toString());
         }
+    }
+
+    /** A style as saved: left out entirely while it is the default look. */
+    private static MarkerStyle stored(MarkerStyle st) {
+        return st == null || st.isDefault() ? null : st;
     }
 
     private static BlockPos pos(int[] p) {

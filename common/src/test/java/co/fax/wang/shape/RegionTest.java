@@ -39,6 +39,46 @@ class RegionTest {
     }
 
     @Test
+    void boxFaceEditsMoveTheRightCorner() {
+        // A at y=10 (start), B at y=7: the top face belongs to A, the bottom to B.
+        BoxRegion b = new BoxRegion(new BlockPos(5, 10, 5), new BlockPos(2, 7, 8), Direction.Axis.Y);
+        BoxRegion up = b.withFace(Direction.UP, 12);
+        assertEquals(new BlockPos(5, 12, 5), up.cornerA);
+        assertEquals(b.cornerB, up.cornerB);
+        BoxRegion east = b.withFace(Direction.EAST, 9);
+        assertEquals(9, east.max().getX());
+        assertEquals(2, east.min().getX());
+        // A face can't be dragged through the opposite one: the box stays one block thick.
+        assertEquals(7, b.withFace(Direction.UP, 3).max().getY());
+        assertEquals(10, b.withFace(Direction.DOWN, 40).min().getY());
+        assertEquals(10, b.faceCoord(Direction.UP));
+        assertEquals(7, b.faceCoord(Direction.DOWN));
+    }
+
+    @Test
+    void flatBoxGrowsFromEitherSide() {
+        BoxRegion b = new BoxRegion(new BlockPos(0, 5, 0), new BlockPos(4, 5, 4), Direction.Axis.Y);
+        BoxRegion taller = b.withFace(Direction.UP, 8);
+        assertEquals(5, taller.cornerA.getY()); // the start stays where it was
+        assertEquals(8, taller.cornerB.getY());
+        BoxRegion deeper = b.withFace(Direction.DOWN, 2);
+        assertEquals(2, deeper.min().getY());
+        assertEquals(5, deeper.max().getY());
+    }
+
+    @Test
+    void boxFlipSwapsStartAndEnd() {
+        BoxRegion b = new BoxRegion(new BlockPos(5, 10, 5), new BlockPos(2, 7, 8), Direction.Axis.Y);
+        RingShape.Segment seg = b.flipped().segmentFor(new BlockPos(3, 9, 6));
+        assertEquals(new BlockPos(3, 7, 6), seg.start());
+        assertEquals(2, seg.index());
+        assertEquals(b.min(), b.flipped().min());
+        BoxRegion x = b.withAxis(Direction.Axis.X).moved(1, 0, -1);
+        assertEquals(Direction.Axis.X, x.axis);
+        assertEquals(new BlockPos(3, 7, 4), x.min());
+    }
+
+    @Test
     void flatBoxHasNoSegment() {
         BoxRegion b = new BoxRegion(new BlockPos(0, 5, 0), new BlockPos(4, 5, 4), Direction.Axis.Y);
         assertTrue(b.contains(new BlockPos(2, 5, 2)));
@@ -113,5 +153,29 @@ class RegionTest {
         assertFalse(s.contains(new BlockPos(5, 0, 5)));
         // ...and the rotated corner (on the diagonal at ~rMax·√2 along X) is inside.
         assertTrue(s.contains(new BlockPos(7, 0, 0)));
+    }
+
+    @Test
+    void flippedRingRunsFromTheFarLayerBack() {
+        RingShape s = ring(3, 5, 4); // layers 0..3
+        s.flip = true;
+        RingShape.Segment seg = s.segmentFor(new BlockPos(4, 1, 0));
+        assertEquals(new BlockPos(4, 3, 0), seg.start());
+        assertEquals(new BlockPos(4, 0, 0), seg.end());
+        assertEquals(2, seg.index());
+        assertEquals(3, seg.length());
+        assertEquals(0, s.segmentFor(new BlockPos(4, 3, 0)).index());
+    }
+
+    @Test
+    void switchingToCircleKeepsRadiiAndDropsRotation() {
+        RingShape s = new RingShape(RingShape.Kind.SQUARE, BlockPos.ZERO, Direction.Axis.Y,
+                new BlockPos(3, 0, 0), new BlockPos(5, 0, 0));
+        s.theta = 0.3;
+        s.setKind(RingShape.Kind.CIRCLE);
+        assertEquals(RingShape.Kind.CIRCLE, s.kind);
+        assertEquals(0, s.theta);
+        assertEquals(3, s.rMin());
+        assertEquals(5, s.rMax());
     }
 }

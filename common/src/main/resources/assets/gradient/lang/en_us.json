@@ -1,9 +1,8 @@
 {
   "key.category.gradient.main": "FW Paint",
-  "key.gradient.open": "Open FW Paint screen",
-  "key.gradient.wheel": "Quick selector",
-  "key.gradient.cycle_palette": "Cycle active palette",
-  "key.gradient.clear_connected": "Clear connected markers (hold + click)",
-  "key.gradient.line_link": "Line: mirror handles / link both ends (hold while dragging)",
-  "key.gradient.axis_lock": "Line: lock drag to an axis (hold while dragging)"
+  "key.gradient.open": "Open / close the FW Paint screen",
+  "key.gradient.wheel": "Wheel (hold)",
+  "key.gradient.cycle_palette": "Next palette, pattern or block",
+  "key.gradient.modifier": "Modifier: other way / both ends (MMB with it: delete connected)",
+  "key.gradient.axis_lock": "Lock a marker drag to an axis (hold while dragging)"
 }

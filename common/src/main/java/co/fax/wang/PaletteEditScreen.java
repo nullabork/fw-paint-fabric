@@ -1,5 +1,6 @@
 package co.fax.wang;
 
+import co.fax.wang.config.ConfigManager;
 import co.fax.wang.palette.AutoMode;
 import com.mojang.blaze3d.platform.InputConstants;
 import co.fax.wang.palette.Palette;
@@ -8,6 +9,10 @@ import co.fax.wang.palette.PaletteOrder;
 import co.fax.wang.palette.PaletteSegment;
 import co.fax.wang.palette.PaletteStore;
 import co.fax.wang.palette.SizingMode;
+import co.fax.wang.ui.EditorChrome;
+import co.fax.wang.ui.Segmented;
+import co.fax.wang.ui.Toggle;
+import co.fax.wang.ui.Ui;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractWidget;
@@ -28,49 +33,43 @@ import com.mojang.blaze3d.platform.cursor.CursorTypes;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
- * The palette editor — a temporary mode of the Palette tab (its own screen, same title bar).
- * Layout, top to bottom (everything below the bar scrolls as one page): the two previews
- * (gradient cylinder + noise cube, side by side, each expandable) → name row (Save / Cancel) →
- * three columns: the grouped settings (left), the colour-sorted source list (middle — double-click
- * or drag blocks into the strip, right-click bans a block from Automatic segments), and the
- * segment strip (right) with its labels on the right, stop handles on the left, drag to reorder,
- * and drag out sideways to remove.
+ * The palette editor — its own screen under the shared editor bar ({@code ‹ Paint / PALETTE
+ * [name] … Cancel Save}); no main tab bar. Columns left → right in working order (everything
+ * below the bar scrolls as one page): 1 PICK BLOCKS (Blocks from switch, pinned Auto rows, the
+ * colour-sorted source list — double-click or drag blocks into the strip, right-click bans a
+ * block from Auto) · 2 ARRANGE (the segment strip START → END, labels on the right, stop handles
+ * on the left, drag to reorder, drag out sideways to remove) · 3 HOW IT BLENDS (Order / Curve /
+ * Sizing switches, the sliders, and the collapsible NOISE group) · PREVIEW (one preview, As
+ * gradient | As noise, expandable). Narrow screens fold the right columns under the left ones.
  */
 public class PaletteEditScreen extends Screen {
 
     private static final int WHITE = 0xFFFFFFFF;
-    private static final int GREY = 0xFFA0A0A0;
-    private static final int LIGHT = 0xFFE0E0E0; // headings + interaction hints
+    private static final int GREY = Ui.HINT;
     private static final int RED = 0xFFFF5555;
     private static final int YELLOW = 0xFFFFE34D;
-    private static final int BAR_H = 22;
+    private static final int BAR_H = EditorChrome.H;
     private static final int LEFT_X = 10;
     private static final int COL_GAP = 12;
     private static final int HOVER_BG = 0x33FFFFFF;
+    private static final int ROW = 18;              // list row height
 
-    // Vertical layout (base y positions — the page scroll offsets them).
-    private static final int PREVIEW_Y = 30;
-    private static final int PREVIEW_H = 104;
-    private static final int NAME_LABEL_Y = PREVIEW_Y + PREVIEW_H + 6;
-    private static final int NAME_Y = NAME_LABEL_Y + 10;
-    private static final int SEP_Y = NAME_Y + 20 + 8;      // separator line, 8px above + below
-    private static final int COL_TOP = SEP_Y + 1 + 8;
-    private static final int LIST_H = 204;
-    private static final int STRIP_H = 224;
-    private static final int HEADING_H = 14;
+    /** Base y of every column's heading (the page scroll offsets all base y positions). */
+    private static final int COL_Y = BAR_H + 8;
 
-    // Left column: the settings (sliders leave room for the help icons).
-    private static final int SET_W = 140;
+    // Column widths: PICK BLOCKS and the two right columns flex between these.
+    private static final int C1_MIN = 120, C1_MAX = 190;
+    private static final int C3_MIN = 160, C3_MAX = 250;
+    private static final int C4_MIN = 140, C4_MAX = 250;
 
-    // Right column: stop handles left of the strip, labels to its right.
+    // ARRANGE column: stop handles left of the strip, labels to its right.
     private static final int HANDLE_W = 12;
     private static final int STRIP_W = 36;
     private static final int LABEL_W = 84;
@@ -84,22 +83,48 @@ public class PaletteEditScreen extends Screen {
     private static final float ISO_DOWN = 3.5355f;
     private static final float ISO_UP = 8.6603f;
 
+    private static final PaletteOrder[] ORDERS =
+            {PaletteOrder.COLOR_ASC, PaletteOrder.COLOR_DESC, PaletteOrder.BRIGHTNESS_ASC, PaletteOrder.BRIGHTNESS_DESC};
+    private static final CurveFunction[] CURVES =
+            {CurveFunction.LINEAR, CurveFunction.EASE_IN, CurveFunction.EASE_OUT, CurveFunction.EASE_IN_OUT, CurveFunction.STEP};
+
     private final Palette editing;      // working copy — Cancel discards it
     private final boolean isNew;
     private boolean dirty;
 
+    private final EditorChrome chrome = new EditorChrome("Palette");
     private String nameDraft;
     private String nameError = "";
-    private EditBox nameBox;
-    private Button orderBtn, curveBtn;
+    private EditBox nameBox, seedBox;
+
+    // Column geometry, worked out by layout() in init (base y positions).
+    private int c1x, c1w, c2x, c3x, c3w, c3y, c4x, c4w, c4y;
+    private int stripH, listH;
+    private int settingsBottomBase;          // bottom of the HOW IT BLENDS column
+    private int noiseHeadingY;               // base y of the collapsible NOISE heading
+    private int previewYBase, previewH;      // the preview box inside the PREVIEW column
 
     // Page scroll: widgets remember their base y and get repositioned/hidden.
     private record ScrolledWidget(AbstractWidget widget, int baseY) {}
     private final List<ScrolledWidget> scrolledWidgets = new ArrayList<>();
     private int scroll;
 
-    // Middle column: pinned Automatic rows + the source blocks sorted by colour.
+    // The ui-kit parts and caption lines on the page (base y; positioned per frame).
+    private record SegRow(Segmented seg, int x, int baseY, int w) {}
+    private record TogRow(Toggle toggle, int x, int baseY, int w) {}
+    /** A text line: label left (white, or grey when {@code hint}), optional grey note right. */
+    private record Caption(int x, int baseY, int w, Supplier<String> left, Supplier<String> right, boolean hint) {}
+    private final List<SegRow> segRows = new ArrayList<>();
+    private final List<TogRow> togRows = new ArrayList<>();
+    private final List<Caption> captions = new ArrayList<>();
+    private Segmented orderSeg, curveSeg, sizingSeg, sourceSeg, varSeg, noiseTypeSeg, previewSeg;
+
+    /** The NOISE group's collapsed state (kept across editor sessions). */
+    private static boolean noiseOpen = true;
+
+    // PICK BLOCKS: pinned Auto rows (leftRows 0 and 1) + the source blocks sorted by colour.
     private record LRow(AutoMode auto, String id, ItemStack stack, String name, int rgb) {}
+    private static final int PINNED = 2;
     private List<LRow> leftRows = new ArrayList<>();
     private int leftScroll;
     private String lastRowClickId;
@@ -128,7 +153,8 @@ public class PaletteEditScreen extends Screen {
     private double dragMouseX, dragMouseY;
     private double pressX;
 
-    // Previews: both shown side by side; either can be expanded.
+    // Preview: one at a time (As gradient = cylinder, As noise = cube), either expandable.
+    private int previewMode;                 // 0 = gradient cylinder, 1 = noise cube
     private int expandedPreview;             // 0 = none, 1 = cylinder, 2 = noise cube
     private double previewOffX, previewOffY, previewOffZ;
     private enum CubeFace { TOP, RIGHT, LEFT }
@@ -141,11 +167,11 @@ public class PaletteEditScreen extends Screen {
     private int[][] cylCells;
     private int cylD, cylH;
 
-    // Help popups. Spots with an icon get the circled-?; clicking it shows the help instantly,
-    // but the popup only lives while the mouse stays over the control — moving away dismisses
-    // it. Texts are suppliers so they always describe the control's CURRENT state.
+    // Help popups: one circled-? per section heading (clicking it shows the help instantly), plus
+    // icon-less spots over the switches that describe their CURRENT state after a hover. Popups
+    // only live while the mouse stays over the spot. Texts are suppliers so they stay current.
     private record HelpSpot(int x, int baseY, int w, int h,
-                            java.util.function.Supplier<String> text, boolean icon) {}
+                            Supplier<String> text, boolean icon) {}
     private final List<HelpSpot> helpSpots = new ArrayList<>();
     private HelpSpot clickedSpot;
     private HelpSpot hoverSpot;
@@ -154,48 +180,98 @@ public class PaletteEditScreen extends Screen {
     // Discard-confirm modal (unsaved changes).
     private Screen pendingExit;
 
-    // OS cursor shape management (move / vertical-resize on the right hovers).
-
     public PaletteEditScreen(Palette source) {
         super(Component.literal("FW Paint — Palette editor"));
         this.isNew = source == null;
         this.editing = source == null ? new Palette() : source.copy();
         this.nameDraft = this.editing.name;
+        this.previewMode = ConfigManager.get().activePaintType == PaintType.NOISE ? 1 : 0;
     }
 
     // ---- layout ---------------------------------------------------------------------------------
 
-    private int paneW() {
-        int avail = this.width - 2 * LEFT_X - SET_W - RIGHT_W - 2 * COL_GAP;
-        return Math.max(60, Math.min(200, avail));
+    /**
+     * Four columns when they fit; otherwise PREVIEW folds under HOW IT BLENDS, and on very narrow
+     * screens both fold under PICK BLOCKS + ARRANGE. The strip and list heights follow the screen
+     * height (the page scrolls for the rest).
+     */
+    private void layout() {
+        int avail = this.width - 2 * LEFT_X;
+        stripH = Math.max(140, Math.min(260, viewBottom() - COL_Y - 25 - 37 - 6));
+        listH = Math.max(72, stripH - 47); // so the two hint blocks line up
+        int four = C1_MIN + RIGHT_W + C3_MIN + C4_MIN + 3 * COL_GAP;
+        int three = C1_MIN + RIGHT_W + C3_MIN + 2 * COL_GAP;
+        int total;
+        if (avail >= four) {
+            int extra = avail - four;
+            c1w = C1_MIN + Math.min(C1_MAX - C1_MIN, extra / 5);
+            extra -= c1w - C1_MIN;
+            c3w = C3_MIN + Math.min(C3_MAX - C3_MIN, extra / 2);
+            extra -= c3w - C3_MIN;
+            c4w = C4_MIN + Math.min(C4_MAX - C4_MIN, extra);
+            total = c1w + RIGHT_W + c3w + c4w + 3 * COL_GAP;
+            int x0 = Math.max(LEFT_X, (this.width - total) / 2);
+            c1x = x0;
+            c2x = c1x + c1w + COL_GAP;
+            c3x = c2x + RIGHT_W + COL_GAP;
+            c4x = c3x + c3w + COL_GAP;
+            c3y = c4y = COL_Y;
+        } else if (avail >= three) {
+            int extra = avail - three;
+            c3w = C3_MIN + Math.min(C3_MAX - C3_MIN, extra / 2);
+            c1w = C1_MIN + Math.min(C1_MAX - C1_MIN, avail - three - (c3w - C3_MIN));
+            c4w = c3w;
+            total = c1w + RIGHT_W + c3w + 2 * COL_GAP;
+            c1x = Math.max(LEFT_X, (this.width - total) / 2);
+            c2x = c1x + c1w + COL_GAP;
+            c3x = c4x = c2x + RIGHT_W + COL_GAP;
+            c3y = COL_Y;
+            c4y = -1; // under HOW IT BLENDS — set once that column is built
+        } else {
+            c1w = Math.max(90, Math.min(C1_MAX, avail - RIGHT_W - COL_GAP));
+            total = c1w + RIGHT_W + COL_GAP;
+            c1x = Math.max(LEFT_X, (this.width - total) / 2);
+            c2x = c1x + c1w + COL_GAP;
+            c3x = c4x = c1x;
+            c3w = c4w = total;
+            c3y = leftColumnsBottom() + 12;
+            c4y = -1;
+        }
     }
 
-    private int contentX() {
-        int total = SET_W + COL_GAP + paneW() + COL_GAP + RIGHT_W;
-        return Math.max(LEFT_X, (this.width - total) / 2);
-    }
+    /** Base y under PICK BLOCKS / ARRANGE (both end at the same line). */
+    private int leftColumnsBottom() { return stripYBase() + stripH + 15 + 22; }
 
-    private int paneX() { return contentX() + SET_W + COL_GAP; }
-    private int rightX() { return paneX() + paneW() + COL_GAP; }
+    private int paneX() { return c1x; }
+    private int paneW() { return c1w; }
+    private int pinYBase() { return COL_Y + Ui.SECTION_H + 10 + Ui.ROW_H + 4; }
+    private int listYBase() { return pinYBase() + PINNED * ROW + 3; }
+    private int listY() { return listYBase() - scroll; }
+    private int visibleListRows() { return Math.max(1, listH / ROW); }
+    private int maxListScroll() { return Math.max(0, leftRows.size() - PINNED - visibleListRows()); }
 
+    private int rightX() { return c2x; }
     private int stripX() { return rightX() + HANDLE_W; }
     private int labelX() { return stripX() + STRIP_W + 4; }
-    private int stripYBase() { return COL_TOP + 26; } // one toggle row above the strip
+    private int stripYBase() { return COL_Y + Ui.SECTION_H + 11; } // the START caption above
     private int stripY() { return stripYBase() - scroll; }
 
-    private int contentHeight() {
-        int paneBottom = COL_TOP + 24 + LIST_H + 26;
-        int stripBottom = stripYBase() + STRIP_H + 34; // room for the adjacent-autos hint
-        return Math.max(Math.max(paneBottom, stripBottom), settingsBottomBase) + 8;
+    /** {x, y (scrolled), w, h} of the preview box. */
+    private int[] previewRect() {
+        return new int[]{c4x, previewYBase - scroll, c4w, previewH};
+    }
+
+    /** Base y of the lowest thing on the page. */
+    private int contentBottom() {
+        int previewBottom = previewYBase + previewH + 4 + 10 + 30; // status + adjacent-Auto warning
+        return Math.max(Math.max(leftColumnsBottom(), settingsBottomBase), previewBottom);
     }
 
     private int viewBottom() { return this.height - 4; }
 
     private int maxScroll() {
-        return Math.max(0, contentHeight() - (viewBottom() - BAR_H));
+        return Math.max(0, contentBottom() + 8 - viewBottom());
     }
-
-    private int settingsBottomBase; // set during init
 
     // ---- init -----------------------------------------------------------------------------------
 
@@ -203,22 +279,17 @@ public class PaletteEditScreen extends Screen {
     protected void init() {
         scrolledWidgets.clear();
         helpSpots.clear();
+        segRows.clear();
+        togRows.clear();
+        captions.clear();
         refreshAvailable();
         rebuildLeftRows();
         refreshSegmentDisplay();
+        layout();
 
-        int cx = contentX();
-
-        // Per-preview expand buttons (⛶), top-right corner of each preview half.
-        int[] cyl = previewHalf(false);
-        int[] noise = previewHalf(true);
-        addScrolled(Button.builder(Component.literal("⛶"), b -> expandedPreview = 1)
-                .bounds(cyl[0] + cyl[2] - 16, PREVIEW_Y, 16, 14).build());
-        addScrolled(Button.builder(Component.literal("⛶"), b -> expandedPreview = 2)
-                .bounds(noise[0] + noise[2] - 16, PREVIEW_Y, 16, 14).build());
-
-        // Name row: the name box spans the left two columns, Save/Cancel sit over the strip.
-        nameBox = new EditBox(this.font, cx, NAME_Y, SET_W + COL_GAP + paneW(), 20,
+        // Editor bar: the name box lives in it (not scrolled).
+        chrome.layout(this.font, this.width);
+        nameBox = new EditBox(this.font, chrome.nameX(), chrome.nameY(), chrome.nameW(), EditorChrome.NAME_H,
                 Component.literal("Name"));
         nameBox.setHint(Component.literal("Untitled"));
         nameBox.setMaxLength(48);
@@ -228,58 +299,81 @@ public class PaletteEditScreen extends Screen {
             nameError = "";
             dirty = true;
         });
-        addScrolled(nameBox);
-        int saveX = rightX() + RIGHT_W - 124;
-        addScrolled(Button.builder(Component.literal("Save"), b -> save())
-                .bounds(saveX, NAME_Y, 60, 20).build());
-        addScrolled(Button.builder(Component.literal("Cancel"), b -> attemptExit(backToList()))
-                .bounds(saveX + 62, NAME_Y, 60, 20).build());
+        addRenderableWidget(nameBox);
 
-        // Middle column: source toggle + the block list (render-only, below).
-        addScrolled(Button.builder(Component.literal("Source: " + editing.source.displayName()), b -> {
-            editing.source = editing.source.next();
-            b.setMessage(Component.literal("Source: " + editing.source.displayName()));
+        // 1 PICK BLOCKS: the per-palette source switch over the pinned Auto rows + list.
+        int y = COL_Y + Ui.SECTION_H;
+        captions.add(new Caption(c1x, y, c1w, () -> "Blocks from", null, false));
+        sourceSeg = seg(List.of("Hotbar", "Inventory", "Both"), editing.source.ordinal(), c1x, y + 10, c1w, i -> {
+            editing.source = GradientSource.values()[i];
             dirty = true;
             refreshAvailable();
             rebuildLeftRows();
             refreshSegmentDisplay();
-        }).bounds(paneX(), COL_TOP, paneW(), 20).build());
-        helpSpots.add(new HelpSpot(paneX(), COL_TOP, paneW(), 20,
-                () -> "Painting draws blocks from " + editing.source.displayName()
-                        + " (also the pool for Automatic segments)", true));
+        });
+        sectionHelp(c1x, c1w, COL_Y, () -> "Blocks from picks where this palette's blocks come from "
+                + "(the list here, and the pool Auto segments draw from). Double-click a block or drag "
+                + "it onto the strip to add it. Auto colour / Auto brightness add a wildcard segment "
+                + "that's filled in when you paint. Right-click a block to ban it from Auto (red).");
 
-        // Right column: Order + Curve icon toggles side by side above the strip, left-aligned
-        // with the strip itself. Their icons render from live state (see renderToggleIcons), so
-        // manual reordering / stop drags show Custom immediately. One shared (?) for the row;
-        // hovering either button describes what it's currently doing.
-        int togX = stripX(), togW = STRIP_W + 4 + LABEL_W;
-        int togBw = (togW - 16 - 4) / 2;
-        orderBtn = addScrolled(Button.builder(Component.empty(),
-                b -> sortSegments(editing.order.nextSort()))
-                .bounds(togX, COL_TOP, togBw, 20).build());
-        helpSpots.add(new HelpSpot(togX, COL_TOP, togBw, 20, this::orderStateText, false));
-        curveBtn = addScrolled(Button.builder(Component.empty(), b -> {
-            editing.curve = editing.curve.next();
+        // 2 ARRANGE: the strip is drawn, not a widget.
+        sectionHelp(c2x, RIGHT_W, COL_Y, () -> "The palette itself: START at the top, END at the bottom. "
+                + "Drag a segment to reorder it, drag it out sideways to remove it, drag the handles on "
+                + "the left to resize. Click a segment to select it: ↑ ↓ move it, Delete removes it. A red "
+                + "outline means the block isn't in Blocks from.");
+
+        // 3 HOW IT BLENDS.
+        int rx = c3x, rw = c3w;
+        sectionHelp(rx, rw, c3y, () -> "Order re-sorts the strip. Curve shapes where the gradient changes "
+                + "fastest. Sizing sets how long a placed gradient runs. Reordering segments by hand turns "
+                + "Order Custom; dragging a stop turns Curve Custom. Variation, Chaos and Step length add "
+                + "randomness to both Gradient and Noise paint.");
+        y = c3y + Ui.SECTION_H;
+        captions.add(new Caption(rx, y, rw, () -> "Order",
+                () -> editing.order == PaletteOrder.CUSTOM ? "Custom · arranged by hand" : "", false));
+        orderSeg = seg(fit(rw, List.of("Colour ↑", "Colour ↓", "Bright ↑", "Bright ↓"),
+                List.of("Col ↑", "Col ↓", "Bri ↑", "Bri ↓")), orderIndex(), rx, y + 10, rw, i -> {
+            sortSegments(ORDERS[i]);
+            resetPreview();
+        });
+        helpSpots.add(new HelpSpot(rx, y + 10, rw, Ui.ROW_H, this::orderStateText, false));
+        y += 10 + Ui.ROW_H + 6;
+        captions.add(new Caption(rx, y, rw, () -> "Curve",
+                () -> editing.curve == CurveFunction.CUSTOM ? "Custom · dragged stops" : "", false));
+        curveSeg = seg(fit(rw, List.of("Linear", "Ease in", "Ease out", "In/out", "Step"),
+                List.of("Lin", "In", "Out", "In/out", "Step")), curveIndex(), rx, y + 10, rw, i -> {
+            editing.curve = CURVES[i];
             dirty = true;
             resetPreview();
-        }).bounds(togX + togBw + 4, COL_TOP, togBw, 20).build());
-        helpSpots.add(new HelpSpot(togX + togBw + 4, COL_TOP, togBw, 20, this::curveStateText, false));
-        helpSpots.add(new HelpSpot(togX + 2 * togBw + 5, COL_TOP, 0, 20,
-                () -> "Left: sort order — cycles colour/brightness, ascending/descending. "
-                        + "Right: curve — cycles the easing shape. Reordering segments by hand "
-                        + "or dragging a stop turns either Custom (C).", true));
-
-        // Left column: the grouped settings.
-        int rx = contentX(), rw = SET_W - 14; // room for the (?) icons
-        int y = COL_TOP + HEADING_H; // "Gradient & noise" heading renders above
-        // Variation: the unified window+chance model — Var toggle half, chance slider half.
+        });
+        helpSpots.add(new HelpSpot(rx, y + 10, rw, Ui.ROW_H, this::curveStateText, false));
+        y += 10 + Ui.ROW_H + 6;
+        captions.add(new Caption(rx, y, rw, () -> "Sizing", null, false));
+        sizingSeg = seg(fit(rw, List.of("Min blocks", "Fill space", "Set steps"), List.of("Min", "Fill", "Steps")),
+                editing.sizing.ordinal(), rx, y + 10, rw, i -> {
+            editing.sizing = SizingMode.values()[i];
+            dirty = true;
+            rebuildWidgets(); // the Steps slider shows/hides
+        });
+        helpSpots.add(new HelpSpot(rx, y + 10, rw, Ui.ROW_H, () -> switch (editing.sizing) {
+            case MIN_BLOCKS -> "Min blocks: the shortest run that fits the segment ratios";
+            case FILL_SPACE -> "Fill space: expands out to the end marker or first block";
+            case SET_STEPS -> "Set steps: a fixed length (the Steps slider below)";
+        }, false));
+        y += 10 + Ui.ROW_H + 6;
+        if (editing.sizing == SizingMode.SET_STEPS) {
+            y = addSlider(rx, y, rw, (editing.steps - 1) / 15.0,
+                    v -> "Steps: " + (1 + (int) Math.round(v * 15)),
+                    v -> editing.steps = 1 + (int) Math.round(v * 15),
+                    "The gradient stretches or shrinks to this many blocks");
+        }
+        // Variation: the unified window + chance model — range switch half, chance slider half.
         int halfW = (rw - 4) / 2;
-        addScrolled(Button.builder(Component.literal("Var: " + varLabel()), b -> {
-            editing.variationWindow = (editing.variationWindow + 1) % 4;
+        varSeg = seg(List.of("Off", "±1", "±2", "±3"), editing.variationWindow, rx, y + 2, halfW, i -> {
+            editing.variationWindow = i;
             dirty = true;
             resetPreview();
-            b.setMessage(Component.literal("Var: " + varLabel()));
-        }).bounds(rx, y, halfW, 20).build());
+        });
         addScrolled(new EditSlider(rx + halfW + 4, y, rw - halfW - 4,
                 editing.variationChance / 100.0,
                 v -> ((int) Math.round(v * 100)) + "%",
@@ -288,105 +382,135 @@ public class PaletteEditScreen extends Screen {
                     dirty = true;
                     resetPreview();
                 }));
-        helpSpots.add(new HelpSpot(rx, y, rw, 20, () ->
+        captions.add(new Caption(rx, y + 22, rw, () ->
                 editing.variationWindow == 0 || editing.variationChance == 0
-                        ? "Variation off: cells place exactly their segment's block"
-                        : "±" + editing.variationWindow + " @ " + editing.variationChance
-                                + "%: a cell may swap to a block that many positions away in "
-                                + "the colour ordering", true));
-        y += 24;
+                        ? "Variation off: cells place their segment's block"
+                        : "Variation: " + editing.variationChance + "% swap to a colour ±"
+                                + editing.variationWindow + " away", null, true));
+        y += 34;
         y = addSlider(rx, y, rw, editing.chaos, v -> "Chaos: " + pct(v),
                 v -> { editing.chaos = v; resetPreview(); },
-                "Chance to repeat or skip a step");
+                "How ragged the bands are: repeat or skip a step");
         y = addSlider(rx, y, rw, editing.stepWobble, v -> "Step length: " + pct(v),
                 v -> { editing.stepWobble = v; resetPreview(); },
-                "Chance steps run longer or shorter");
+                "Wobble: bands run longer or shorter");
 
-        addScrolled(Button.builder(Component.literal("Sizing: " + editing.sizing.label()), b -> {
-            editing.sizing = switch (editing.sizing) {
-                case MIN_BLOCKS -> SizingMode.FILL_SPACE;
-                case FILL_SPACE -> SizingMode.SET_STEPS;
-                case SET_STEPS -> SizingMode.MIN_BLOCKS;
-            };
-            dirty = true;
-            rebuildWidgets(); // the Steps slider shows/hides
-        }).bounds(rx, y, rw, 20).build());
-        helpSpots.add(new HelpSpot(rx, y, rw, 20, () -> switch (editing.sizing) {
-            case MIN_BLOCKS -> "Min blocks: the shortest run that fits the segment ratios";
-            case FILL_SPACE -> "Fill space: expands out to the end marker or first block";
-            case SET_STEPS -> "Set steps: a fixed length (the Steps slider below)";
-        }, true));
-        y += 24;
-        if (editing.sizing == SizingMode.SET_STEPS) {
-            y = addSlider(rx, y, rw, (editing.steps - 1) / 15.0,
-                    v -> "Steps: " + (1 + (int) Math.round(v * 15)),
-                    v -> editing.steps = 1 + (int) Math.round(v * 15),
-                    "The gradient stretches or shrinks to this many blocks");
-        }
-
+        // NOISE (collapsible): only Noise paint reads these.
+        y += 4;
         noiseHeadingY = y;
-        y += HEADING_H; // "Noise only" heading renders above the noise group
-        addScrolled(Button.builder(Component.literal("Noise: " + editing.noiseType.displayName()), b -> {
-            editing.noiseType = editing.noiseType.next();
-            dirty = true;
-            b.setMessage(Component.literal("Noise: " + editing.noiseType.displayName()));
-        }).bounds(rx, y, rw, 20).build());
-        helpSpots.add(new HelpSpot(rx, y, rw, 20, () -> switch (editing.noiseType) {
-            case SMOOTH -> "Smooth noise: soft rounded blobs — noise painting only";
-            case PERLIN -> "Perlin noise: natural ridged shapes — noise painting only";
-            case FRACTAL -> "Fractal noise: layered detail — noise painting only";
-        }, true));
-        y += 24;
-        if (editing.noiseLock) {
-            y = addSlider(rx, y, rw, (clampScale(editing.noiseScaleX) - 1) / 14.0,
-                    v -> "Scale: " + (1 + (int) Math.round(v * 14)),
-                    v -> { double s = 1 + Math.round(v * 14); editing.noiseScaleX = editing.noiseScaleY = editing.noiseScaleZ = s; },
-                    "Noise feature size — only used when noise painting");
+        sectionHelp(rx, rw, y, () -> "Only Noise paint uses these. Type picks the noise shape, Scale its "
+                + "feature size in blocks (lock XYZ for round blobs, unlock to stretch along an axis), and "
+                + "Seed which pattern you get — the same seed always paints the same pattern. Click the "
+                + "heading to fold this group away.");
+        y += Ui.SECTION_H;
+        if (noiseOpen) {
+            captions.add(new Caption(rx, y, rw, () -> "Type", null, false));
+            noiseTypeSeg = seg(List.of("Smooth", "Perlin", "Fractal"), editing.noiseType.ordinal(),
+                    rx, y + 10, rw, i -> {
+                editing.noiseType = NoiseType.values()[i];
+                dirty = true;
+            });
+            helpSpots.add(new HelpSpot(rx, y + 10, rw, Ui.ROW_H, () -> switch (editing.noiseType) {
+                case SMOOTH -> "Smooth noise: soft rounded blobs";
+                case PERLIN -> "Perlin noise: natural ridged shapes";
+                case FRACTAL -> "Fractal noise: layered detail";
+            }, false));
+            y += 10 + Ui.ROW_H + 6;
+            Toggle lock = new Toggle("Lock XYZ", null, false, () -> editing.noiseLock, on -> {
+                editing.noiseLock = on;
+                dirty = true;
+                rebuildWidgets();
+            });
+            togRows.add(new TogRow(lock, rx, y, rw));
+            y += Ui.ROW_H + 4;
+            if (editing.noiseLock) {
+                y = addSlider(rx, y, rw, (clampScale(editing.noiseScaleX) - 1) / 14.0,
+                        v -> "Scale: " + (1 + (int) Math.round(v * 14)),
+                        v -> { double s = 1 + Math.round(v * 14); editing.noiseScaleX = editing.noiseScaleY = editing.noiseScaleZ = s; },
+                        "Feature size, in blocks");
+            } else {
+                y = addSlider(rx, y, rw, (clampScale(editing.noiseScaleX) - 1) / 14.0,
+                        v -> "Scale X: " + (1 + (int) Math.round(v * 14)),
+                        v -> editing.noiseScaleX = 1 + Math.round(v * 14), null);
+                y = addSlider(rx, y, rw, (clampScale(editing.noiseScaleY) - 1) / 14.0,
+                        v -> "Scale Y: " + (1 + (int) Math.round(v * 14)),
+                        v -> editing.noiseScaleY = 1 + Math.round(v * 14), null);
+                y = addSlider(rx, y, rw, (clampScale(editing.noiseScaleZ) - 1) / 14.0,
+                        v -> "Scale Z: " + (1 + (int) Math.round(v * 14)),
+                        v -> editing.noiseScaleZ = 1 + Math.round(v * 14),
+                        "Feature size per axis, in blocks");
+            }
+            int randW = Math.max(46, this.font.width("Random") + 10);
+            seedBox = new EditBox(this.font, rx, y, rw - randW - 4, 20, Component.literal("Seed"));
+            seedBox.setHint(Component.literal("Seed…"));
+            seedBox.setMaxLength(32);
+            seedBox.setValue(editing.noiseSeed == null ? "" : editing.noiseSeed);
+            seedBox.setResponder(s -> {
+                editing.noiseSeed = s;
+                dirty = true;
+            });
+            addScrolled(seedBox);
+            addScrolled(Button.builder(Component.literal("Random"), b -> {
+                seedBox.setValue(String.valueOf(new Random().nextInt(100000)));
+            }).bounds(rx + rw - randW, y, randW, 20).build());
+            y += 24;
         } else {
-            y = addSlider(rx, y, rw, (clampScale(editing.noiseScaleX) - 1) / 14.0,
-                    v -> "Scale X: " + (1 + (int) Math.round(v * 14)),
-                    v -> editing.noiseScaleX = 1 + Math.round(v * 14),
-                    "Noise feature size — only used when noise painting");
-            y = addSlider(rx, y, rw, (clampScale(editing.noiseScaleY) - 1) / 14.0,
-                    v -> "Scale Y: " + (1 + (int) Math.round(v * 14)),
-                    v -> editing.noiseScaleY = 1 + Math.round(v * 14), null);
-            y = addSlider(rx, y, rw, (clampScale(editing.noiseScaleZ) - 1) / 14.0,
-                    v -> "Scale Z: " + (1 + (int) Math.round(v * 14)),
-                    v -> editing.noiseScaleZ = 1 + Math.round(v * 14), null);
+            seedBox = null;
+            noiseTypeSeg = null;
         }
-        addScrolled(Button.builder(Component.literal("Lock XYZ: " + (editing.noiseLock ? "On" : "Off")), b -> {
-            editing.noiseLock = !editing.noiseLock;
-            dirty = true;
-            rebuildWidgets();
-        }).bounds(rx, y, rw, 20).build());
-        y += 24;
-        EditBox seed = new EditBox(this.font, rx, y, rw, 20, Component.literal("Seed"));
-        seed.setHint(Component.literal("Seed…"));
-        seed.setMaxLength(32);
-        seed.setValue(editing.noiseSeed == null ? "" : editing.noiseSeed);
-        seed.setResponder(s -> {
-            editing.noiseSeed = s;
-            dirty = true;
-        });
-        addScrolled(seed);
-        helpSpots.add(new HelpSpot(rx, y, rw, 20,
-                () -> "Noise seed — only used when noise painting", true));
-        y += 24;
         settingsBottomBase = y;
 
+        // PREVIEW.
+        if (c4y < 0) c4y = settingsBottomBase + 12;
+        sectionHelp(c4x, c4w - 18, c4y, () -> "As gradient shows a column painted START (top) to END "
+                + "(bottom); As noise shows a cube of Noise paint — drag a face to move through the noise. "
+                + "⛶ enlarges the preview; Esc closes it.");
+        addScrolled(Button.builder(Component.literal("⛶"), b -> expandedPreview = previewMode + 1)
+                .bounds(c4x + c4w - 16, c4y - 3, 16, 13).build());
+        previewSeg = seg(List.of("As gradient", "As noise"), previewMode, c4x, c4y + Ui.SECTION_H, c4w,
+                i -> previewMode = i);
+        previewYBase = c4y + Ui.SECTION_H + Ui.ROW_H + 4;
+        previewH = Math.max(90, Math.min(170, c4w * 3 / 4));
+
+        leftScroll = Math.min(leftScroll, maxListScroll());
         scroll = Math.min(scroll, maxScroll());
         applyScroll();
     }
 
-    private int noiseHeadingY;
+    private Segmented seg(List<String> labels, int selected, int x, int baseY, int w,
+                          java.util.function.IntConsumer onPick) {
+        Segmented s = new Segmented(labels, selected, onPick);
+        segRows.add(new SegRow(s, x, baseY, w));
+        return s;
+    }
+
+    /** The full labels when every cell fits them, else the short ones. */
+    private List<String> fit(int w, List<String> full, List<String> shortLabels) {
+        int cell = w / full.size();
+        for (String l : full) {
+            if (this.font.width(l) + 6 > cell) return shortLabels;
+        }
+        return full;
+    }
+
+    /** A section's one circled-? at the right end of its heading line. */
+    private void sectionHelp(int x, int w, int headingY, Supplier<String> text) {
+        helpSpots.add(new HelpSpot(x + w - 12, headingY - 5, 0, 14, text, true));
+    }
+
+    private int orderIndex() {
+        for (int i = 0; i < ORDERS.length; i++) if (ORDERS[i] == editing.order) return i;
+        return -1; // Custom: nothing lit
+    }
+
+    private int curveIndex() {
+        for (int i = 0; i < CURVES.length; i++) if (CURVES[i] == editing.curve) return i;
+        return -1; // Custom: nothing lit
+    }
 
     private static double clampScale(double s) { return Math.max(1, Math.min(15, s)); }
 
     private static String pct(double v) { return Math.round(v * 100) + "%"; }
-
-    private String varLabel() {
-        return editing.variationWindow == 0 ? "Off" : "±" + editing.variationWindow;
-    }
 
     private String orderStateText() {
         return switch (editing.order) {
@@ -394,18 +518,18 @@ public class PaletteEditScreen extends Screen {
             case COLOR_DESC -> "Sorted by colour, descending";
             case BRIGHTNESS_ASC -> "Sorted by brightness, ascending";
             case BRIGHTNESS_DESC -> "Sorted by brightness, descending";
-            case CUSTOM -> "Custom order — arranged by hand";
+            case CUSTOM -> "Custom order — arranged by hand. Pick a sort to re-sort the strip";
         };
     }
 
     private String curveStateText() {
         return switch (editing.curve) {
             case LINEAR -> "Linear: even change end to end";
-            case EASE_IN -> "Ease In: holds the start colour longer";
-            case EASE_OUT -> "Ease Out: reaches the end colour sooner";
-            case EASE_IN_OUT -> "Ease In/Out: lingers at both ends";
+            case EASE_IN -> "Ease in: holds the start colour longer";
+            case EASE_OUT -> "Ease out: reaches the end colour sooner";
+            case EASE_IN_OUT -> "In/out: lingers at both ends";
             case STEP -> "Step: hard quantised bands";
-            case CUSTOM -> "Custom: exactly the stop positions you dragged";
+            case CUSTOM -> "Custom: exactly the stop positions you dragged. Pick a curve to replace them";
         };
     }
 
@@ -414,15 +538,17 @@ public class PaletteEditScreen extends Screen {
         return addRenderableWidget(w);
     }
 
+    /** A slider with its one-line grey explanation under it; returns the y below both. */
     private int addSlider(int x, int y, int w, double initial,
                           java.util.function.DoubleFunction<String> label,
-                          java.util.function.DoubleConsumer onChange, String help) {
+                          java.util.function.DoubleConsumer onChange, String explain) {
         addScrolled(new EditSlider(x, y, w, initial, label, v -> {
             onChange.accept(v);
             dirty = true;
         }));
-        if (help != null) helpSpots.add(new HelpSpot(x, y, w, 20, () -> help, true));
-        return y + 24;
+        if (explain == null) return y + 24;
+        captions.add(new Caption(x, y + 22, w, () -> explain, null, true));
+        return y + 34;
     }
 
     private void applyScroll() {
@@ -431,6 +557,12 @@ public class PaletteEditScreen extends Screen {
             s.widget().setY(y);
             s.widget().visible = y >= BAR_H + 2 && y + s.widget().getHeight() <= viewBottom();
         }
+    }
+
+    /** Whether a scrolled row at base y (h tall) is fully on screen below the bar. */
+    private boolean rowVisible(int baseY, int h) {
+        int y = baseY - scroll;
+        return y >= BAR_H + 2 && y + h <= viewBottom();
     }
 
     // ---- toggle enablement ----------------------------------------------------------------------
@@ -658,8 +790,8 @@ public class PaletteEditScreen extends Screen {
         double[] b = displayBounds(count);
         int[] edges = new int[count + 1];
         edges[0] = stripY();
-        edges[count] = stripY() + STRIP_H;
-        for (int k = 0; k < count - 1; k++) edges[k + 1] = stripY() + (int) Math.round(b[k] * STRIP_H);
+        edges[count] = stripY() + stripH;
+        for (int k = 0; k < count - 1; k++) edges[k + 1] = stripY() + (int) Math.round(b[k] * stripH);
         return edges;
     }
 
@@ -674,9 +806,9 @@ public class PaletteEditScreen extends Screen {
         for (int i = 0; i < count; i++) {
             if (i == skip) continue;
             acc += sizes.get(i) / (1 - removed);
-            edges[pos++] = stripY() + (int) Math.round(Math.min(1, acc) * STRIP_H);
+            edges[pos++] = stripY() + (int) Math.round(Math.min(1, acc) * stripH);
         }
-        edges[count] = stripY() + STRIP_H;
+        edges[count] = stripY() + stripH;
         return edges;
     }
 
@@ -731,20 +863,24 @@ public class PaletteEditScreen extends Screen {
             }
             return true;
         }
-        // Title bar: switching tabs leaves the editor (confirming unsaved changes).
+        // Editor bar: ‹ Paint = Cancel (both confirm unsaved changes), Save.
         if (my < BAR_H && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
-            int[] xs = tabXs();
-            String[] names = GradientScreen.barTabNames();
-            for (int i = 0; i < names.length; i++) {
-                if (mx >= xs[i * 2] && mx <= xs[i * 2] + xs[i * 2 + 1]) {
-                    attemptExit(GradientScreen.atBarTab(i));
+            switch (chrome.click(mx, my)) {
+                case BACK, CANCEL -> {
+                    attemptExit(backToList());
                     return true;
                 }
+                case SAVE -> {
+                    save();
+                    return true;
+                }
+                default -> { }
             }
         }
         // Circled-? icons show their popup immediately (it hides again on mouse-away).
         if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
             for (HelpSpot h : helpSpots) {
+                if (!h.icon()) continue;
                 int hy = h.baseY() - scroll;
                 if (mx >= h.x() + h.w() + 2 && mx <= h.x() + h.w() + 13
                         && my >= hy + 5 && my <= hy + 16) {
@@ -754,6 +890,28 @@ public class PaletteEditScreen extends Screen {
             }
         }
         if (super.mouseClicked(event, doubled)) return true;
+        if (my < BAR_H) return false;
+
+        // The switches and toggles.
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
+            for (SegRow r : List.copyOf(segRows)) {
+                if (!rowVisible(r.baseY(), Ui.ROW_H)) continue;
+                r.seg().setBounds(r.x(), r.baseY() - scroll, r.w());
+                if (r.seg().click(mx, my)) return true;
+            }
+            for (TogRow r : List.copyOf(togRows)) {
+                if (!rowVisible(r.baseY(), Ui.ROW_H)) continue;
+                r.toggle().setBounds(r.x(), r.baseY() - scroll, r.w());
+                if (r.toggle().click(mx, my, this.font)) return true;
+            }
+            // The NOISE heading folds its group.
+            int ny = noiseHeadingY - scroll;
+            if (mx >= c3x && mx < c3x + c3w - 14 && my >= ny - 2 && my < ny + 11) {
+                noiseOpen = !noiseOpen;
+                rebuildWidgets();
+                return true;
+            }
+        }
 
         // Stop handles.
         if (event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
@@ -777,26 +935,41 @@ public class PaletteEditScreen extends Screen {
                 return true;
             }
         }
-        // Noise-preview pan (collapsed, right half).
-        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && !editing.segments.isEmpty()) {
-            int[] nb = previewHalf(true);
-            int ny = nb[1] - scroll;
-            if (mx >= nb[0] && mx <= nb[0] + nb[2] && my >= ny && my <= ny + nb[3]) {
+        // Noise-preview pan (As noise, collapsed).
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && previewMode == 1 && !editing.segments.isEmpty()) {
+            int[] nb = previewRect();
+            if (mx >= nb[0] && mx <= nb[0] + nb[2] && my >= nb[1] && my <= nb[1] + nb[3]) {
                 dragFace = faceAt(mx, my, false);
                 return true;
             }
         }
-        // Block pane (middle): press arms a drag-into-strip; double-click appends; right-click bans.
+        // Block pane: press arms a drag-into-strip; double-click appends; right-click bans.
         if (paneListClick(mx, my, event.button(), doubled)) return true;
         return false;
     }
 
-    private boolean paneListClick(double mx, double my, int button, boolean doubled) {
+    /**
+     * The leftRows index under the mouse: the two pinned Auto rows, then the scrolling block
+     * list. -1 = not over a row (but maybe still inside the pane), -2 = outside the pane.
+     */
+    private int rowAt(double mx, double my) {
         int cx = paneX(), lw = paneW();
-        int ly = COL_TOP + 24 - scroll;
-        if (mx < cx || mx > cx + lw || my < ly || my > ly + LIST_H) return false;
-        int idx = leftScroll + (int) ((my - ly) / 18);
-        if (idx < 0 || idx >= leftRows.size()) return true;
+        if (mx < cx || mx > cx + lw) return -2;
+        int py = pinYBase() - scroll;
+        if (my >= py && my < py + PINNED * ROW) {
+            if (my < BAR_H + 1) return -2;
+            return (int) ((my - py) / ROW);
+        }
+        int ly = listY();
+        if (my < ly || my > ly + listH || my < BAR_H + 1 || my > viewBottom()) return -2;
+        int idx = PINNED + leftScroll + (int) ((my - ly) / ROW);
+        return idx < leftRows.size() ? idx : -1;
+    }
+
+    private boolean paneListClick(double mx, double my, int button, boolean doubled) {
+        int idx = rowAt(mx, my);
+        if (idx == -2) return false;
+        if (idx < 0) return true;
         LRow row = leftRows.get(idx);
         String key = row.auto() != null ? "auto:" + row.auto() : row.id();
         if (button == InputConstants.MOUSE_BUTTON_RIGHT && row.auto() == null) {
@@ -849,8 +1022,8 @@ public class PaletteEditScreen extends Screen {
         if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && dragStop >= 0) {
             int count = editing.segments.size();
             if (editing.stops.size() == count - 1 && dragStop < editing.stops.size()) {
-                double v = (my - stripY()) / (double) STRIP_H;
-                double min = 4.0 / STRIP_H;
+                double v = (my - stripY()) / (double) stripH;
+                double min = 4.0 / stripH;
                 double lo = (dragStop == 0 ? 0 : editing.stops.get(dragStop - 1)) + min;
                 double hi = (dragStop == editing.stops.size() - 1 ? 1 : editing.stops.get(dragStop + 1)) - min;
                 editing.stops.set(dragStop, Math.max(lo, Math.min(hi, v)));
@@ -955,11 +1128,9 @@ public class PaletteEditScreen extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
         if (pendingExit != null || expandedPreview != 0) return true;
-        int cx = paneX(), lw = paneW();
-        int ly = COL_TOP + 24 - scroll;
-        if (mouseX >= cx && mouseX <= cx + lw && mouseY >= ly && mouseY <= ly + LIST_H) {
-            int maxLeft = Math.max(0, leftRows.size() - LIST_H / 18);
-            leftScroll = Math.max(0, Math.min(maxLeft, leftScroll - (int) Math.signum(scrollY)));
+        int ly = listY();
+        if (mouseX >= paneX() && mouseX <= paneX() + paneW() && mouseY >= ly && mouseY <= ly + listH) {
+            leftScroll = Math.max(0, Math.min(maxListScroll(), leftScroll - (int) Math.signum(scrollY)));
             return true;
         }
         if (super.mouseScrolled(mouseX, mouseY, scrollX, scrollY)) return true;
@@ -983,7 +1154,7 @@ public class PaletteEditScreen extends Screen {
             clickedSpot = null;
             return true;
         }
-        boolean typing = nameBox != null && nameBox.isFocused();
+        boolean typing = (nameBox != null && nameBox.isFocused()) || (seedBox != null && seedBox.isFocused());
         if (!typing && selectedSeg >= 0 && selectedSeg < editing.segments.size()) {
             if (key == 265) { // up
                 if (selectedSeg > 0) {
@@ -1014,7 +1185,7 @@ public class PaletteEditScreen extends Screen {
     // ---- save / exit ----------------------------------------------------------------------------
 
     private Screen backToList() {
-        return new GradientScreen(false);
+        return GradientScreen.atPaintTab();
     }
 
     private void save() {
@@ -1104,48 +1275,29 @@ public class PaletteEditScreen extends Screen {
         if (dragSeg >= 0 || paneDragging) return CursorTypes.RESIZE_ALL;
         if (stopHandleAt(mouseX, mouseY) >= 0) return CursorTypes.RESIZE_NS;
         if (segmentAt(mouseX, mouseY) >= 0) return CursorTypes.RESIZE_ALL;
-        int cx = paneX(), ly = COL_TOP + 24 - scroll;
-        if (mouseX >= cx && mouseX <= cx + paneW() && mouseY >= ly && mouseY <= ly + LIST_H) {
-            int idx = leftScroll + (int) ((mouseY - ly) / 18.0);
-            if (idx >= 0 && idx < leftRows.size()) return CursorTypes.RESIZE_ALL;
-        }
+        if (mouseY > BAR_H && rowAt(mouseX, mouseY) >= 0) return CursorTypes.RESIZE_ALL;
         return null;
     }
 
     // ---- rendering ------------------------------------------------------------------------------
 
-    private int[] tabXs() {
-        String[] names = GradientScreen.barTabNames();
-        int gap = 14;
-        int[] out = new int[names.length * 2];
-        int x = this.width - 10;
-        for (int i = names.length - 1; i >= 0; i--) {
-            String label = i == GradientScreen.paletteBarIndex() ? "» " + names[i] : names[i];
-            int w = this.font.width(label);
-            x -= w;
-            out[i * 2] = x;
-            out[i * 2 + 1] = w;
-            x -= gap;
-        }
-        return out;
-    }
-
     @Override
     public void extractRenderState(GuiGraphicsExtractor g, int mouseX, int mouseY, float partialTick) {
-        // Full-page rgba(0,0,0,0.3) underlay so the UI reads against any world (before super →
-        // beneath the widgets).
-        g.fill(0, 0, this.width, this.height, 0x4D000000);
+        // Full-page Ui.BACKDROP underlay so the UI reads against any world. The bar goes down
+        // first so the name box (a widget) draws over it; scrolled widgets hide under the bar.
+        g.fill(0, 0, this.width, this.height, Ui.BACKDROP);
+        chrome.render(g, this.font, mouseX, mouseY, dirty, nameError);
         super.extractRenderState(g, mouseX, mouseY, partialTick);
-        renderPreviewArea(g);
-        renderNameRow(g);
-        renderSettingsHeadings(g);
+        g.enableScissor(0, BAR_H + 1, this.width, viewBottom());
+        renderSections(g);
+        renderCaptions(g);
+        renderParts(g, mouseX, mouseY);
         renderPaneList(g, mouseX, mouseY);
         renderStrip(g, mouseX, mouseY);
+        renderPreviewArea(g);
+        g.disableScissor();
         renderHelpIcons(g);
         renderPageScrollbar(g);
-        renderTitleBar(g);
-        updateToggleStates();
-        renderToggleIcons(g);
         renderDisabledHints(g, mouseX, mouseY);
         renderPaneDragChip(g);
         renderHelpPopup(g, mouseX, mouseY);
@@ -1154,109 +1306,62 @@ public class PaletteEditScreen extends Screen {
         updateCursor(g, mouseX, mouseY);
     }
 
-    private void updateToggleStates() {
-        if (orderBtn != null) orderBtn.active = orderEnabled();
-        if (curveBtn != null) curveBtn.active = curveEnabled();
+    /** The column headings: numbered in working order, PREVIEW and NOISE un-numbered. */
+    private void renderSections(GuiGraphicsExtractor g) {
+        EditorChrome.section(g, this.font, c1x, COL_Y - scroll, c1w, "1", "Pick blocks", null, 14);
+        EditorChrome.section(g, this.font, c2x, COL_Y - scroll, RIGHT_W, "2", "Arrange", null, 14);
+        EditorChrome.section(g, this.font, c3x, c3y - scroll, c3w, "3", "How it blends", null, 14);
+        int ny = noiseHeadingY - scroll;
+        EditorChrome.section(g, this.font, c3x, ny, c3w, null, "Noise", "· only used by Noise paint", 26);
+        g.text(this.font, noiseOpen ? "▾" : "▸", c3x + c3w - 22, ny, Ui.HINT);
+        EditorChrome.section(g, this.font, c4x, c4y - scroll, c4w, null, "Preview", null, 34);
     }
 
-    /** The Order/Curve buttons carry icons drawn from live state, so Custom shows instantly. */
-    private void renderToggleIcons(GuiGraphicsExtractor g) {
-        if (orderBtn != null && orderBtn.visible) drawOrderIcon(g, orderBtn);
-        if (curveBtn != null && curveBtn.visible) drawCurveIcon(g, curveBtn);
-    }
-
-    /** Order: palette (colour) or sun (brightness) + an asc/desc arrow; palette + C for Custom. */
-    private void drawOrderIcon(GuiGraphicsExtractor g, AbstractWidget b) {
-        boolean dim = !b.active;
-        int cx = b.getX() + b.getWidth() / 2, cy = b.getY() + b.getHeight() / 2;
-        PaletteOrder ord = editing.order;
-        boolean sun = ord.byBrightness();
-        int iconX = cx - 10, iconY = cy - 5;
-        if (ord == PaletteOrder.CUSTOM) {
-            drawPaletteIcon(g, iconX, iconY, dim);
-            g.text(this.font, "C", cx + 4, cy - 4, dim ? 0xFF808080 : WHITE);
-            return;
-        }
-        if (sun) drawSunIcon(g, iconX, iconY, dim);
-        else drawPaletteIcon(g, iconX, iconY, dim);
-        drawArrowIcon(g, cx + 5, cy - 4, !ord.descending(), dim);
-    }
-
-    /** Curve: the current easing drawn as a little line; Custom = a pronounced bell + C. */
-    private void drawCurveIcon(GuiGraphicsExtractor g, AbstractWidget b) {
-        boolean dim = !b.active;
-        int color = dim ? 0xFF808080 : WHITE;
-        int w = Math.min(26, b.getWidth() - 12), h = 10;
-        boolean custom = editing.curve == CurveFunction.CUSTOM;
-        int x0 = b.getX() + (b.getWidth() - w - (custom ? 8 : 0)) / 2;
-        int y0 = b.getY() + (b.getHeight() + h) / 2 - 1;
-        for (int i = 0; i < w; i++) {
-            double t = i / (double) (w - 1);
-            double v = custom
-                    ? Math.exp(-Math.pow(t - 0.5, 2) / (2 * 0.15 * 0.15)) // pronounced bell
-                    : editing.curve.apply(t);
-            int py = y0 - (int) Math.round(v * h);
-            g.fill(x0 + i, py - 1, x0 + i + 1, py + 1, color);
-        }
-        if (custom) g.text(this.font, "C", x0 + w + 3, b.getY() + (b.getHeight() - 8) / 2, color);
-    }
-
-    /** A tiny painter's palette: ring outline, three paint dots, a thumb notch. */
-    private static void drawPaletteIcon(GuiGraphicsExtractor g, int x, int y, boolean dim) {
-        int c = dim ? 0xFF707070 : 0xFFD8D8D8;
-        // Blob outline (a squashed 11×10 ring with a bite at the bottom-right).
-        g.fill(x + 3, y, x + 8, y + 1, c);
-        g.fill(x + 1, y + 1, x + 3, y + 2, c);
-        g.fill(x + 8, y + 1, x + 10, y + 2, c);
-        g.fill(x, y + 2, x + 1, y + 7, c);
-        g.fill(x + 10, y + 2, x + 11, y + 5, c);
-        g.fill(x + 1, y + 7, x + 3, y + 8, c);
-        g.fill(x + 3, y + 8, x + 8, y + 9, c);
-        g.fill(x + 8, y + 7, x + 10, y + 8, c);
-        g.fill(x + 8, y + 5, x + 9, y + 6, c);  // thumb-notch bite
-        // Paint dots.
-        g.fill(x + 3, y + 2, x + 4, y + 3, dim ? 0xFF804040 : 0xFFFF5555);
-        g.fill(x + 6, y + 2, x + 7, y + 3, dim ? 0xFF408040 : 0xFF55FF55);
-        g.fill(x + 4, y + 5, x + 5, y + 6, dim ? 0xFF404080 : 0xFF5599FF);
-    }
-
-    /** A tiny sun: 3×3 core + rays. */
-    private static void drawSunIcon(GuiGraphicsExtractor g, int x, int y, boolean dim) {
-        int c = dim ? 0xFF707070 : 0xFFFFE34D;
-        g.fill(x + 4, y + 3, x + 7, y + 6, c);          // core
-        g.fill(x + 5, y, x + 6, y + 2, c);              // N ray
-        g.fill(x + 5, y + 7, x + 6, y + 9, c);          // S
-        g.fill(x, y + 4, x + 2, y + 5, c);              // W
-        g.fill(x + 9, y + 4, x + 11, y + 5, c);         // E
-        g.fill(x + 2, y + 1, x + 3, y + 2, c);          // diagonals
-        g.fill(x + 8, y + 1, x + 9, y + 2, c);
-        g.fill(x + 2, y + 7, x + 3, y + 8, c);
-        g.fill(x + 8, y + 7, x + 9, y + 8, c);
-    }
-
-    /** A small up/down arrow (triangle head + stem). */
-    private static void drawArrowIcon(GuiGraphicsExtractor g, int x, int y, boolean up, boolean dim) {
-        int c = dim ? 0xFF707070 : 0xFFD8D8D8;
-        if (up) {
-            g.fill(x + 2, y, x + 3, y + 1, c);
-            g.fill(x + 1, y + 1, x + 4, y + 2, c);
-            g.fill(x, y + 2, x + 5, y + 3, c);
-            g.fill(x + 2, y + 3, x + 3, y + 8, c);
-        } else {
-            g.fill(x + 2, y, x + 3, y + 5, c);
-            g.fill(x, y + 5, x + 5, y + 6, c);
-            g.fill(x + 1, y + 6, x + 4, y + 7, c);
-            g.fill(x + 2, y + 7, x + 3, y + 8, c);
+    private void renderCaptions(GuiGraphicsExtractor g) {
+        for (Caption c : captions) {
+            int y = c.baseY() - scroll;
+            String left = c.left().get();
+            String right = c.right() == null ? "" : c.right().get();
+            int rightW = right.isEmpty() ? 0 : this.font.width(right) + 6;
+            g.text(this.font, this.font.plainSubstrByWidth(left, c.w() - rightW), c.x(), y,
+                    c.hint() ? Ui.HINT : Ui.TEXT);
+            if (!right.isEmpty()) {
+                String r = this.font.plainSubstrByWidth(right, c.w() - this.font.width(left) - 6);
+                g.text(this.font, r, c.x() + c.w() - this.font.width(r), y, Ui.HINT);
+            }
         }
     }
 
-    /** Short hover hints on the disabled toggles, explaining how to enable them. */
+    /** The switches and toggles, synced to the live state (manual reorders / stop drags show Custom). */
+    private void renderParts(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        orderSeg.setSelected(orderIndex());
+        orderSeg.setEnabled(orderEnabled());
+        curveSeg.setSelected(curveIndex());
+        curveSeg.setEnabled(curveEnabled());
+        sizingSeg.setSelected(editing.sizing.ordinal());
+        sourceSeg.setSelected(editing.source.ordinal());
+        varSeg.setSelected(editing.variationWindow);
+        previewSeg.setSelected(previewMode);
+        if (noiseTypeSeg != null) noiseTypeSeg.setSelected(editing.noiseType.ordinal());
+        boolean modal = pendingExit != null || expandedPreview != 0;
+        int mx = modal ? -1 : mouseX, my = modal ? -1 : mouseY;
+        for (SegRow r : segRows) {
+            r.seg().setBounds(r.x(), r.baseY() - scroll, r.w());
+            r.seg().render(g, this.font, mx, my);
+        }
+        for (TogRow r : togRows) {
+            r.toggle().setBounds(r.x(), r.baseY() - scroll, r.w());
+            r.toggle().render(g, this.font, mx, my);
+        }
+    }
+
+    /** Short hover hints on the disabled switches, explaining how to enable them. */
     private void renderDisabledHints(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         if (pendingExit != null || expandedPreview != 0) return;
         String hint = null;
-        if (orderBtn != null && !orderBtn.active && overWidget(orderBtn, mouseX, mouseY)) {
+        if (!orderEnabled() && overSeg(orderSeg, mouseX, mouseY)) {
             hint = "Add at least 2 blocks to sort";
-        } else if (curveBtn != null && !curveBtn.active && overWidget(curveBtn, mouseX, mouseY)) {
+        } else if (!curveEnabled() && overSeg(curveSeg, mouseX, mouseY)) {
             hint = "Add at least 3 segments to shape the curve";
         }
         if (hint == null) return;
@@ -1269,54 +1374,9 @@ public class PaletteEditScreen extends Screen {
         g.text(this.font, hint, x, y, YELLOW);
     }
 
-    private static boolean overWidget(AbstractWidget w, int mx, int my) {
-        return w.visible && mx >= w.getX() && mx <= w.getX() + w.getWidth()
-                && my >= w.getY() && my <= w.getY() + w.getHeight();
-    }
-
-    private void renderTitleBar(GuiGraphicsExtractor g) {
-        g.fill(0, 0, this.width, BAR_H, 0xE0000000);
-        g.fill(0, BAR_H, this.width, BAR_H + 1, 0x60FFFFFF);
-        int textY = (BAR_H - this.font.lineHeight) / 2 + 1;
-        g.text(this.font, "FW Paint — Edit palette", 8, textY, WHITE);
-        String[] names = GradientScreen.barTabNames();
-        int[] xs = tabXs();
-        for (int i = 0; i < names.length; i++) {
-            boolean cur = i == GradientScreen.paletteBarIndex();
-            g.text(this.font, cur ? "» " + names[i] : names[i], xs[i * 2], textY, cur ? WHITE : GREY);
-        }
-    }
-
-    private void renderNameRow(GuiGraphicsExtractor g) {
-        int cx = contentX();
-        int total = SET_W + COL_GAP + paneW() + COL_GAP + RIGHT_W;
-        int labelY = NAME_LABEL_Y - scroll;
-        if (labelY >= BAR_H + 2 && labelY <= viewBottom() - 8) {
-            g.text(this.font, "Name:", cx, labelY, GREY);
-            if (!nameError.isEmpty()) {
-                g.text(this.font, nameError, cx + this.font.width("Name: ") + 4, labelY, RED);
-            }
-        }
-        // Separator between the name row and the settings, spanning all three columns.
-        int sepY = SEP_Y - scroll;
-        if (sepY >= BAR_H + 2 && sepY <= viewBottom()) {
-            g.fill(cx, sepY, cx + total, sepY + 1, 0x50FFFFFF);
-        }
-    }
-
-    /** Group headings over the left settings column. */
-    private void renderSettingsHeadings(GuiGraphicsExtractor g) {
-        int x = contentX();
-        int y1 = COL_TOP - scroll;
-        if (y1 >= BAR_H + 2 && y1 <= viewBottom() - 10) {
-            g.text(this.font, "Gradient & noise", x, y1 + 2, LIGHT);
-            g.fill(x, y1 + 11, x + SET_W - 14, y1 + 12, 0x60FFFFFF);
-        }
-        int y2 = noiseHeadingY - scroll;
-        if (y2 >= BAR_H + 2 && y2 <= viewBottom() - 10) {
-            g.text(this.font, "Noise only", x, y2 + 2, LIGHT);
-            g.fill(x, y2 + 11, x + SET_W - 14, y2 + 12, 0x60FFFFFF);
-        }
+    private boolean overSeg(Segmented s, int mx, int my) {
+        return s != null && my > BAR_H && my < viewBottom()
+                && Ui.inside(mx, my, s.x(), s.y(), s.width(), s.height());
     }
 
     private void renderPageScrollbar(GuiGraphicsExtractor g) {
@@ -1330,45 +1390,57 @@ public class PaletteEditScreen extends Screen {
         g.fill(x, thumbY, x + 2, thumbY + thumbH, 0x90FFFFFF);
     }
 
-    // ---- block pane (middle) --------------------------------------------------------------------
+    // ---- block pane (PICK BLOCKS) ---------------------------------------------------------------
 
     private void renderPaneList(GuiGraphicsExtractor g, int mouseX, int mouseY) {
         int cx = paneX(), lw = paneW();
-        int ly = COL_TOP + 24 - scroll;
-        int lh = LIST_H;
-        if (ly + lh < BAR_H || ly > viewBottom()) return;
+        boolean modal = pendingExit != null || expandedPreview != 0;
+        // The pinned Auto rows: dashed (wildcards), never scroll away from the list.
+        int py = pinYBase() - scroll;
+        for (int i = 0; i < PINNED && i < leftRows.size(); i++) {
+            int ry = py + i * ROW;
+            LRow row = leftRows.get(i);
+            boolean hover = !modal && Ui.inside(mouseX, mouseY, cx, ry, lw, ROW - 1);
+            if (hover) g.fill(cx + 1, ry, cx + lw - 1, ry + ROW - 1, HOVER_BG);
+            EditorChrome.dashedOutline(g, cx, ry, lw, ROW - 1, 0xFF8A8A8A);
+            PaletteListPanel.drawCrosshatch(g, cx + 2, ry, 16);
+            g.text(this.font, this.font.plainSubstrByWidth(row.name(), lw - 26), cx + 21, ry + 4, 0xFFC8C8C8);
+        }
+
+        int ly = listY();
+        int lh = listH;
         g.fill(cx, ly, cx + lw, ly + lh, 0x90000000);
         outline(g, cx, ly, lw, lh, 0xA0FFFFFF);
         g.enableScissor(cx, Math.max(BAR_H + 1, ly), cx + lw, Math.min(viewBottom(), ly + lh));
-        for (int i = leftScroll; i < leftRows.size(); i++) {
-            int ry = ly + (i - leftScroll) * 18;
+        int blocks = leftRows.size() - PINNED;
+        if (blocks == 0) {
+            g.text(this.font, this.font.plainSubstrByWidth("No blocks in " + editing.source.displayName(), lw - 8),
+                    cx + 4, ly + 5, Ui.HINT);
+        }
+        for (int i = PINNED + leftScroll; i < leftRows.size(); i++) {
+            int ry = ly + (i - PINNED - leftScroll) * ROW;
             if (ry >= ly + lh) break;
             LRow row = leftRows.get(i);
-            boolean hover = mouseX >= cx && mouseX <= cx + lw && mouseY >= ry && mouseY < ry + 18;
-            if (hover) g.fill(cx + 1, ry, cx + lw - 1, ry + 18, HOVER_BG);
-            if (row.auto() != null) {
-                PaletteListPanel.drawCrosshatch(g, cx + 2, ry + 1, 16);
-                g.text(this.font, this.font.plainSubstrByWidth(row.name(), lw - 26),
-                        cx + 21, ry + 5, 0xFFC8C8C8);
-            } else {
-                g.item(row.stack(), cx + 2, ry + 1);
-                boolean banned = editing.autoExclude.contains(row.id());
-                g.text(this.font, this.font.plainSubstrByWidth(row.name(), lw - 26),
-                        cx + 21, ry + 5, banned ? RED : WHITE);
-            }
+            boolean hover = !modal && mouseX >= cx && mouseX <= cx + lw && mouseY >= ry && mouseY < ry + ROW;
+            if (hover) g.fill(cx + 1, ry, cx + lw - 1, ry + ROW, HOVER_BG);
+            g.item(row.stack(), cx + 2, ry + 1);
+            boolean banned = editing.autoExclude.contains(row.id());
+            String name = this.font.plainSubstrByWidth(row.name(), lw - 26);
+            g.text(this.font, name, cx + 21, ry + 5, banned ? Ui.MISSING : WHITE);
+            if (banned) g.fill(cx + 20, ry + 8, cx + 22 + this.font.width(name), ry + 9, Ui.MISSING);
         }
         g.disableScissor();
-        int maxLeft = Math.max(0, leftRows.size() - lh / 18);
+        int maxLeft = maxListScroll();
         if (maxLeft > 0) {
             int trackX = cx + lw - 3;
-            int thumbH = Math.max(8, lh * (lh / 18) / leftRows.size());
+            int thumbH = Math.max(8, lh * visibleListRows() / Math.max(1, blocks));
             int thumbY = ly + (int) ((lh - thumbH) * (double) leftScroll / maxLeft);
             g.fill(trackX, ly + 1, trackX + 2, ly + lh - 1, 0x30FFFFFF);
             g.fill(trackX, thumbY, trackX + 2, thumbY + thumbH, 0x90FFFFFF);
         }
         int hintY = ly + lh + 4;
-        g.text(this.font, this.font.plainSubstrByWidth("Dbl-click or drag: add to the strip", lw), cx, hintY, LIGHT);
-        g.text(this.font, this.font.plainSubstrByWidth("Right-click: ban from Automatic", lw), cx, hintY + 11, LIGHT);
+        Ui.hint(g, this.font, cx, hintY, lw, "Dbl-click / drag → strip");
+        Ui.hint(g, this.font, cx, hintY + 11, lw, "RMB ban from Auto");
     }
 
     /** The floating chip while dragging a block from the pane toward the strip. */
@@ -1393,13 +1465,14 @@ public class PaletteEditScreen extends Screen {
     // ---- strip ----------------------------------------------------------------------------------
 
     private void renderStrip(GuiGraphicsExtractor g, int mouseX, int mouseY) {
+        renderStripCaptions(g);
         int count = editing.segments.size();
         int sx = stripX(), sy = stripY();
-        outline(g, sx - 1, sy - 1, STRIP_W + 2, STRIP_H + 2, 0x60FFFFFF);
+        outline(g, sx - 1, sy - 1, STRIP_W + 2, stripH + 2, 0x60FFFFFF);
         if (count == 0) {
             // Empty strip: the "select a block" placeholder, stacked vertically down the middle.
             String hint = "SELECT A BLOCK";
-            int ty = sy + (STRIP_H - hint.length() * 9) / 2;
+            int ty = sy + (stripH - hint.length() * 9) / 2;
             for (int i = 0; i < hint.length(); i++) {
                 String ch = String.valueOf(hint.charAt(i));
                 g.text(this.font, ch, sx + (STRIP_W - this.font.width(ch)) / 2, ty + i * 9, GREY);
@@ -1452,27 +1525,16 @@ public class PaletteEditScreen extends Screen {
         }
 
         renderStripLabels(g, count, edges);
+    }
 
-        // Adjacent Automatic segments can resolve to the same block — warn that a "step" may
-        // then look longer than the strip suggests.
-        boolean adjacentAutos = false;
-        for (int k = 0; k + 1 < count; k++) {
-            if (editing.segments.get(k).isAutomatic() && editing.segments.get(k + 1).isAutomatic()) {
-                adjacentAutos = true;
-                break;
-            }
-        }
-        if (adjacentAutos) {
-            int hy = sy + STRIP_H + 6;
-            List<String> lines = wrap("Adjacent Auto segments may resolve to the same block, "
-                    + "which then looks like one longer step.", RIGHT_W);
-            for (String line : lines) {
-                if (hy >= BAR_H + 2 && hy <= viewBottom() - 8) {
-                    g.text(this.font, line, rightX(), hy, YELLOW);
-                }
-                hy += 10;
-            }
-        }
+    /** START / END captions over and under the strip, and the strip's hint lines. */
+    private void renderStripCaptions(GuiGraphicsExtractor g) {
+        int sx = stripX(), sy = stripY();
+        g.text(this.font, "START", sx + (STRIP_W - this.font.width("START")) / 2, sy - 10, Ui.HINT);
+        g.text(this.font, "END", sx + (STRIP_W - this.font.width("END")) / 2, sy + stripH + 3, Ui.HINT);
+        int hy = sy + stripH + 15;
+        Ui.hint(g, this.font, rightX(), hy, RIGHT_W, "Drag edges to resize");
+        Ui.hint(g, this.font, rightX(), hy + 11, RIGHT_W, "↑ ↓ move · Del remove");
     }
 
     /** A sideways "house" pentagon whose point touches the boundary line. Hot = yellow. */
@@ -1498,7 +1560,7 @@ public class PaletteEditScreen extends Screen {
     private void renderStripLabels(GuiGraphicsExtractor g, int count, int[] edges) {
         int gx = labelX(), gw = LABEL_W;
         int top = stripY() + 1;
-        int bottom = stripY() + STRIP_H - 8;
+        int bottom = stripY() + stripH - 8;
         int[] ys = new int[count];
         for (int k = 0; k < count; k++) {
             int a = edges[Math.min(k, edges.length - 2)];
@@ -1574,33 +1636,48 @@ public class PaletteEditScreen extends Screen {
         }
     }
 
-    // ---- previews (both, side by side) ----------------------------------------------------------
-
-    /** {x, y(base), w, h} of a preview half: false = cylinder (left), true = noise cube (right). */
-    private int[] previewHalf(boolean noise) {
-        int total = SET_W + COL_GAP + paneW() + COL_GAP + RIGHT_W;
-        int half = Math.min(220, (total - 8) / 2);
-        int x0 = (this.width - (2 * half + 8)) / 2;
-        return new int[]{noise ? x0 + half + 8 : x0, PREVIEW_Y, half, PREVIEW_H};
-    }
+    // ---- preview (one at a time: As gradient | As noise) ---------------------------------------
 
     private void renderPreviewArea(GuiGraphicsExtractor g) {
-        int[] cyl = previewHalf(false);
-        int[] noise = previewHalf(true);
-        int y = cyl[1] - scroll;
-        if (y + cyl[3] < BAR_H || y > viewBottom()) return;
-        if (editing.segments.isEmpty()) {
+        int[] r = previewRect();
+        int x = r[0], y = r[1], w = r[2], h = r[3];
+        g.fill(x, y, x + w, y + h, 0x40000000);
+        outline(g, x, y, w, h, Ui.LINE);
+        int count = editing.segments.size();
+        if (count == 0) {
             String s = "Add blocks to preview";
-            int mid = (cyl[0] + noise[0] + noise[2]) / 2;
-            g.text(this.font, s, mid - this.font.width(s) / 2, y + cyl[3] / 2 - 4, YELLOW);
-            return;
+            g.text(this.font, this.font.plainSubstrByWidth(s, w - 8),
+                    x + Math.max(4, (w - this.font.width(s)) / 2), y + h / 2 - 4, YELLOW);
+        } else {
+            g.enableScissor(x + 1, Math.max(BAR_H + 1, y + 1), x + w - 1, Math.min(viewBottom(), y + h - 1));
+            if (previewMode == 1) drawNoisePreview(g, x, y, w, h, 1f);
+            else drawCylinderPreview(g, x, y, w, h, 1f);
+            g.disableScissor();
         }
-        g.enableScissor(cyl[0], Math.max(BAR_H + 1, y), cyl[0] + cyl[2], Math.min(viewBottom(), y + cyl[3]));
-        drawCylinderPreview(g, cyl[0], y, cyl[2], cyl[3], 1f);
-        g.disableScissor();
-        g.enableScissor(noise[0], Math.max(BAR_H + 1, y), noise[0] + noise[2], Math.min(viewBottom(), y + noise[3]));
-        drawNoisePreview(g, noise[0], y, noise[2], noise[3], 1f);
-        g.disableScissor();
+
+        // Status: segment makeup, then the adjacent-Auto warning (they can resolve to the same
+        // block, so a "step" may look longer than the strip suggests).
+        int autos = 0;
+        for (PaletteSegment s : editing.segments) if (s.isAutomatic()) autos++;
+        String status = count + (count == 1 ? " segment" : " segments") + " · "
+                + (count - autos) + (count - autos == 1 ? " block" : " blocks")
+                + (autos > 0 ? " + " + autos + " Auto" : "");
+        int sy = y + h + 4;
+        Ui.hint(g, this.font, x, sy, w, status);
+        boolean adjacentAutos = false;
+        for (int k = 0; k + 1 < count; k++) {
+            if (editing.segments.get(k).isAutomatic() && editing.segments.get(k + 1).isAutomatic()) {
+                adjacentAutos = true;
+                break;
+            }
+        }
+        if (adjacentAutos) {
+            int hy = sy + 11;
+            for (String line : wrap("Auto segments next to each other may pick the same block.", w)) {
+                g.text(this.font, line, x, hy, Ui.ATTENTION);
+                hy += 10;
+            }
+        }
     }
 
     private void drawCylinderPreview(GuiGraphicsExtractor g, int x, int y, int w, int h, float s) {
@@ -1825,13 +1902,13 @@ public class PaletteEditScreen extends Screen {
             tx = (this.width - w) / 2f;
             ty = (this.height - h) / 2f;
         } else {
-            int[] b = previewHalf(true);
+            int[] b = previewRect();
             s = 1f;
             n = Math.max(2, Math.min(10, 1 + (int) Math.min((b[2] - 16) / (2 * ISO_X),
                     (b[3] - 16) / (2 * ISO_DOWN + ISO_UP))));
             float cw = 2 * (n - 1) * ISO_X + 16;
             tx = b[0] + (b[2] - cw) / 2f;
-            ty = b[1] - scroll + (b[3] - ((n - 1) * (2 * ISO_DOWN + ISO_UP) + 16)) / 2f;
+            ty = b[1] + (b[3] - ((n - 1) * (2 * ISO_DOWN + ISO_UP) + 16)) / 2f;
         }
         double dx = (mx - tx) / s - ((n - 1) * ISO_X + 8);
         double dy = (my - ty) / s;
@@ -1888,6 +1965,7 @@ public class PaletteEditScreen extends Screen {
         // Which control (incl. its ? icon) is the mouse over right now?
         HelpSpot over = null;
         for (HelpSpot h : helpSpots) {
+            if (mouseY <= BAR_H || pendingExit != null || expandedPreview != 0) break;
             int y = h.baseY() - scroll;
             if (mouseX >= h.x() && mouseX <= h.x() + h.w() + 13 && mouseY >= y && mouseY <= y + h.h()) {
                 over = h;

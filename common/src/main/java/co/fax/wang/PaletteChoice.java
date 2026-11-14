@@ -97,26 +97,27 @@ public final class PaletteChoice {
     public static Prepared prepare(LocalPlayer player, String typeLabel, boolean requiresStaticEnd) {
         Palette active = PaletteStore.active();
         if (active == null) {
-            return Prepared.fail(null, typeLabel + ": no palette — press "
-                    + Gradient.boundKey("open") + " to set one up");
+            return Prepared.fail(null, Gradient.message(typeLabel, "no palette picked", "Paint"));
         }
         Palette palette = active.copy(); // snapshot: mid-press edits can't shift the ramp
         if (palette.segments.isEmpty()) {
-            return Prepared.fail(palette, "'" + palette.name + "' is empty — add blocks in the editor");
+            return Prepared.fail(palette, Gradient.message("Palette",
+                    "'" + palette.name + "' is empty, add blocks with Edit", "Paint"));
         }
 
         List<SourceEntry> source = gatherSource(player, palette);
         if (source.isEmpty()) {
-            return Prepared.fail(palette, typeLabel + ": no placeable blocks in "
-                    + palette.source.displayName());
+            return Prepared.fail(palette, Gradient.message(typeLabel, "no placeable blocks in "
+                    + palette.source.displayName(), null));
         }
 
         Set<String> availableIds = new HashSet<>();
         for (SourceEntry e : source) availableIds.add(e.id());
         List<String> missing = palette.missingBlocks(availableIds);
         if (!missing.isEmpty() && ConfigManager.get().missingBlockPolicy == MissingBlockPolicy.DONT_PAINT) {
-            return Prepared.fail(palette, "'" + palette.name + "': missing blocks ("
-                    + missing.size() + ") — check the Palette tab");
+            return Prepared.fail(palette, Gradient.message("Palette", missing.size()
+                    + (missing.size() == 1 ? " block" : " blocks") + " missing from '" + palette.name + "'",
+                    "Paint"));
         }
 
         List<PaletteSegment> effective = new ArrayList<>();
@@ -125,10 +126,12 @@ public final class PaletteChoice {
             effective.add(s);
         }
         if (effective.isEmpty()) {
-            return Prepared.fail(palette, "'" + palette.name + "': none of its blocks are available");
+            return Prepared.fail(palette, Gradient.message("Palette",
+                    "none of '" + palette.name + "' blocks are available", "Paint"));
         }
         if (requiresStaticEnd && effective.get(effective.size() - 1).isAutomatic()) {
-            return Prepared.fail(palette, "'" + palette.name + "': 3D paint needs a defined end block");
+            return Prepared.fail(palette, Gradient.message("Palette",
+                    "3D Fill needs a defined end block in '" + palette.name + "'", "Paint"));
         }
 
         List<SourceEntry> autoPool = new ArrayList<>();
