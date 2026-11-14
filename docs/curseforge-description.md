@@ -63,6 +63,8 @@ palettes, patterns, Solid's block), **Place** (the mode and its options, plus ma
 open that Help topic. Messages on the action bar always say where to go: "FW Paint · Area: what
 happened — K › Tab".
 
+![The Place tab: mode tiles grouped Blocks / Markers / Shapes, with the mode's options and marker settings](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/place-tab-3d-fill-options-markers-v3.0.0.jpg)
+
 ## The wheel
 
 Hover a wedge to fan out its options; click only to choose. **Paint** fans the paint types
@@ -76,14 +78,19 @@ the screen on that tab. The wedge holding the current selection shows a blue tin
 doesn't fit scrolls as a carousel (arrows or mouse wheel). Hover anything for a one-line
 description along the bottom of the screen. Set several things in one hold, then release.
 
-![The selector wheel: Place fanned out to the shape-marker modes](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/selector-wheel-place-shape-markers-v2.2.0.jpg)
+**Recent**, along the bottom, keeps your last picks (newest first, saved between sessions).
+Click one to set it again — it switches whatever it needs, so a Solid block picked while you
+paint Gradient takes you back to Solid.
+
+![The wheel: Place fanned out to Shapes, with the Recent bar along the bottom](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/selector-wheel-place-shapes-line-recent-bar-v3.0.0.jpg)
 
 ## The HUD
 
 Line one says **Paint · Mode**; line two shows the palette strip, pattern or block. Yellow lines
 appear only for options that apply and aren't at their default (● Don't match palette, Fill voids
 first: off, Place in air: off, Perp snap 90°). No tool or nothing picked yet? The HUD says so
-and where to fix it (K › Settings, K › Paint). **B** steps to the next palette (Gradient/Noise),
+and where to fix it (K › Settings, K › Paint). With a line marker in view it also shows the
+line's length and node count. **B** steps to the next palette (Gradient/Noise),
 pattern (Pattern) or block (Solid).
 
 ## Palettes
@@ -122,6 +129,8 @@ while you work; Save puts the palette in use) and columns in working order:
   but Autos is a reusable "gradient from whatever I'm standing on".
 - One **?** per section explains it.
 
+![The palette editor: Pick blocks, Arrange, How it blends and the preview](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/palette-editor-pick-arrange-blend-v3.0.0.jpg)
+
 ## Patterns
 
 ![A patterned wall painted stroke by stroke, variance shimmer included](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/pattern-wall-placed-variation-v2.1.0-beta.1.jpg)
@@ -137,6 +146,8 @@ ground-up painting upright), and Variation; the preview shows the wall, variance
 Painting advances out of the clicked face, the width crossing a plane snapped from your facing
 (45°/90°) — adjacent strokes **continue the drawing** instead of restarting, so you can build a
 patterned wall column by column. **B** steps through your patterns while Pattern is the paint.
+
+![The pattern editor: ink list, canvas with its tool bar, preview and How it repeats](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/pattern-editor-8x8-checkerboard-v3.0.0.jpg)
 
 ## Placement modes
 
@@ -171,6 +182,9 @@ greyed when they don't apply:
 - **Place in air** (every placing mode, on by default) — blocks with nothing next to them go
   straight into the air, no scaffolding needed (aim at the sky to drop one block at reach); turn
   it off for servers whose anti-cheat flags that.
+- **Only place inside markers** (every placing mode, off by default) — a click on the outside of
+  a box, ring, tube or start-to-end run places nothing, so a slip can't spread a blob over the
+  outside. Clicks away from markers paint as normal; the HUD shows a yellow reminder.
 - **Perp snap 45° | 90°** — Face perp runs and pattern planes.
 
 ## Markers
@@ -235,7 +249,24 @@ and editable. Painting that begins inside a shape stays inside it.
   selects like a real block face in every paint mode, so you can paint a shape's skin from the
   inside with no scaffolding.
 
-![A marker line bent into a square tube, with its handles, control nodes and floating buttons](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/marker-line-square-tube-controls-v2.4.0.jpg)
+![A line marker's tube with its cog toolbar open](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/marker-line-tube-cog-toolbar-v3.0.0.jpg)
+
+### Rendering: restyle a marker
+
+The **eye** on a box, ring or line toolbar swaps the buttons for that marker's look (the arrow
+goes back). The look is saved with the marker; **Reset** puts it back.
+
+- **Colour** — filled squares colour the faces, hollow squares the edge lines; click the lit one
+  again for the default.
+- **Opacity** — the two framed − / + pairs set face and edge opacity in 10% steps.
+- **Show as block** — pick any block from a filterable list and the marker is drawn with that
+  block's textures (as full cubes). A preview only: nothing is placed.
+- **Show when obscured** — whether faces and edge lines still show where real blocks are in
+  front of them (edges do by default, faces don't).
+
+![The Rendering page: face and edge colours, opacity pairs and the obscured toggles](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/marker-rendering-page-red-faces-line-tube-v3.0.0.jpg)
+
+![A line tube shown as Deepslate Emerald Ore](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/marker-line-tube-shown-as-emerald-ore-v3.0.0.jpg)
 
 ![The same tube filled with a rainbow gradient](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/marker-line-tube-gradient-fill-v2.4.0.jpg)
 
