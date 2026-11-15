@@ -577,6 +577,9 @@ public final class HelpPanel {
                         + "whole line; grab either anywhere and pull to turn the line about its "
                         + "centre. Hold {link} for 15-degree steps. The rings turn with the line "
                         + "and are remembered with it.",
+                    "To turn the line about some other direction, re-aim a ring first: hold the "
+                        + "axis-lock key (Alt) and drag a ring. Only that ring moves - it leans "
+                        + "about the other ring's axis and the line stays where it is.",
                     "A bare line (no shape) selects just the blocks it passes through.")),
                 t("Painting it", "Grow a fill inside the tube.", List.of(
                     "3D Fill inside the tube grows from where you aim - a block, or the green "

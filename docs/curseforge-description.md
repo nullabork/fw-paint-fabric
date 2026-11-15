@@ -247,6 +247,7 @@ and editable. Painting that begins inside a shape stays inside it.
   cube, the cog and a blue **rotate** cube ride together beside the line, sliding along it to
   stay a few blocks from where you stand, side by side. **Rotate** puts two rings round the
   whole line: grab either anywhere and pull to turn the line about its centre (Ctrl: 15° steps).
+  Alt+drag a ring tilts just that ring, so you can turn the line about any direction.
   Lines are edited in Line mode only; elsewhere they just show and keep constraining paint.
 - **Shape walls count as block faces** — inside a ring, box or tube, the wall within reach
   selects like a real block face in every paint mode, so you can paint a shape's skin from the

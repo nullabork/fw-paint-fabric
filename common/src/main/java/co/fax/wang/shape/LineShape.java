@@ -454,6 +454,17 @@ public final class LineShape {
         markDirty();
     }
 
+    /**
+     * Tilt one gimbal ring without touching the line: ring 0 (about {@link #gimbalY}) or ring 1
+     * (about {@link #gimbalX}) leans by {@code angle} about the OTHER ring's axis, from where
+     * {@code from} had it. The two axes stay at right angles, so with tilts and turns the rings can
+     * be set to turn the line about any direction.
+     */
+    public void tiltGimbalFrom(Pose from, int ring, double angle) {
+        if (ring == 0) gimbalY = LineCurve.turn(from.gimbalY(), from.gimbalX(), angle);
+        else gimbalX = LineCurve.turn(from.gimbalX(), from.gimbalY(), angle);
+    }
+
     /** World-space bounds of the line and its tube (for placing the toolbar): {min, max}. */
     public Vec3[] bounds() {
         double x0 = Double.MAX_VALUE, y0 = x0, z0 = x0, x1 = -x0, y1 = x1, z1 = x1;
