@@ -243,13 +243,18 @@ and editable. Painting that begins inside a shape stays inside it.
   node resizes it. One toolbar behind the cog sweeps a **circle, square, triangle or star** along
   the curve — Shell or Solid — picks the gradient direction (across from the side you aim in,
   along start → end, inside out, or outside in) and **Flip**s start and end. **3D Fill inside the
-  tube grows from the spot you aim at** (even mid-air) and stays inside it. Lines are edited in
-  Line mode only; elsewhere they just show and keep constraining paint.
+  tube grows from the spot you aim at** (even mid-air) and stays inside it. The white **move**
+  cube, the cog and a blue **rotate** cube ride together beside the line, sliding along it to
+  stay a few blocks from where you stand, side by side. **Rotate** puts two rings round the
+  whole line: grab either anywhere and pull to turn the line about its centre (Ctrl: 15° steps).
+  Lines are edited in Line mode only; elsewhere they just show and keep constraining paint.
 - **Shape walls count as block faces** — inside a ring, box or tube, the wall within reach
   selects like a real block face in every paint mode, so you can paint a shape's skin from the
   inside with no scaffolding.
 
 ![A line marker's tube with its cog toolbar open](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/marker-line-tube-cog-toolbar-v3.0.0.jpg)
+
+![Rotate mode: pulling a ring turns the whole line](https://raw.githubusercontent.com/nullabork/fw-paint-fabric/master/docs/images/marker-line-rotate-gimbal-ring-pulled-v3.0.1.jpg)
 
 ### Rendering: restyle a marker
 

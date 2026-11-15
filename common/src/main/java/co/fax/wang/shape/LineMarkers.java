@@ -31,8 +31,14 @@ import java.util.List;
  *       two ends and on the node last aimed at. Drag = that node, modifier+drag = every node,
  *       RMB = reset that node, modifier+RMB = reset all; modifier+scroll on a node grows / shrinks
  *       it.</li>
- *   <li>A white move cube and a grey cog sit beside the middle of the line; the cog opens the
- *       line's toolbar ({@link MarkerToolbar}): profile, shell / solid, gradient, flip, delete.</li>
+ *   <li>A white move cube, a grey cog and a blue rotate cube ride together beside the line. They
+ *       slide along it to stay a few blocks from where you stand and line up side by side across
+ *       your view (from your position, not where you look), so they are always in reach and never
+ *       hide each other. The cog opens the line's toolbar ({@link MarkerToolbar}): profile,
+ *       shell / solid, gradient, flip, delete.</li>
+ *   <li>The rotate cube turns rotate mode on and off: two rings (the gimbal, in axis colours)
+ *       go round the whole line; grab either anywhere and pull to turn the line about its
+ *       centre. The gimbal turns with the line and is saved with it.</li>
  * </ul>
  *
  * State lives here; {@link ShapeMarkers} decides each tick who owns the aim, forwards
@@ -64,7 +70,17 @@ public final class LineMarkers {
     private static final long DOUBLE_CLICK_MS = 350;
 
     /** What the crosshair is on; SIZE / TWIST carry their node's index. */
-    private enum Kind { NODE, HANDLE_IN, HANDLE_OUT, SIZE, TWIST, MOVE, COG, BODY }
+    private enum Kind { NODE, HANDLE_IN, HANDLE_OUT, SIZE, TWIST, MOVE, COG, ROTATE, GIMBAL, BODY }
+
+    /** The gimbal rings sit this far outside the line's furthest reach. */
+    private static final double RING_MARGIN = 1;
+    /** Added to a ring's aim distance, so every real control anywhere beats it. */
+    private static final double RING_BEHIND = 1e6;
+    /** Holding the modifier turns in steps of this (radians). */
+    private static final double TURN_STEP = Math.toRadians(15);
+    /** Gimbal ring colours: index 0 turns about the gimbal's Y axis, 1 about its X axis. */
+    private static final int[] RING_COLORS = {
+            Gizmo.axisColor(net.minecraft.core.Direction.Axis.Y), Gizmo.axisColor(net.minecraft.core.Direction.Axis.X)};
 
     private record Aim(LineShape line, Kind kind, int index, double dist) {}
 
@@ -106,6 +122,13 @@ public final class LineMarkers {
     /** The selected line's node last aimed at: its size + twist cubes stay out. -1 = none. */
     private static int selNode = -1;
     private static long frame;
+    /** The line in rotate mode (its gimbal rings are out), or null. */
+    private static LineShape rotating;
+    // A ring drag: the line as it was at the grab, and the ring being pulled.
+    private static LineShape.Pose turnPose;
+    private static Vec3 turnCentre, turnAxis;
+    private static double turnRadius, turnAngle0, turnBy;
+    private static long lastSlideNanos;
 
     // ---- queries ------------------------------------------------------------------------------
 
@@ -117,7 +140,14 @@ public final class LineMarkers {
     /** Ray distance to the aimed line control (0 while dragging), or +∞ when none. */
     static double controlDist() {
         if (dragLine != null) return 0;
-        return aimed != null && aimed.kind != Kind.BODY ? aimed.dist : Double.POSITIVE_INFINITY;
+        if (aimed == null || aimed.kind == Kind.BODY) return Double.POSITIVE_INFINITY;
+        // A gimbal ring is huge: it loses to any other marker's control, however far that is.
+        return aimed.kind == Kind.GIMBAL ? RING_BEHIND + aimed.dist : aimed.dist;
+    }
+
+    /** True while a gimbal ring (not being pulled) holds the aim: toolbar buttons win over it. */
+    static boolean ringAimed() {
+        return dragLine == null && aimed != null && aimed.kind == Kind.GIMBAL;
     }
 
     static boolean dragging() {
@@ -150,6 +180,17 @@ public final class LineMarkers {
         return pendingStart != null;
     }
 
+    /**
+     * Dev-only ({@link co.fax.wang.DebugScript}'s {@code aim ring K DEG}): the point {@code deg}
+     * degrees round gimbal ring {@code ring} of the line in rotate mode, or null when none is.
+     */
+    public static Vec3 debugRingPoint(int ring, double deg) {
+        if (rotating == null) return null;
+        Vec3[] uv = Gizmo.planeAxes(ringAxis(rotating, ring));
+        double a = Math.toRadians(deg), r = ringRadius(rotating);
+        return rotating.curve.centre().add(uv[0].scale(Math.cos(a) * r)).add(uv[1].scale(Math.sin(a) * r));
+    }
+
     /** Dev bench hook ({@code DebugRender}): add a line and select it, without saving. */
     public static void debugAdd(LineShape l) {
         lines.add(l);
@@ -167,6 +208,7 @@ public final class LineMarkers {
         pendingStart = null;
         aimed = null;
         dragLine = null;
+        rotating = null;
     }
 
     /** Delete a line (MMB, or the toolbar's bin). */
@@ -175,6 +217,7 @@ public final class LineMarkers {
         if (selected == l) selected = null;
         if (aimed != null && aimed.line == l) aimed = null;
         if (dragLine == l) dragLine = null;
+        if (rotating == l) rotating = null;
         MarkerText.say("Line removed");
         ShapeMarkers.saveLines();
     }
@@ -197,6 +240,9 @@ public final class LineMarkers {
             dragLine = null;
             return;
         }
+        // The move / cog / rotate cluster follows where you stand (held by a drag or open toolbar).
+        Vec3 eye = Raycast.eye(mc);
+        for (LineShape l : lines) l.aimControls(eye, dragLine == l || MarkerToolbar.isOpen(l));
         computeAim(mc);
         if (aimed != null && dragLine == null) {
             if (selected != aimed.line) selNode = -1;
@@ -279,6 +325,13 @@ public final class LineMarkers {
                             beginDrag(mc, aimed, false);
                         }
                     }
+                    case ROTATE -> {
+                        rotating = rotating == aimed.line ? null : aimed.line;
+                        MarkerText.say(rotating != null
+                                ? "Line rotate on — drag a ring to turn the line · " + MarkerText.mod() + " 15° steps"
+                                : "Line rotate off");
+                    }
+                    case GIMBAL -> beginTurn(mc, aimed);
                     default -> beginDrag(mc, aimed, false);
                 }
             } else if (aimed == null) {
@@ -299,7 +352,7 @@ public final class LineMarkers {
             MarkerText.say("Line cancelled");
             consumed = true;
         }
-        if (pickEdge && aimed != null && dragLine == null) {
+        if (pickEdge && aimed != null && dragLine == null && aimed.kind != Kind.GIMBAL) {
             consumed = true;
             LineShape l = aimed.line;
             int last = l.curve.nodes.size() - 1;
@@ -376,6 +429,7 @@ public final class LineMarkers {
             return true;
         }
         if (dragLine == null) return false;
+        if (dragKind == Kind.GIMBAL) return true; // a ring drag has no depth to push
         Vec3 anchor = controlPos(dragLine, dragKind, dragIndex);
         Vec3 away = anchor.subtract(Raycast.eye(mc));
         if (away.lengthSqr() < 1e-6) return true;
@@ -493,7 +547,7 @@ public final class LineMarkers {
                 "Help: how lines work", () -> Minecraft.getInstance()
                         .setScreenAndShow(co.fax.wang.GradientScreen.atHelpTopic("Marker line"))));
         Vec3[] b = l.bounds();
-        return new MarkerToolbar.Spec(null, rows, l.cogNode(), b[0], b[1], controlsOf(l));
+        return new MarkerToolbar.Spec(null, rows, cluster(l)[1], b[0], b[1], controlsOf(l));
     }
 
     private static void changed(LineShape l, String msg) {
@@ -513,8 +567,15 @@ public final class LineMarkers {
                 out.add(l.twistNode(i));
             }
         }
-        out.add(l.moveNode());
+        Vec3[] c = cluster(l);
+        out.add(c[0]);
+        out.add(c[2]);
         return out;
+    }
+
+    /** The line's {move, cog, rotate} cubes as seen from where the camera is now. */
+    private static Vec3[] cluster(LineShape l) {
+        return l.controls(Raycast.eye(Minecraft.getInstance()));
     }
 
     private static String cap(String s) {
@@ -546,6 +607,11 @@ public final class LineMarkers {
             case TWIST -> "Twist · drag turn · " + mod + "+drag all nodes · RMB reset · " + mod + "+RMB reset all";
             case MOVE -> "Move · drag move · " + alt + " axis lock · MMB delete line";
             case COG -> "Cog · LMB options · MMB delete line";
+            case ROTATE -> rotating == l ? "Rotate · on · LMB turn the rings off · MMB delete line"
+                    : "Rotate · LMB show the rings that turn the whole line · MMB delete line";
+            case GIMBAL -> dragLine == l
+                    ? "Rotate ring · turned " + Math.round(Math.toDegrees(turnBy)) + "° · " + mod + " 15° steps"
+                    : "Rotate ring · drag turn the whole line about its centre · " + mod + " 15° steps";
             case BODY -> "Line · dbl-click add a node · MMB delete line";
         };
     }
@@ -581,6 +647,10 @@ public final class LineMarkers {
      * it, but walking around the point does.
      */
     private static void applyDrag(Minecraft mc) {
+        if (dragKind == Kind.GIMBAL) {
+            applyTurn(mc);
+            return;
+        }
         if (dragRadial) {
             // The handle's length follows the point on its ray (from the node) nearest the view.
             LineCurve.Node n = dragLine.curve.nodes.get(dragIndex);
@@ -651,10 +721,51 @@ public final class LineMarkers {
                 if (Gradient.modifierDown()) l.setAllTwists(angle); // modifier: every node
                 else ns.get(dragIndex).tw = angle;
             }
-            case MOVE -> l.curve.translate(target.subtract(l.moveNode()));
+            case MOVE -> l.curve.translate(target.subtract(cluster(l)[0]));
             default -> { }
         }
         l.markDirty();
+    }
+
+    // ---- rotate (gimbal rings) ------------------------------------------------------------------
+
+    private static Vec3 ringAxis(LineShape l, int ring) {
+        return ring == 0 ? l.gimbalY : l.gimbalX;
+    }
+
+    private static double ringRadius(LineShape l) {
+        return l.reach() + RING_MARGIN;
+    }
+
+    /** Grab a gimbal ring: the line is remembered as it is, and turns from that until release. */
+    private static void beginTurn(Minecraft mc, Aim a) {
+        LineShape l = a.line;
+        turnCentre = l.curve.centre();
+        turnAxis = ringAxis(l, a.index);
+        turnRadius = ringRadius(l);
+        turnPose = l.pose();
+        turnAngle0 = Gizmo.rayCircle(Raycast.eye(mc), Raycast.look(mc), turnCentre, turnAxis, turnRadius)[2];
+        turnBy = 0;
+        dragLine = l;
+        dragKind = Kind.GIMBAL;
+        dragIndex = a.index;
+        dragRadial = false;
+        lockAxis = null;
+        ShapeMarkers.touch(l);
+    }
+
+    /**
+     * Follow the pull: the spot on the ring nearest the crosshair goes where the grabbed spot was,
+     * turning the line (and the other ring) about the grabbed ring's axis through the centre.
+     */
+    private static void applyTurn(Minecraft mc) {
+        double now = Gizmo.rayCircle(Raycast.eye(mc), Raycast.look(mc), turnCentre, turnAxis, turnRadius)[2];
+        double by = now - turnAngle0;
+        by -= 2 * Math.PI * Math.floor((by + Math.PI) / (2 * Math.PI)); // into -180° … 180°
+        if (Gradient.modifierDown()) by = Math.rint(by / TURN_STEP) * TURN_STEP;
+        if (by == turnBy) return;
+        turnBy = by;
+        dragLine.turnFrom(turnPose, turnCentre, turnAxis, by);
     }
 
     /**
@@ -713,7 +824,7 @@ public final class LineMarkers {
             case HANDLE_OUT -> handlePos(l, index, false);
             case SIZE -> l.sizeNode(index);
             case TWIST -> l.twistNode(index);
-            case MOVE -> l.moveNode();
+            case MOVE -> cluster(l)[0];
             default -> null;
         };
     }
@@ -783,10 +894,25 @@ public final class LineMarkers {
                         best = closer(best, l, Kind.TWIST, i, Gizmo.rayCube(eye, dir, l.twistNode(i), CTRL_HALF));
                     }
                 }
-                best = closer(best, l, Kind.MOVE, 0, Gizmo.rayCube(eye, dir, l.moveNode(), CTRL_HALF));
+                Vec3[] c = l.controls(eye);
+                best = closer(best, l, Kind.MOVE, 0, Gizmo.rayCube(eye, dir, c[0], CTRL_HALF));
+                best = closer(best, l, Kind.ROTATE, 0, Gizmo.rayCube(eye, dir, c[2], CTRL_HALF));
             }
             if (ShapeMarkers.cogShown(l)) {
-                best = closer(best, l, Kind.COG, 0, Gizmo.rayCube(eye, dir, l.cogNode(), CTRL_HALF));
+                best = closer(best, l, Kind.COG, 0, Gizmo.rayCube(eye, dir, l.controls(eye)[1], CTRL_HALF));
+            }
+        }
+        if (best == null && rotating != null && lines.contains(rotating)) {
+            // Rotate mode: its two rings, wherever the crosshair passes close to one (they are
+            // big, so every cube and node above wins over them).
+            Vec3 c = rotating.curve.centre();
+            double r = ringRadius(rotating), bestGap = Double.MAX_VALUE;
+            for (int ring = 0; ring < 2; ring++) {
+                double[] h = Gizmo.rayCircle(eye, dir, c, ringAxis(rotating, ring), r);
+                if (h[1] < Raycast.REACH && h[0] < Math.max(PICK, h[1] * 0.02) && h[0] < bestGap) {
+                    bestGap = h[0];
+                    best = new Aim(rotating, Kind.GIMBAL, ring, h[1]);
+                }
             }
         }
         if (best == null) {
@@ -864,8 +990,13 @@ public final class LineMarkers {
         Vec3[] axes = Gizmo.cameraAxes(mc);
         PoseStack ps = new PoseStack();
         LineShape lookedTube = handles ? tubeLookedInto(mc) : null;
+        long nowNanos = System.nanoTime();
+        double dt = Math.min(0.25, (nowNanos - lastSlideNanos) / 1e9);
+        lastSlideNanos = nowNanos;
+        Vec3 eye = Raycast.eye(mc);
         for (LineShape l : lines) {
             boolean editing = handles && pm == PlacementMode.MARKER_LINE;
+            if (editing) l.slideControls(dt);
             boolean sel = editing && l == selected;
             boolean cog = editing && ShapeMarkers.cogShown(l);
             l.ensureCells(false); // stale tubes rebuild in the background; the last one keeps drawing
@@ -877,7 +1008,9 @@ public final class LineMarkers {
                     l.style.ghost(looked ? TUBE_GHOST_SELECTED : TUBE_GHOST, !looked));
             // Twice: depth-tested (weaves through terrain), then a faint on-top ghost so the
             // line and its controls stay readable — and grabbable — behind blocks.
-            Gizmo.twoPass(col, ps, cam, e -> drawParts(e, l, sel, editing, cog, axes));
+            Vec3[] cluster = editing ? l.controls(eye) : null;
+            Gizmo.twoPass(col, ps, cam, e -> drawParts(e, l, sel, editing, cog, axes, cluster));
+            if (editing && l == rotating) drawGimbal(col, ps, cam, l);
         }
         if (dragLine != null && lockAxis != null && dragOrigin != null) {
             // Alt axis lock: the track the dragged node slides on, coloured by axis.
@@ -920,7 +1053,8 @@ public final class LineMarkers {
     }
 
     /** The curve, nodes, and (selected) handles + size/twist/move cubes into one pass. */
-    private static void drawParts(Gizmo.Em e, LineShape l, boolean sel, boolean editing, boolean cog, Vec3[] axes) {
+    private static void drawParts(Gizmo.Em e, LineShape l, boolean sel, boolean editing, boolean cog, Vec3[] axes,
+                                  Vec3[] cluster) {
         drawCurve(e, l.samples(), 0.035, sel ? LINE_SELECTED : LINE);
         if (!editing) return; // outside Line mode: just the line (and its tube)
         List<LineCurve.Node> ns = l.curve.nodes;
@@ -930,7 +1064,7 @@ public final class LineMarkers {
             boolean a = isAimed(l, Kind.NODE, i);
             Gizmo.cube(e, ns.get(i).p, a ? NODE_HALF * 1.3 : NODE_HALF, a ? Gizmo.AIMED : c);
         }
-        if (cog) Gizmo.cog(e, l.cogNode(), isAimed(l, Kind.COG, 0), axes);
+        if (cog) Gizmo.cog(e, cluster[1], isAimed(l, Kind.COG, 0), axes);
         if (!sel) return;
         for (int i = 0; i < ns.size(); i++) {
             for (boolean in : new boolean[]{true, false}) {
@@ -951,8 +1085,36 @@ public final class LineMarkers {
                         Gizmo.ROTATE_ICON, axes);
             }
         }
-        Gizmo.controlCube(e, l.moveNode(), CTRL_HALF, isAimed(l, Kind.MOVE, 0) ? Gizmo.AIMED : Gizmo.MOVE,
+        Gizmo.controlCube(e, cluster[0], CTRL_HALF, isAimed(l, Kind.MOVE, 0) ? Gizmo.AIMED : Gizmo.MOVE,
                 Gizmo.MOVE_ICON, axes);
+        // Rotate: lit (lighter) while its rings are out.
+        Gizmo.controlCube(e, cluster[2], CTRL_HALF, isAimed(l, Kind.ROTATE, 0) ? Gizmo.AIMED
+                : l == rotating ? Gizmo.lighten(Gizmo.TURN) : Gizmo.TURN, Gizmo.GIMBAL_ICON, axes);
+    }
+
+    /**
+     * Rotate mode's gimbal: two rings round the whole line, in their axis colours, white under
+     * the crosshair or while pulled; a pulled ring also shows a spoke to where it is held.
+     */
+    private static void drawGimbal(SubmitNodeCollector col, PoseStack ps, Vec3 cam, LineShape l) {
+        boolean turning = dragLine == l && dragKind == Kind.GIMBAL;
+        Vec3 c = turning ? turnCentre : l.curve.centre();
+        double r = turning ? turnRadius : ringRadius(l);
+        double w = 0.03 + r * 0.002;
+        Gizmo.twoPass(col, ps, cam, e -> {
+            for (int ring = 0; ring < 2; ring++) {
+                boolean lit = isAimed(l, Kind.GIMBAL, ring);
+                Gizmo.circle(e, c, ringAxis(l, ring), r, lit ? w * 1.6 : w, lit ? Gizmo.AIMED : RING_COLORS[ring]);
+            }
+            if (turning) {
+                Vec3[] uv = Gizmo.planeAxes(turnAxis);
+                double a = turnAngle0 + turnBy;
+                Vec3 held = c.add(uv[0].scale(Math.cos(a) * r)).add(uv[1].scale(Math.sin(a) * r));
+                Gizmo.segmentRibbon(e, c, held, w, Gizmo.AIMED);
+                Gizmo.cube(e, held, NODE_HALF, Gizmo.AIMED);
+            }
+            Gizmo.cube(e, c, NODE_HALF * 0.7, Gizmo.TURN);
+        });
     }
 
     private static boolean isAimed(LineShape l, Kind k, int i) {

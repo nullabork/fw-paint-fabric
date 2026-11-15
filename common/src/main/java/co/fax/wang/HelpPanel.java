@@ -570,7 +570,13 @@ public final class HelpPanel {
                     "Every node has its own size and twist, easing smoothly between nodes: the "
                         + "green (diagonal arrow) and blue (curved arrow) cubes show on both ends "
                         + "and on the node you aim at. Different sizes = a taper, like a tentacle.",
-                    "White cube (four arrows) beside the line: drag to move the whole thing.",
+                    "White cube (four arrows) beside the line: drag to move the whole thing. It "
+                        + "rides with the grey cog and the blue rotate cube: the three slide along "
+                        + "the line to stay a few blocks from where you stand, side by side.",
+                    "Blue cube (globe): LMB turns rotate mode on or off. Two rings go round the "
+                        + "whole line; grab either anywhere and pull to turn the line about its "
+                        + "centre. Hold {link} for 15-degree steps. The rings turn with the line "
+                        + "and are remembered with it.",
                     "A bare line (no shape) selects just the blocks it passes through.")),
                 t("Painting it", "Grow a fill inside the tube.", List.of(
                     "3D Fill inside the tube grows from where you aim - a block, or the green "

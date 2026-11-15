@@ -105,7 +105,20 @@ Performance (measured with `FWPAINT_PERF`, see `DebugRender`):
   independently — radius is interpolated along the line (tentacles).
 - **Twist nodes** at each end: drag around the end to rotate the profile there; the twist is
   interpolated between the ends.
-- **Move node** beside the middle of the line: drag to move the whole line (drag-plane rules).
+- **Move node** beside the line: drag to move the whole line (drag-plane rules).
+- **Control cluster**: the move node, the cog and the rotate node ride together beside the line.
+  They slide along it to stay 2.5–5.5 blocks from where the player stands (heading for 4), and
+  line up side by side across the player's view, level with the horizon. Both depend only on the
+  player's position, never on where they look, so the cluster holds still under the crosshair. A
+  drag or the line's open toolbar holds it in place.
+- **Rotate node** (blue, globe icon): LMB toggles rotate mode for that line. Two gimbal rings are
+  drawn round the whole line (radius = the line's furthest reach + 1), centred on the average of
+  its nodes: green turns about the gimbal's Y axis, red about its X axis; a ring goes white under
+  the crosshair. LMB-drag a ring anywhere along it to turn the line rigidly about that axis
+  through the centre — nodes, handles, tube profile (every node's twist is compensated) and the
+  gimbal's own axes, so the other ring turns too. The modifier snaps to 15°. The gimbal axes are
+  saved with the line (`gimbal` in the store). Rings lose the aim to every other control and to
+  toolbar buttons. Nodes are not re-snapped to the grid after a turn.
 
 ### Painting
 

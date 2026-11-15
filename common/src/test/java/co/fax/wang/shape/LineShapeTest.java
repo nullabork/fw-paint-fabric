@@ -351,4 +351,108 @@ class LineShapeTest {
         assertEquals(1, l.curve.nodes.get(1).r);
         assertEquals(0.5, l.curve.nodes.get(1).tw);
     }
+
+    private static LineShape bentTube() {
+        LineCurve c = new LineCurve(new Vec3(0.5, 10.5, 0.5), new Vec3(12.5, 14.5, 6.5));
+        c.nodes.get(0).out = new Vec3(4, 0, 1);
+        c.nodes.get(1).in = new Vec3(0, -3, -2);
+        c.nodes.get(0).tw = 0.3;
+        c.nodes.get(1).tw = 1.1;
+        LineShape l = new LineShape(c);
+        l.profile = LineProfile.SQUARE;
+        return l;
+    }
+
+    @Test
+    void turningALineCarriesItsProfileAndGimbalRigidly() {
+        LineShape l = bentTube();
+        Vec3 centre = l.curve.centre();
+        Vec3 axis = new Vec3(1, 2, -0.5).normalize();
+        double angle = 1.234;
+        List<LineCurve.Sample> before = List.copyOf(l.samples());
+        Vec3[][] frames = new Vec3[before.size()][];
+        for (int i = 0; i < frames.length; i++) frames[i] = l.rotatedFrame(i);
+        double reach = l.reach();
+
+        l.turnFrom(l.pose(), centre, axis, angle);
+
+        List<LineCurve.Sample> after = l.samples();
+        assertEquals(before.size(), after.size());
+        for (int i = 0; i < after.size(); i += 7) {
+            Vec3 want = centre.add(LineCurve.turn(before.get(i).pos().subtract(centre), axis, angle));
+            assertEquals(0, want.distanceTo(after.get(i).pos()), 1e-6, "sample " + i + " position");
+            // The profile's own axes (twist included) turn with the line: a square stays square-on.
+            assertEquals(0, LineCurve.turn(frames[i][0], axis, angle).distanceTo(l.rotatedFrame(i)[0]), 1e-6,
+                    "sample " + i + " profile");
+        }
+        assertEquals(0, centre.distanceTo(l.curve.centre()), 1e-9); // it turns about its middle
+        assertEquals(reach, l.reach(), 1e-6);
+        assertEquals(0, l.gimbalX.dot(l.gimbalY), 1e-9);
+        assertEquals(0, LineCurve.turn(new Vec3(1, 0, 0), axis, angle).distanceTo(l.gimbalX), 1e-9);
+    }
+
+    @Test
+    void turnedGimbalIsSavedWithTheLine() {
+        LineShape l = bentTube();
+        assertNull(ShapeStore.encodeLine(l).gimbal); // never turned: nothing extra in the save
+        l.turnFrom(l.pose(), l.curve.centre(), new Vec3(0, 1, 0), Math.PI / 2);
+        LineShape back = ShapeStore.decodeLine(ShapeStore.encodeLine(l));
+        assertEquals(0, l.gimbalX.distanceTo(back.gimbalX), 1e-12);
+        assertEquals(0, l.gimbalY.distanceTo(back.gimbalY), 1e-12);
+    }
+
+    @Test
+    void controlClusterStaysInReachAndSideBySide() {
+        LineShape l = straight(40); // along +X at y 10.5, z 0.5
+        Vec3 eye = new Vec3(30, 11, 3);
+        l.aimControls(eye, false);
+        Vec3[] c = l.controls(eye);
+        double d = c[1].distanceTo(eye);
+        assertTrue(d >= LineShape.CTRL_NEAR && d <= LineShape.CTRL_FAR, "cluster " + d + " from the eye");
+        // Side by side across the view: evenly spaced on a level line at right angles to eye -> cog.
+        Vec3 across = c[2].subtract(c[0]);
+        assertEquals(2 * LineShape.CTRL_SPACING, across.length(), 1e-9);
+        assertEquals(0, across.y, 1e-9);
+        assertEquals(0, across.dot(c[1].subtract(eye)), 1e-9);
+        // Standing still (or only looking around) never moves it.
+        Vec3 was = c[1];
+        l.aimControls(eye, false);
+        assertEquals(0, was.distanceTo(l.controls(eye)[1]), 1e-12);
+        // Walk well along the line: it comes after you.
+        Vec3 far = new Vec3(5, 11, 3);
+        l.aimControls(far, false);
+        l.slideControls(10);
+        double d2 = l.controls(far)[1].distanceTo(far);
+        assertTrue(d2 >= LineShape.CTRL_NEAR && d2 <= LineShape.CTRL_FAR, "cluster " + d2 + " after walking");
+    }
+
+    @Test
+    void rayCircleFindsTheGrabbedAngleFaceOnAndEdgeOn() {
+        Vec3 c = new Vec3(0, 0, 0), axis = new Vec3(0, 1, 0);
+        Vec3[] uv = Gizmo.planeAxes(axis);
+        double a = 0.9, r = 5;
+        Vec3 on = uv[0].scale(Math.cos(a) * r).add(uv[1].scale(Math.sin(a) * r));
+        for (Vec3 eye : new Vec3[]{new Vec3(0, 20, 0), new Vec3(30, 0.001, 4)}) {
+            double[] h = Gizmo.rayCircle(eye, on.subtract(eye).normalize(), c, axis, r);
+            assertEquals(0, h[0], 0.01); // the ring is a 64-gon
+            assertEquals(a, h[2], 1e-3);
+        }
+    }
+
+    @Test
+    void controlClusterHoldsStillWhenNoSpotIsInRange() {
+        // The whole line is further than CTRL_FAR, then nearer than CTRL_NEAR: standing still must
+        // not move the cluster from call to call (it used to hop from side to side of you).
+        for (Vec3 eye : new Vec3[]{new Vec3(20, 30, 14), new Vec3(20.3, 9.6, 0.5)}) {
+            LineShape l = straight(40);
+            l.aimControls(eye, false);
+            l.slideControls(10);
+            Vec3 was = l.controls(eye)[1];
+            for (int k = 0; k < 6; k++) {
+                l.aimControls(eye, false);
+                l.slideControls(10);
+                assertEquals(0, was.distanceTo(l.controls(eye)[1]), 1e-12, "moved on call " + k + " at " + eye);
+            }
+        }
+    }
 }

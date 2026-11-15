@@ -56,6 +56,15 @@ public final class Segmented {
         Ui.outline(g, x, y, w, h, enabled ? Ui.BORDER : Ui.LINE);
     }
 
+    /** The choice under the mouse, or -1 when it is off the switch (help popups describe that one). */
+    public int cellAt(double mx, double my) {
+        if (!Ui.inside(mx, my, x, y, w, h)) return -1;
+        for (int i = 0; i < labels.size(); i++) {
+            if (mx < cellX(i + 1)) return i;
+        }
+        return labels.size() - 1;
+    }
+
     /** True when the click landed on the switch (picking a choice, or the one already chosen). */
     public boolean click(double mx, double my) {
         if (!enabled || !Ui.inside(mx, my, x, y, w, h)) return false;

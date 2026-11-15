@@ -60,6 +60,10 @@ final class Gizmo {
     static final String[] COG_ICON = {
             "..X.X..", ".XXXXX.", "XXX.XXX", ".X...X.", "XXX.XXX", ".XXXXX.", "..X.X.."};
 
+    /** The rotate-mode cube: a gimbal (a ring with its two crossing axes). */
+    static final String[] GIMBAL_ICON = {
+            "..XXX..", ".X.X.X.", "X..X..X", "XXXXXXX", "X..X..X", ".X.X.X.", "..XXX.."};
+
     /** Size of the small control cubes (size / twist / move / cog), half-extent in blocks. */
     static final double CTRL_HALF = 0.25;
 
@@ -123,6 +127,54 @@ final class Gizmo {
         Vec3 e2 = d.cross(e1).normalize().scale(w);
         quad(e, argb, a.subtract(e1), b.subtract(e1), b.add(e1), a.add(e1));
         quad(e, argb, a.subtract(e2), b.subtract(e2), b.add(e2), a.add(e2));
+    }
+
+    /** Unit vectors {u, v} spanning the plane at right angles to the unit {@code axis}. */
+    static Vec3[] planeAxes(Vec3 axis) {
+        Vec3 u = axis.cross(Math.abs(axis.y) > 0.9 ? new Vec3(1, 0, 0) : new Vec3(0, 1, 0)).normalize();
+        return new Vec3[]{u, axis.cross(u).normalize()};
+    }
+
+    /** A circle of ribbons, radius {@code r} about {@code c}, in the plane at right angles to {@code axis}. */
+    static void circle(Em e, Vec3 c, Vec3 axis, double r, double w, int argb) {
+        Vec3[] uv = planeAxes(axis);
+        int n = CIRCLE_SEGMENTS;
+        Vec3 prev = c.add(uv[0].scale(r));
+        for (int i = 1; i <= n; i++) {
+            double a = 2 * Math.PI * i / n;
+            Vec3 p = c.add(uv[0].scale(Math.cos(a) * r)).add(uv[1].scale(Math.sin(a) * r));
+            segmentRibbon(e, prev, p, w, argb);
+            prev = p;
+        }
+    }
+
+    static final int CIRCLE_SEGMENTS = 64;
+
+    /**
+     * Where the view ray passes closest to that circle: {gap between ray and circle, distance
+     * along the ray, angle round the circle (radians, from {@link #planeAxes}' u toward v)}.
+     * Works edge-on as well as face-on, so a ring can be grabbed and pulled from any side.
+     */
+    static double[] rayCircle(Vec3 o, Vec3 d, Vec3 c, Vec3 axis, double r) {
+        Vec3[] uv = planeAxes(axis);
+        int n = CIRCLE_SEGMENTS;
+        double bestGap = Double.MAX_VALUE, bestT = 0, bestAngle = 0;
+        Vec3 prev = c.add(uv[0].scale(r));
+        for (int i = 1; i <= n; i++) {
+            double a = 2 * Math.PI * i / n;
+            Vec3 p = c.add(uv[0].scale(Math.cos(a) * r)).add(uv[1].scale(Math.sin(a) * r));
+            double[] st = LineCurve.segmentRayClosest(prev, p, o, d);
+            Vec3 on = prev.add(p.subtract(prev).scale(st[0]));
+            double gap = on.distanceTo(o.add(d.scale(st[1])));
+            if (gap < bestGap) {
+                bestGap = gap;
+                bestT = st[1];
+                Vec3 rel = on.subtract(c);
+                bestAngle = Math.atan2(rel.dot(uv[1]), rel.dot(uv[0]));
+            }
+            prev = p;
+        }
+        return new double[]{bestGap, bestT, bestAngle};
     }
 
     /** A dashed ribbon a→b: {@code dash}-long pieces with {@code gap} between them. */

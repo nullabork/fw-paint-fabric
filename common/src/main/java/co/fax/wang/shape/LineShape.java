@@ -29,6 +29,12 @@ public final class LineShape {
     public LineGradient gradient = LineGradient.ACROSS;
     /** How this line's tube is drawn (its toolbar's Rendering page). */
     public MarkerStyle style = new MarkerStyle();
+    /**
+     * The rotate gimbal's two ring axes (unit, at right angles): the rings are drawn round these
+     * and dragging one turns the line about it. They turn with the line, so the gimbal stays
+     * relative to the shape, and are saved with it.
+     */
+    public Vec3 gimbalX = new Vec3(1, 0, 0), gimbalY = new Vec3(0, 1, 0);
     /** A new tube's radius (and what right-clicking a size cube resets to). */
     public static final double DEFAULT_RADIUS = LineCurve.DEFAULT_RADIUS;
     /** Size-cube drags keep a node's radius within this. */
@@ -307,18 +313,145 @@ public final class LineShape {
         return samples().get(i).pos().add(rotatedFrame(i)[1].scale(curve.nodes.get(node).r + 0.5));
     }
 
-    /** Move node: beside the middle of the line, clear of the tube. */
-    public Vec3 moveNode() {
-        List<LineCurve.Sample> ss = samples();
-        int i = ss.size() / 2;
+    // The move / cog / rotate cubes ride together beside the line. They slide along it to stay
+    // within easy reach of where you stand, and line up side by side across your view — both
+    // from your POSITION only, never from where you look, so they hold still under the crosshair.
+
+    /** The cluster keeps between these distances of the eye; outside them it slides to IDEAL. */
+    static final double CTRL_NEAR = 2.5, CTRL_FAR = 5.5, CTRL_IDEAL = 4;
+    /** A new spot must be at least this much nearer to CTRL_IDEAL than the current one to move there. */
+    static final double CTRL_GAIN = 0.3;
+    /** Centre-to-centre spacing of the three cubes. */
+    static final double CTRL_SPACING = 0.8;
+    /** Where the cluster is along the line and where it is heading, in sample-index units; -1 = unplaced. */
+    private double ctrlAt = -1, ctrlGoal = -1;
+
+    /** Beside sample {@code i}, clear of the tube. */
+    private Vec3 besideSample(int i) {
         double r = profile == LineProfile.NONE ? 0 : radiusAt(i) + 0.5;
-        return ss.get(i).pos().add(rotatedFrame(i)[0].scale(-(r + 1.5)));
+        return samples().get(i).pos().add(rotatedFrame(i)[0].scale(-(r + 1.5)));
     }
 
-    /** Cog (options) cube: just past the move node along the line, so the two sit together. */
-    public Vec3 cogNode() {
+    private Vec3 besideAt(double at) {
+        int last = samples().size() - 1;
+        at = Math.max(0, Math.min(last, at));
+        int i = (int) Math.floor(at), j = Math.min(last, i + 1);
+        return i == j ? besideSample(i) : LineCurve.lerp(besideSample(i), besideSample(j), at - i);
+    }
+
+    /**
+     * Choose where the cluster should sit for someone standing at {@code eye}: it stays where it
+     * is while that is between CTRL_NEAR and CTRL_FAR away, else it heads for the spot along the
+     * line that is CTRL_IDEAL away (or the nearest spot, when the whole line is further). Walking
+     * up to it pushes it on ahead; walking off past it brings it round to your other side.
+     * {@code hold} keeps the goal (a drag or an open toolbar is using the cluster).
+     */
+    public void aimControls(Vec3 eye, boolean hold) {
+        int n = samples().size();
+        if (n == 0) return;
+        if (ctrlGoal >= 0 && ctrlGoal <= n - 1) {
+            if (hold) return;
+            double d = besideAt(ctrlGoal).distanceTo(eye);
+            if (d >= CTRL_NEAR && d <= CTRL_FAR) return;
+        }
+        int cur = ctrlGoal < 0 ? n / 2 : (int) Math.round(Math.min(n - 1, ctrlGoal));
+        boolean tooNear = ctrlGoal >= 0 && besideAt(cur).distanceTo(eye) < CTRL_NEAR;
+        int nearest = 0;
+        double nearestD = Double.MAX_VALUE;
+        double[] dist = new double[n];
+        for (int i = 0; i < n; i++) {
+            dist[i] = besideSample(i).distanceTo(eye);
+            if (dist[i] < nearestD) {
+                nearestD = dist[i];
+                nearest = i;
+            }
+        }
+        // Too near: stay on the side it is on. Too far: prefer the other side of you (ahead).
+        boolean wantAfter = tooNear == (cur >= nearest);
+        int best = cur;
+        double bestScore = Double.MAX_VALUE;
+        for (int i = 0; i < n; i++) {
+            double score = Math.abs(dist[i] - CTRL_IDEAL) + ((i >= nearest) == wantAfter ? 0 : 0.75)
+                    + Math.abs(i - cur) * 1e-4;
+            if (score < bestScore) {
+                bestScore = score;
+                best = i;
+            }
+        }
+        // Only move for a real gain. When no spot along the line is in range (it is all too far,
+        // or all too near) the side preference above would otherwise pick the other side of you
+        // on every call, and the cluster would jiggle between two spots while you stand still.
+        if (ctrlGoal >= 0 && Math.abs(dist[cur] - CTRL_IDEAL) <= Math.abs(dist[best] - CTRL_IDEAL) + CTRL_GAIN) return;
+        ctrlGoal = best;
+        if (ctrlAt < 0) ctrlAt = best;
+    }
+
+    /** Slide the cluster toward its goal ({@code dt} seconds since the last call). */
+    public void slideControls(double dt) {
+        if (ctrlGoal < 0) return;
+        int last = samples().size() - 1;
+        ctrlGoal = Math.min(last, ctrlGoal);
+        if (ctrlAt < 0) ctrlAt = ctrlGoal;
+        ctrlAt = Math.min(last, ctrlAt);
+        double gap = ctrlGoal - ctrlAt;
+        ctrlAt = Math.abs(gap) < 0.05 ? ctrlGoal : ctrlAt + gap * (1 - Math.exp(-Math.max(0, dt) * 10));
+    }
+
+    /**
+     * The move, cog and rotate cubes for someone standing at {@code eye}: {move, cog, rotate},
+     * side by side across their view (level with the horizon), so no one hides another.
+     */
+    public Vec3[] controls(Vec3 eye) {
+        if (ctrlAt < 0) aimControls(eye, false);
+        Vec3 c = besideAt(Math.max(0, ctrlAt));
+        Vec3 f = c.subtract(eye);
+        Vec3 right = new Vec3(-f.z, 0, f.x); // f × up
+        right = right.lengthSqr() < 1e-6 ? new Vec3(1, 0, 0) : right.normalize();
+        return new Vec3[]{c.subtract(right.scale(CTRL_SPACING)), c, c.add(right.scale(CTRL_SPACING))};
+    }
+
+    // ---- rotation ---------------------------------------------------------------------------
+
+    /** How far the line and its tube reach from {@link LineCurve#centre()} (the gimbal's radius). */
+    public double reach() {
+        Vec3 c = curve.centre();
+        double best = 0;
         List<LineCurve.Sample> ss = samples();
-        return moveNode().add(ss.get(ss.size() / 2).tan().scale(0.8));
+        for (int i = 0; i < ss.size(); i++) {
+            double r = profile == LineProfile.NONE ? 0 : radiusAt(i) + 0.5;
+            best = Math.max(best, ss.get(i).pos().distanceTo(c) + r);
+        }
+        return best;
+    }
+
+    /** What a turn starts from: the curve, the first frame's normal, and the gimbal, as they were. */
+    public record Pose(LineCurve curve, Vec3 n0, Vec3 gimbalX, Vec3 gimbalY) {}
+
+    public Pose pose() {
+        List<LineCurve.Sample> ss = samples();
+        return new Pose(curve.copy(), ss.isEmpty() ? new Vec3(0, 1, 0) : ss.get(0).n(), gimbalX, gimbalY);
+    }
+
+    /**
+     * Make this line {@code from} turned by {@code angle} about {@code axis} through
+     * {@code centre} — the whole thing rigidly: curve, tube profile and gimbal. The curve's frames
+     * start from world-up, not from the line, so a turned curve alone would leave a square or
+     * star profile facing the old way; every node's twist takes up the difference.
+     */
+    public void turnFrom(Pose from, Vec3 centre, Vec3 axis, double angle) {
+        curve.setTurned(from.curve(), centre, axis, angle);
+        gimbalX = LineCurve.turn(from.gimbalX(), axis, angle);
+        gimbalY = LineCurve.turn(from.gimbalY(), axis, angle);
+        markDirty();
+        List<LineCurve.Sample> ss = samples();
+        if (!ss.isEmpty()) {
+            Vec3 want = LineCurve.turn(from.n0(), axis, angle);
+            double fix = Math.atan2(want.dot(ss.get(0).b()), want.dot(ss.get(0).n()));
+            for (int i = 0; i < curve.nodes.size() && i < from.curve().nodes.size(); i++) {
+                curve.nodes.get(i).tw = from.curve().nodes.get(i).tw + fix;
+            }
+        }
+        markDirty();
     }
 
     /** World-space bounds of the line and its tube (for placing the toolbar): {min, max}. */

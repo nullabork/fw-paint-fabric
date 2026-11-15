@@ -168,14 +168,17 @@ public class PaletteEditScreen extends Screen {
     private int cylD, cylH;
 
     // Help popups: one circled-? per section heading (clicking it shows the help instantly), plus
-    // icon-less spots over the switches that describe their CURRENT state after a hover. Popups
-    // only live while the mouse stays over the spot. Texts are suppliers so they stay current.
+    // icon-less spots over the switches that describe the choice UNDER THE MOUSE after a hover
+    // (not the one that is on). Popups only live while the mouse stays over the spot. Texts are
+    // suppliers so they stay current.
     private record HelpSpot(int x, int baseY, int w, int h,
                             Supplier<String> text, boolean icon) {}
     private final List<HelpSpot> helpSpots = new ArrayList<>();
     private HelpSpot clickedSpot;
     private HelpSpot hoverSpot;
     private long hoverSince;
+    /** Where the mouse was when the help popup was last laid out (switch spots read it). */
+    private int helpMx, helpMy;
 
     // Discard-confirm modal (unsaved changes).
     private Screen pendingExit;
@@ -336,7 +339,7 @@ public class PaletteEditScreen extends Screen {
             sortSegments(ORDERS[i]);
             resetPreview();
         });
-        helpSpots.add(new HelpSpot(rx, y + 10, rw, Ui.ROW_H, this::orderStateText, false));
+        switchHelp(orderSeg, rx, y + 10, rw, i -> orderText(i < 0 ? PaletteOrder.CUSTOM : ORDERS[i]));
         y += 10 + Ui.ROW_H + 6;
         captions.add(new Caption(rx, y, rw, () -> "Curve",
                 () -> editing.curve == CurveFunction.CUSTOM ? "Custom · dragged stops" : "", false));
@@ -346,7 +349,7 @@ public class PaletteEditScreen extends Screen {
             dirty = true;
             resetPreview();
         });
-        helpSpots.add(new HelpSpot(rx, y + 10, rw, Ui.ROW_H, this::curveStateText, false));
+        switchHelp(curveSeg, rx, y + 10, rw, i -> curveText(i < 0 ? CurveFunction.CUSTOM : CURVES[i]));
         y += 10 + Ui.ROW_H + 6;
         captions.add(new Caption(rx, y, rw, () -> "Sizing", null, false));
         sizingSeg = seg(fit(rw, List.of("Min blocks", "Fill space", "Set steps"), List.of("Min", "Fill", "Steps")),
@@ -355,11 +358,11 @@ public class PaletteEditScreen extends Screen {
             dirty = true;
             rebuildWidgets(); // the Steps slider shows/hides
         });
-        helpSpots.add(new HelpSpot(rx, y + 10, rw, Ui.ROW_H, () -> switch (editing.sizing) {
+        switchHelp(sizingSeg, rx, y + 10, rw, i -> switch (SizingMode.values()[Math.max(0, i)]) {
             case MIN_BLOCKS -> "Min blocks: the shortest run that fits the segment ratios";
             case FILL_SPACE -> "Fill space: expands out to the end marker or first block";
             case SET_STEPS -> "Set steps: a fixed length (the Steps slider below)";
-        }, false));
+        });
         y += 10 + Ui.ROW_H + 6;
         if (editing.sizing == SizingMode.SET_STEPS) {
             y = addSlider(rx, y, rw, (editing.steps - 1) / 15.0,
@@ -410,11 +413,11 @@ public class PaletteEditScreen extends Screen {
                 editing.noiseType = NoiseType.values()[i];
                 dirty = true;
             });
-            helpSpots.add(new HelpSpot(rx, y + 10, rw, Ui.ROW_H, () -> switch (editing.noiseType) {
+            switchHelp(noiseTypeSeg, rx, y + 10, rw, i -> switch (NoiseType.values()[Math.max(0, i)]) {
                 case SMOOTH -> "Smooth noise: soft rounded blobs";
                 case PERLIN -> "Perlin noise: natural ridged shapes";
                 case FRACTAL -> "Fractal noise: layered detail";
-            }, false));
+            });
             y += 10 + Ui.ROW_H + 6;
             Toggle lock = new Toggle("Lock XYZ", null, false, () -> editing.noiseLock, on -> {
                 editing.noiseLock = on;
@@ -493,6 +496,19 @@ public class PaletteEditScreen extends Screen {
         return full;
     }
 
+    /**
+     * A switch's hover help: {@code text} describes the choice the mouse is on (its index), so
+     * hovering a choice that is off explains that one, not the one that is on. Off the cells (the
+     * margin beside the switch) it describes the chosen one; -1 = none chosen.
+     */
+    private void switchHelp(Segmented s, int x, int baseY, int w, java.util.function.IntFunction<String> text) {
+        helpSpots.add(new HelpSpot(x, baseY, w, Ui.ROW_H, () -> {
+            int cell = s.cellAt(helpMx, helpMy);
+            boolean on = cell < 0 || cell == s.selected();
+            return text.apply(cell < 0 ? s.selected() : cell) + (on ? "" : " · LMB switch to it");
+        }, false));
+    }
+
     /** A section's one circled-? at the right end of its heading line. */
     private void sectionHelp(int x, int w, int headingY, Supplier<String> text) {
         helpSpots.add(new HelpSpot(x + w - 12, headingY - 5, 0, 14, text, true));
@@ -512,18 +528,18 @@ public class PaletteEditScreen extends Screen {
 
     private static String pct(double v) { return Math.round(v * 100) + "%"; }
 
-    private String orderStateText() {
-        return switch (editing.order) {
-            case COLOR_ASC -> "Sorted by colour, ascending";
-            case COLOR_DESC -> "Sorted by colour, descending";
-            case BRIGHTNESS_ASC -> "Sorted by brightness, ascending";
-            case BRIGHTNESS_DESC -> "Sorted by brightness, descending";
+    private static String orderText(PaletteOrder o) {
+        return switch (o) {
+            case COLOR_ASC -> "Colour ↑: sort the strip by colour, ascending";
+            case COLOR_DESC -> "Colour ↓: sort the strip by colour, descending";
+            case BRIGHTNESS_ASC -> "Bright ↑: sort the strip by brightness, ascending";
+            case BRIGHTNESS_DESC -> "Bright ↓: sort the strip by brightness, descending";
             case CUSTOM -> "Custom order — arranged by hand. Pick a sort to re-sort the strip";
         };
     }
 
-    private String curveStateText() {
-        return switch (editing.curve) {
+    private static String curveText(CurveFunction c) {
+        return switch (c) {
             case LINEAR -> "Linear: even change end to end";
             case EASE_IN -> "Ease in: holds the start colour longer";
             case EASE_OUT -> "Ease out: reaches the end colour sooner";
@@ -1980,6 +1996,8 @@ public class PaletteEditScreen extends Screen {
         if (clickedSpot != null && over != clickedSpot) clickedSpot = null;
         if (over == null) return;
         if (over != clickedSpot && System.currentTimeMillis() - hoverSince < 1000) return;
+        helpMx = mouseX;
+        helpMy = mouseY;
         String text = over.text().get();
         double px = mouseX, py = mouseY;
         List<String> lines = wrap(text, 150);
