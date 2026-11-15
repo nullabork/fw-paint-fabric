@@ -116,7 +116,11 @@ Performance (measured with `FWPAINT_PERF`, see `DebugRender`):
   its nodes: green turns about the gimbal's Y axis, red about its X axis; a ring goes white under
   the crosshair. LMB-drag a ring anywhere along it to turn the line rigidly about that axis
   through the centre — nodes, handles, tube profile (every node's twist is compensated) and the
-  gimbal's own axes, so the other ring turns too. The modifier snaps to 15°. The gimbal axes are
+  gimbal's own axes, so the other ring turns too. With axis lock (Alt) held at the grab the drag
+  is a **tilt** instead: only the grabbed ring's axis turns, about the other ring's axis, and the
+  line is untouched (`LineShape.tiltGimbalFrom`), so a ring's plane can be re-aimed to any
+  direction; the two axes stay at right angles. The pull is read against the circle the grabbed
+  spot travels on about the turn axis. The modifier snaps to 15°. The gimbal axes are
   saved with the line (`gimbal` in the store). Rings lose the aim to every other control and to
   toolbar buttons. Nodes are not re-snapped to the grid after a turn.
 

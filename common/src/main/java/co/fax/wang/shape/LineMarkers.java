@@ -128,6 +128,11 @@ public final class LineMarkers {
     private static LineShape.Pose turnPose;
     private static Vec3 turnCentre, turnAxis;
     private static double turnRadius, turnAngle0, turnBy;
+    /** Axis lock was down at the grab: the ring itself leans about the other ring's axis, the line stays. */
+    private static boolean turnTilt;
+    /** The grabbed spot (from the centre), and the circle it travels on, which the pull is read against. */
+    private static Vec3 turnGrab, turnOn;
+    private static double turnOnRadius;
     private static long lastSlideNanos;
 
     // ---- queries ------------------------------------------------------------------------------
@@ -609,9 +614,11 @@ public final class LineMarkers {
             case COG -> "Cog · LMB options · MMB delete line";
             case ROTATE -> rotating == l ? "Rotate · on · LMB turn the rings off · MMB delete line"
                     : "Rotate · LMB show the rings that turn the whole line · MMB delete line";
-            case GIMBAL -> dragLine == l
-                    ? "Rotate ring · turned " + Math.round(Math.toDegrees(turnBy)) + "° · " + mod + " 15° steps"
-                    : "Rotate ring · drag turn the whole line about its centre · " + mod + " 15° steps";
+            case GIMBAL -> dragLine != l
+                    ? "Rotate ring · drag turn the whole line · " + alt
+                            + "+drag tilt this ring only · " + mod + " 15° steps"
+                    : (turnTilt ? "Rotate ring · tilted " : "Rotate ring · turned ")
+                            + Math.round(Math.toDegrees(turnBy)) + "° · " + mod + " 15° steps";
             case BODY -> "Line · dbl-click add a node · MMB delete line";
         };
     }
@@ -737,14 +744,31 @@ public final class LineMarkers {
         return l.reach() + RING_MARGIN;
     }
 
-    /** Grab a gimbal ring: the line is remembered as it is, and turns from that until release. */
+    /**
+     * Grab a gimbal ring: the line is remembered as it is, and turns from that until release. With
+     * axis lock held at the grab it is a tilt instead: the grabbed ring leans about the OTHER
+     * ring's axis and the line stays put, which is how a ring's plane is re-aimed.
+     */
     private static void beginTurn(Minecraft mc, Aim a) {
         LineShape l = a.line;
+        Vec3 eye = Raycast.eye(mc), look = Raycast.look(mc), ringAxis = ringAxis(l, a.index);
         turnCentre = l.curve.centre();
-        turnAxis = ringAxis(l, a.index);
         turnRadius = ringRadius(l);
         turnPose = l.pose();
-        turnAngle0 = Gizmo.rayCircle(Raycast.eye(mc), Raycast.look(mc), turnCentre, turnAxis, turnRadius)[2];
+        turnTilt = Gradient.axisLockDown();
+        turnAxis = turnTilt ? ringAxis(l, 1 - a.index) : ringAxis;
+        double at = Gizmo.rayCircle(eye, look, turnCentre, ringAxis, turnRadius)[2];
+        Vec3[] uv = Gizmo.planeAxes(ringAxis);
+        turnGrab = uv[0].scale(Math.cos(at) * turnRadius).add(uv[1].scale(Math.sin(at) * turnRadius));
+        // The pull is read against the circle the grabbed spot travels on about the turn axis. For
+        // a plain turn that is the ring itself; for a tilt it is a parallel of the other ring. A
+        // spot grabbed near that axis barely travels, so there the full-size circle is used.
+        double along = turnGrab.dot(turnAxis);
+        Vec3 out = turnGrab.subtract(turnAxis.scale(along));
+        boolean small = out.length() < turnRadius * 0.15;
+        turnOn = small ? turnCentre : turnCentre.add(turnAxis.scale(along));
+        turnOnRadius = small ? turnRadius : out.length();
+        turnAngle0 = Gizmo.rayCircle(eye, look, turnOn, turnAxis, turnOnRadius)[2];
         turnBy = 0;
         dragLine = l;
         dragKind = Kind.GIMBAL;
@@ -756,16 +780,18 @@ public final class LineMarkers {
 
     /**
      * Follow the pull: the spot on the ring nearest the crosshair goes where the grabbed spot was,
-     * turning the line (and the other ring) about the grabbed ring's axis through the centre.
+     * turning the line (and the other ring) about the grabbed ring's axis through the centre, or,
+     * for a tilt, leaning just the grabbed ring about the other ring's axis.
      */
     private static void applyTurn(Minecraft mc) {
-        double now = Gizmo.rayCircle(Raycast.eye(mc), Raycast.look(mc), turnCentre, turnAxis, turnRadius)[2];
+        double now = Gizmo.rayCircle(Raycast.eye(mc), Raycast.look(mc), turnOn, turnAxis, turnOnRadius)[2];
         double by = now - turnAngle0;
         by -= 2 * Math.PI * Math.floor((by + Math.PI) / (2 * Math.PI)); // into -180° … 180°
         if (Gradient.modifierDown()) by = Math.rint(by / TURN_STEP) * TURN_STEP;
         if (by == turnBy) return;
         turnBy = by;
-        dragLine.turnFrom(turnPose, turnCentre, turnAxis, by);
+        if (turnTilt) dragLine.tiltGimbalFrom(turnPose, dragIndex, by);
+        else dragLine.turnFrom(turnPose, turnCentre, turnAxis, by);
     }
 
     /**
@@ -1107,9 +1133,7 @@ public final class LineMarkers {
                 Gizmo.circle(e, c, ringAxis(l, ring), r, lit ? w * 1.6 : w, lit ? Gizmo.AIMED : RING_COLORS[ring]);
             }
             if (turning) {
-                Vec3[] uv = Gizmo.planeAxes(turnAxis);
-                double a = turnAngle0 + turnBy;
-                Vec3 held = c.add(uv[0].scale(Math.cos(a) * r)).add(uv[1].scale(Math.sin(a) * r));
+                Vec3 held = c.add(LineCurve.turn(turnGrab, turnAxis, turnBy));
                 Gizmo.segmentRibbon(e, c, held, w, Gizmo.AIMED);
                 Gizmo.cube(e, held, NODE_HALF, Gizmo.AIMED);
             }

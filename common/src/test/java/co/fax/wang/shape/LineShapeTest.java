@@ -392,6 +392,26 @@ class LineShapeTest {
     }
 
     @Test
+    void tiltingARingLeavesTheLineAndTheOtherRingAlone() {
+        LineShape l = bentTube();
+        LineShape.Pose from = l.pose();
+        Vec3 first = l.curve.nodes.get(0).p;
+        double tw = l.curve.nodes.get(0).tw;
+        l.tiltGimbalFrom(from, 0, Math.toRadians(30));
+        assertEquals(0, first.distanceTo(l.curve.nodes.get(0).p), 0); // the line has not moved
+        assertEquals(tw, l.curve.nodes.get(0).tw, 0);
+        assertEquals(0, l.gimbalX.distanceTo(from.gimbalX()), 0); // the other ring's axis holds
+        assertEquals(Math.cos(Math.toRadians(30)), l.gimbalY.dot(from.gimbalY()), 1e-9);
+        assertEquals(0, l.gimbalX.dot(l.gimbalY), 1e-9); // still at right angles
+        l.tiltGimbalFrom(l.pose(), 1, Math.toRadians(50));
+        assertEquals(0, l.gimbalX.dot(l.gimbalY), 1e-9);
+        assertEquals(1, l.gimbalX.length(), 1e-9);
+        LineShape back = ShapeStore.decodeLine(ShapeStore.encodeLine(l)); // a tilt alone is saved
+        assertEquals(0, l.gimbalX.distanceTo(back.gimbalX), 1e-12);
+        assertEquals(0, l.gimbalY.distanceTo(back.gimbalY), 1e-12);
+    }
+
+    @Test
     void turnedGimbalIsSavedWithTheLine() {
         LineShape l = bentTube();
         assertNull(ShapeStore.encodeLine(l).gimbal); // never turned: nothing extra in the save
