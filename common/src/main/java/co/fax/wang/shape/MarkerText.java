@@ -22,8 +22,15 @@ public final class MarkerText {
     /** A message stays up this long before an aim hint may replace it. */
     private static final long MESSAGE_MS = 1500;
 
+    /**
+     * A hint still being aimed at is sent again this often. The action bar fades a message out
+     * after a couple of seconds whatever it says, so without this the hint would fade while the
+     * crosshair is still on the control; it should only go once you look away.
+     */
+    private static final long REFRESH_MS = 1000;
+
     private static String lastHint;
-    private static long lastSayMs;
+    private static long lastSayMs, lastHintMs;
 
     /** The modifier key's live name, shortened for the common ones ("Ctrl", "Shift", "Alt"). */
     static String mod() {
@@ -56,18 +63,22 @@ public final class MarkerText {
     }
 
     /**
-     * An aim hint, sent only when it differs from the last one (so it doesn't flood the action
-     * bar every tick), and not over a message that has only just gone up (it follows once that
-     * has been read). {@code null} = nothing aimed: the next hint shows again even if the same.
+     * An aim hint, sent when it differs from the last one and then about once a second for as
+     * long as the same thing stays aimed (so it holds steady instead of fading, without flooding
+     * the action bar every tick), and not over a message that has only just gone up (it follows
+     * once that has been read). {@code null} = nothing aimed: the hint is left to fade, and the
+     * next one shows again even if the same.
      */
     static void hint(String text) {
         if (text == null) {
             lastHint = null;
             return;
         }
-        if (text.equals(lastHint)) return;
-        if (System.currentTimeMillis() - lastSayMs < MESSAGE_MS) return;
+        long now = System.currentTimeMillis();
+        if (text.equals(lastHint) && now - lastHintMs < REFRESH_MS) return;
+        if (now - lastSayMs < MESSAGE_MS) return;
         lastHint = text;
+        lastHintMs = now;
         raw(text);
     }
 

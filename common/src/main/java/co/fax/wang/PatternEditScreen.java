@@ -140,6 +140,8 @@ public class PatternEditScreen extends Screen {
     private final List<HelpSpot> helpSpots = new ArrayList<>();
     private HelpSpot clickedSpot, hoverSpot;
     private long hoverSince;
+    /** Where the mouse was when the help popup was last laid out (switch spots read it). */
+    private int helpMx, helpMy;
 
     private Screen pendingExit;
 
@@ -314,22 +316,22 @@ public class PatternEditScreen extends Screen {
             editing.tiling = PatternTiling.values()[i];
             dirty = true;
         });
-        helpSpots.add(new HelpSpot(rx, y + 10, rw, Ui.ROW_H, () -> switch (editing.tiling) {
+        switchHelp(tileSeg, rx, y + 10, rw, i -> switch (PatternTiling.values()[Math.max(0, i)]) {
             case NONE -> "No tiling: one copy — columns stop at the end, nothing past the sides";
             case SIDES -> "Tiles sideways: the pattern wraps across its width";
             case START_END -> "Tiles start/end: columns repeat the pattern as they run";
             case START_END_SIDES -> "Tiles both ways: wraps across the width and along the run";
-        }, false));
+        });
         y += 10 + Ui.ROW_H + 6;
         captions.add(new Caption(rx, y, rw, () -> "Start from", false));
         startSeg = seg(List.of("Top", "Bottom"), editing.startAtBottom ? 1 : 0, rx, y + 10, rw, i -> {
             editing.startAtBottom = i == 1;
             dirty = true;
         });
-        helpSpots.add(new HelpSpot(rx, y + 10, rw, Ui.ROW_H, () -> editing.startAtBottom
-                ? "Placement begins at the drawing's BOTTOM row — painting up from the ground keeps "
-                        + "the drawing upright"
-                : "Placement begins at the drawing's TOP row", false));
+        switchHelp(startSeg, rx, y + 10, rw, i -> i == 1
+                ? "Bottom: placement begins at the drawing's BOTTOM row — painting up from the ground "
+                        + "keeps the drawing upright"
+                : "Top: placement begins at the drawing's TOP row");
         y += 10 + Ui.ROW_H + 6;
         int half = (rw - 4) / 2;
         varSeg = seg(List.of("Off", "±1", "±2", "±3"), editing.variationWindow, rx, y + 2, half, i -> {
@@ -366,6 +368,19 @@ public class PatternEditScreen extends Screen {
             if (this.font.width(l) + 6 > cell) return shortLabels;
         }
         return full;
+    }
+
+    /**
+     * A switch's hover help: {@code text} describes the choice the mouse is on (its index), so
+     * hovering a choice that is off explains that one, not the one that is on. Off the cells (the
+     * margin beside the switch) it describes the chosen one.
+     */
+    private void switchHelp(Segmented s, int x, int baseY, int w, java.util.function.IntFunction<String> text) {
+        helpSpots.add(new HelpSpot(x, baseY, w, Ui.ROW_H, () -> {
+            int cell = s.cellAt(helpMx, helpMy);
+            boolean on = cell < 0 || cell == s.selected();
+            return text.apply(cell < 0 ? s.selected() : cell) + (on ? "" : " · LMB switch to it");
+        }, false));
     }
 
     /** A section's one circled-? at the right end of its heading line. */
@@ -1250,6 +1265,8 @@ public class PatternEditScreen extends Screen {
         if (clickedSpot != null && over != clickedSpot) clickedSpot = null;
         if (over == null) return;
         if (over != clickedSpot && System.currentTimeMillis() - hoverSince < 1000) return;
+        helpMx = mouseX;
+        helpMy = mouseY;
         List<String> lines = wrap(over.text().get(), 150);
         int w = 0;
         for (String l : lines) w = Math.max(w, this.font.width(l));

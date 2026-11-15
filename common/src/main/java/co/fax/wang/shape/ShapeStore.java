@@ -64,6 +64,8 @@ public final class ShapeStore {
         String gradient;
         double r0, r1, tw0, tw1;
         MarkerStyle style;
+        /** The rotate gimbal's two ring axes, [xx,xy,xz, yx,yy,yz]; absent → world X and Y. */
+        double[] gimbal;
     }
 
     /** A stored line back to a shape (legacy end-only sizes spread over the nodes); null if < 2 nodes. */
@@ -89,6 +91,15 @@ public final class ShapeStore {
             if (g.name().equals(sl.gradient)) l.gradient = g; // unknown/missing → default
         }
         if (sl.style != null) l.style = sl.style;
+        if (sl.gimbal != null && sl.gimbal.length >= 6) {
+            Vec3 gx = new Vec3(sl.gimbal[0], sl.gimbal[1], sl.gimbal[2]);
+            Vec3 gy = new Vec3(sl.gimbal[3], sl.gimbal[4], sl.gimbal[5]);
+            // Only a sound pair is taken: two unit axes at right angles.
+            if (Math.abs(gx.length() - 1) < 1e-3 && Math.abs(gy.length() - 1) < 1e-3 && Math.abs(gx.dot(gy)) < 1e-3) {
+                l.gimbalX = gx;
+                l.gimbalY = gy;
+            }
+        }
         if (!perNode) {
             // No sizes saved at all (never written by a released build) → defaults, not radius 0.
             boolean none = sl.r0 == 0 && sl.r1 == 0;
@@ -111,6 +122,9 @@ public final class ShapeStore {
         sl.solid = l.solid;
         sl.gradient = l.gradient.name();
         sl.style = stored(l.style);
+        Vec3 gx = l.gimbalX, gy = l.gimbalY;
+        boolean turned = gx.distanceToSqr(new Vec3(1, 0, 0)) > 1e-12 || gy.distanceToSqr(new Vec3(0, 1, 0)) > 1e-12;
+        sl.gimbal = turned ? new double[]{gx.x, gx.y, gx.z, gy.x, gy.y, gy.z} : null;
         sl.r0 = ns.get(0).r;
         sl.r1 = ns.get(ns.size() - 1).r;
         sl.tw0 = ns.get(0).tw;

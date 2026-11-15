@@ -243,6 +243,41 @@ public final class LineCurve {
         return new Vec3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
     }
 
+    /** {@code v} turned by {@code angle} radians about the unit axis {@code k} (right-handed). */
+    static Vec3 turn(Vec3 v, Vec3 k, double angle) {
+        double c = Math.cos(angle), s = Math.sin(angle);
+        return v.scale(c).add(k.cross(v).scale(s)).add(k.scale(k.dot(v) * (1 - c)));
+    }
+
+    /**
+     * Make this curve {@code from} turned rigidly by {@code angle} about the unit {@code axis}
+     * through {@code centre}: node positions and both handles. Always worked out from the
+     * untouched {@code from}, so a long drag never accumulates rounding. Sizes and twists are
+     * copied as they are (see {@link LineShape#turnFrom} for the twist that keeps the profile).
+     */
+    public void setTurned(LineCurve from, Vec3 centre, Vec3 axis, double angle) {
+        for (int i = 0; i < nodes.size() && i < from.nodes.size(); i++) {
+            Node a = from.nodes.get(i), n = nodes.get(i);
+            n.p = centre.add(turn(a.p.subtract(centre), axis, angle));
+            n.in = turn(a.in, axis, angle);
+            n.out = turn(a.out, axis, angle);
+            n.r = a.r;
+            n.tw = a.tw;
+        }
+    }
+
+    /** The middle of the nodes (their average) — a line turns about this, so it stays put. */
+    public Vec3 centre() {
+        double x = 0, y = 0, z = 0;
+        for (Node n : nodes) {
+            x += n.p.x;
+            y += n.p.y;
+            z += n.p.z;
+        }
+        int k = Math.max(1, nodes.size());
+        return new Vec3(x / k, y / k, z / k);
+    }
+
     /** Moves every node by {@code delta} (handles are relative, so they follow). */
     public void translate(Vec3 delta) {
         for (Node n : nodes) n.p = n.p.add(delta);

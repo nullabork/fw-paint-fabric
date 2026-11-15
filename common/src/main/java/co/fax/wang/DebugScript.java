@@ -37,9 +37,10 @@ import java.util.regex.Pattern;
  * cmd &lt;command&gt;             run a chat command (no slash): tp, fill, setblock, time, gamemode…
  * origin X Y Z              later "$x+3" / "$y" / "$z-1" are measured from here
  * look X Y Z                aim the camera at a point (eyes on it)
- * aim cog | control K | button K
+ * aim cog | control K | button K | ring K DEG
  *                           aim at the open (else last touched) marker's cog, its control K,
- *                           or button K of its open toolbar
+ *                           or button K of its open toolbar; or the point DEG degrees round
+ *                           gimbal ring K (0 green, 1 red) of the line in rotate mode
  * turn DYAW DPITCH          turn the camera by degrees
  * mode NAME | paint NAME    placement mode / paint type (enum names)
  * set FIELD VALUE           a config field (boolean, int, double, enum, string), for this run
@@ -184,7 +185,9 @@ public final class DebugScript {
                 oz = Integer.parseInt(a[3]);
             }
             case "aim" -> {
-                Vec3 p = ShapeMarkers.debugAimPoint(mc, a[1], a.length > 2 ? Integer.parseInt(a[2]) : 0);
+                Vec3 p = "ring".equals(a[1])
+                        ? co.fax.wang.shape.LineMarkers.debugRingPoint(Integer.parseInt(a[2]), d(a[3]))
+                        : ShapeMarkers.debugAimPoint(mc, a[1], a.length > 2 ? Integer.parseInt(a[2]) : 0);
                 if (p == null) LOG.warn("TOUR script: nothing to aim at for '{}'", line);
                 else mc.player.lookAt(EntityAnchorArgument.Anchor.EYES, p);
             }

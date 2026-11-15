@@ -400,6 +400,11 @@ public final class ShapeMarkers {
         MarkerToolbar.refresh(specFor(MarkerToolbar.owner(), mc, pm, groupMode));
         boolean dragging = LineMarkers.dragging() || dragShape != null || BoxMarkers.dragging();
         if (dragging) MarkerToolbar.close(); // the toolbar gets out of the way of a drag
+        // A line's rotate rings are big enough to pass behind an open toolbar: its buttons win.
+        if (who == Who.LINE && LineMarkers.ringAimed() && MarkerToolbar.updateHover(mc)) {
+            LineMarkers.dropAim();
+            who = Who.NONE;
+        }
         barHover = who == Who.NONE && !dragging && MarkerToolbar.updateHover(mc);
         if (!barHover) MarkerToolbar.dropHover();
         updateHoverOwner(mc, groupMode && !attack && !use); // not mid-stroke over block markers
