@@ -35,6 +35,14 @@ public final class LineShape {
      * relative to the shape, and are saved with it.
      */
     public Vec3 gimbalX = new Vec3(1, 0, 0), gimbalY = new Vec3(0, 1, 0);
+    /**
+     * Which way is "top" for an Across gradient, as an angle (radians) round the line from each
+     * slice's frame normal: 0 = that normal (straight up on a level line). The frame is the
+     * untwisted one, so twisting the profile doesn't swing the gradient.
+     */
+    public double gradAngle;
+    /** Draw the tube in the colours a Gradient fill would give it, instead of its plain tint. */
+    public boolean gradPreview;
     /** A new tube's radius (and what right-clicking a size cube resets to). */
     public static final double DEFAULT_RADIUS = LineCurve.DEFAULT_RADIUS;
     /** Size-cube drags keep a node's radius within this. */
@@ -254,6 +262,141 @@ public final class LineShape {
                 BlockPos.containing(ns.get(ns.size() - 1).p), idx, len);
     }
 
+    // ---- gradient direction -------------------------------------------------------------------
+
+    /** Cells within this far along the line of a slice count towards that slice's bottom and top. */
+    static final double SLICE_SPREAD = 1.0;
+
+    /** The "top" direction of slice {@code i}: its frame normal turned by {@link #gradAngle}. */
+    public Vec3 sliceTop(int i) {
+        LineCurve.Sample s = samples().get(i);
+        return s.n().scale(Math.cos(gradAngle)).add(s.b().scale(Math.sin(gradAngle)));
+    }
+
+    /** The sample nearest {@code p}, searching outward from {@code from} (downhill in distance). */
+    private int nearestSample(Vec3 p, int from) {
+        List<LineCurve.Sample> ss = samples();
+        int i = Math.max(0, Math.min(ss.size() - 1, from));
+        double d = ss.get(i).pos().distanceToSqr(p);
+        while (true) {
+            double dl = i > 0 ? ss.get(i - 1).pos().distanceToSqr(p) : Double.MAX_VALUE;
+            double dr = i < ss.size() - 1 ? ss.get(i + 1).pos().distanceToSqr(p) : Double.MAX_VALUE;
+            if (dl < d && dl <= dr) {
+                d = dl;
+                i--;
+            } else if (dr < d) {
+                d = dr;
+                i++;
+            } else {
+                return i;
+            }
+        }
+    }
+
+    /**
+     * Each cell's position (0 … 1) on an Across gradient: the tube is cut into slices at right
+     * angles to the line, and in every slice the gradient runs from its bottom-most cell (0) to
+     * its top-most (1) along {@link #sliceTop}. So it follows the line round every bend, a thin
+     * stretch gets the whole gradient just like a thick one, and a shell is coloured the same as
+     * a solid tube. Cells are {@code cells} (normally the whole tube).
+     */
+    public double[] sliceFracs(List<BlockPos> cells) {
+        List<LineCurve.Sample> ss = samples();
+        int n = ss.size();
+        double[] out = new double[cells.size()];
+        if (n == 0) return out;
+        Vec3[] tops = new Vec3[n];
+        for (int i = 0; i < n; i++) tops[i] = sliceTop(i);
+        double total = Math.max(1e-9, ss.get(n - 1).s());
+        int[] at = new int[out.length];
+        double[] h = new double[out.length], lo = new double[n], hi = new double[n];
+        java.util.Arrays.fill(lo, Double.MAX_VALUE);
+        java.util.Arrays.fill(hi, -Double.MAX_VALUE);
+        for (int c = 0; c < out.length; c++) {
+            Vec3 p = Vec3.atCenterOf(cells.get(c));
+            // Start from where the tube build put the cell along the line, then settle on the
+            // nearest sample (a wobbly line can pass the same spot twice; this keeps to its own).
+            float f = built.cells().containsKey(cells.get(c).asLong()) ? built.cells().get(cells.get(c).asLong()) : -1;
+            int guess = f < 0 ? n / 2 : sampleAtArc(f * total);
+            int i = nearestSample(p, guess);
+            at[c] = i;
+            h[c] = p.subtract(ss.get(i).pos()).dot(tops[i]);
+            lo[i] = Math.min(lo[i], h[c]);
+            hi[i] = Math.max(hi[i], h[c]);
+        }
+        // A slice's bottom and top come from every cell a little way either side of it, so they
+        // change smoothly along the line instead of jumping from one sample to the next.
+        double[] wlo = new double[n], whi = new double[n];
+        for (int i = 0; i < n; i++) {
+            double a = Double.MAX_VALUE, b = -Double.MAX_VALUE;
+            for (int j = i; j >= 0 && ss.get(i).s() - ss.get(j).s() <= SLICE_SPREAD; j--) {
+                a = Math.min(a, lo[j]);
+                b = Math.max(b, hi[j]);
+            }
+            for (int j = i + 1; j < n && ss.get(j).s() - ss.get(i).s() <= SLICE_SPREAD; j++) {
+                a = Math.min(a, lo[j]);
+                b = Math.max(b, hi[j]);
+            }
+            wlo[i] = a;
+            whi[i] = b;
+        }
+        for (int c = 0; c < out.length; c++) {
+            double span = whi[at[c]] - wlo[at[c]];
+            out[c] = span < 1e-9 ? 0 : Math.max(0, Math.min(1, (h[c] - wlo[at[c]]) / span));
+        }
+        return out;
+    }
+
+    /** The sample at arc length {@code s} along the line (the first one at or past it). */
+    public int sampleAtArc(double s) {
+        List<LineCurve.Sample> ss = samples();
+        int a = 0, b = ss.size() - 1;
+        while (a < b) {
+            int m = (a + b) >>> 1;
+            if (ss.get(m).s() < s) a = m + 1;
+            else b = m;
+        }
+        return a;
+    }
+
+    /**
+     * Each cell's position (0 … 1) along this line's gradient, by its {@link LineGradient} mode:
+     * across each slice (bottom → top), along the curve, or radially (line → skin, skin → line).
+     */
+    public double[] gradientFracs(List<BlockPos> cells) {
+        double[] ts = new double[cells.size()];
+        switch (gradient) {
+            case ACROSS -> ts = sliceFracs(cells);
+            case ALONG -> {
+                for (int i = 0; i < ts.length; i++) ts[i] = Math.max(0, fracOf(cells.get(i)));
+            }
+            case INSIDE_OUT, OUTSIDE_IN -> {
+                boolean in = gradient == LineGradient.OUTSIDE_IN;
+                for (int i = 0; i < ts.length; i++) {
+                    double r = radialFrac(cells.get(i));
+                    ts[i] = in ? 1 - r : r;
+                }
+            }
+        }
+        return ts;
+    }
+
+    /** The current build (changes identity whenever the cells do): a key for caches of them. */
+    Object builtKey() {
+        return built;
+    }
+
+    /** The cells of the last finished build, without forcing a rebuild (rendering). */
+    LongSet builtCellKeys() {
+        return built.cells().keySet();
+    }
+
+    /** Where the control cluster sits along the line, as a sample index. */
+    public int controlSample() {
+        int last = samples().size() - 1;
+        return (int) Math.round(Math.max(0, Math.min(last, ctrlAt)));
+    }
+
     /**
      * Distance from {@code cell}'s centre to the line, as a fraction of the tube radius there
      * (0 on the line, about 1 at the skin; clamped to 0 … 1). A bare line counts as radius 1.
@@ -425,11 +568,11 @@ public final class LineShape {
     }
 
     /** What a turn starts from: the curve, the first frame's normal, and the gimbal, as they were. */
-    public record Pose(LineCurve curve, Vec3 n0, Vec3 gimbalX, Vec3 gimbalY) {}
+    public record Pose(LineCurve curve, Vec3 n0, Vec3 gimbalX, Vec3 gimbalY, double gradAngle) {}
 
     public Pose pose() {
         List<LineCurve.Sample> ss = samples();
-        return new Pose(curve.copy(), ss.isEmpty() ? new Vec3(0, 1, 0) : ss.get(0).n(), gimbalX, gimbalY);
+        return new Pose(curve.copy(), ss.isEmpty() ? new Vec3(0, 1, 0) : ss.get(0).n(), gimbalX, gimbalY, gradAngle);
     }
 
     /**
@@ -450,6 +593,7 @@ public final class LineShape {
             for (int i = 0; i < curve.nodes.size() && i < from.curve().nodes.size(); i++) {
                 curve.nodes.get(i).tw = from.curve().nodes.get(i).tw + fix;
             }
+            gradAngle = Math.IEEEremainder(from.gradAngle() + fix, 2 * Math.PI); // the gradient turns with it too
         }
         markDirty();
     }

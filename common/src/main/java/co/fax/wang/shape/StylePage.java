@@ -13,7 +13,7 @@ import java.util.List;
  * marker's normal toolbar swaps its buttons for these, and Back swaps them back.
  *
  * <pre>
- * Back · Show as block · Reset · [faces − +] · [edges − +] (opacity, each pair framed) ·
+ * Back · Show as block · (lines) Show as gradient · Gradient angle · Reset · [faces − +] · [edges − +] (opacity, each pair framed) ·
  *        faces when obscured · edges when obscured
  * face colours   (filled squares)
  * edge colours   (hollow squares)
@@ -67,6 +67,10 @@ final class StylePage {
         Gizmo.billboardQuad(e, c.add(ax[0].scale(-(r - t))), ax, t, r, argb);
     }
 
+    /** Show as gradient: bands fading from full to faint, top to bottom. */
+    private static final MarkerToolbar.Icon GRADIENT = MarkerToolbar.pixels(new String[]{
+            "4444444", "4444444", "3333333", "2222222", "2222222", "1111111", "1111111"}, 0.085);
+
     /** Faces through blocks: a solid square with a dotted wall across it. */
     private static final MarkerToolbar.Icon FACES_THROUGH = MarkerToolbar.pixels(new String[]{
             "XXXX...", "XXXX.X.", "XXXX...", "XXXX.X.", ".......", ".X.X.X.", "......."}, 0.085);
@@ -100,8 +104,21 @@ final class StylePage {
                     MarkerText.say(id.isEmpty() ? "Marker: shown as a tint again"
                             : "Marker: shown as " + Gradient.toolDisplayName(id));
                 }, () -> ShapeMarkers.reopenStyle(owner)))));
+        if (owner instanceof LineShape line) {
+            // Lines only: the tube in the colours a Gradient fill would give it (its own direction and angle).
+            top.add(new MarkerToolbar.Button(GRADIENT, line.gradPreview, false,
+                    line.gradPreview ? "Shown as the gradient (on) · LMB back to the marker's own look"
+                            : "Show as gradient: see the active palette's gradient on the line, live (places nothing)",
+                    () -> {
+                        line.gradPreview = !line.gradPreview;
+                        saved.run();
+                        MarkerText.say(line.gradPreview ? "Line: shown as the gradient" : "Line: gradient look off");
+                    }));
+            top.add(LineMarkers.angleButton(line));
+        }
         top.add(new MarkerToolbar.Button(MarkerToolbar.REDO, false, false,
                 "Reset this marker's look to the default", () -> {
+                    if (owner instanceof LineShape line) line.gradPreview = false;
                     st.reset();
                     saved.run();
                     MarkerText.say("Marker: default look");

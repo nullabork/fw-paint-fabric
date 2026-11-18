@@ -1068,38 +1068,10 @@ public final class PaintPlacer {
 
     // ---- line tube gradients ------------------------------------------------------------------------
 
-    /**
-     * Each tube cell's position along the gradient (0 … 1), by the line's {@link
-     * co.fax.wang.shape.LineGradient} mode: across the tube along the view (from the side aimed
-     * into), along the curve, or radially (line → skin, or skin → line).
-     */
+    /** Each tube cell's position along the gradient (0 … 1), by the line's own gradient mode. */
     private static double[] lineGradientTs(Minecraft mc, co.fax.wang.shape.LineShape line, List<BlockPos> cells) {
         // (cells: the whole tube, so every mode's 0 … 1 spans the tube, not just what's filled)
-        double[] ts = new double[cells.size()];
-        switch (line.gradient) {
-            case ALONG -> {
-                for (int i = 0; i < ts.length; i++) ts[i] = Math.max(0, line.fracOf(cells.get(i)));
-            }
-            case INSIDE_OUT, OUTSIDE_IN -> {
-                boolean in = line.gradient == co.fax.wang.shape.LineGradient.OUTSIDE_IN;
-                for (int i = 0; i < ts.length; i++) {
-                    double r = line.radialFrac(cells.get(i));
-                    ts[i] = in ? 1 - r : r;
-                }
-            }
-            case ACROSS -> {
-                Vec3 look = co.fax.wang.shape.Raycast.look(mc);
-                double lo = Double.MAX_VALUE, hi = -Double.MAX_VALUE;
-                for (int i = 0; i < ts.length; i++) {
-                    ts[i] = Vec3.atCenterOf(cells.get(i)).dot(look);
-                    lo = Math.min(lo, ts[i]);
-                    hi = Math.max(hi, ts[i]);
-                }
-                double span = hi - lo;
-                for (int i = 0; i < ts.length; i++) ts[i] = span < 1e-9 ? 0 : (ts[i] - lo) / span;
-            }
-        }
-        return ts;
+        return line.gradientFracs(cells);
     }
 
 

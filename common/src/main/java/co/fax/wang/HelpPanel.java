@@ -580,14 +580,31 @@ public final class HelpPanel {
                     "To turn the line about some other direction, re-aim a ring first: hold the "
                         + "axis-lock key (Alt) and drag a ring. Only that ring moves - it leans "
                         + "about the other ring's axis and the line stays where it is.",
+                    "Physics (the weight on the toolbar) opens a page with Gravity. Turn it on "
+                        + "and the line falls as one solid piece, hits the ground, tumbles and "
+                        + "settles where something of that shape would come to rest - a branch "
+                        + "dropped on a hill. A line that is underground pops up first. It only "
+                        + "moves the marker; nothing is placed until you paint. Press Gravity "
+                        + "again to stop it mid-fall; Undo drop puts the line back.",
                     "A bare line (no shape) selects just the blocks it passes through.")),
                 t("Painting it", "Grow a fill inside the tube.", List.of(
                     "3D Fill inside the tube grows from where you aim - a block, or the green "
                         + "cell in open air - one block, then a layer around it; keep holding "
                         + "to keep growing. It stays inside the tube.",
-                    "Which way a Gradient runs, on the toolbar: Across (default) from the side "
-                        + "you aim into to the far side; Along from start (teal cube) to end "
-                        + "(orange); Inside out from line to skin; Outside in from skin to line.",
+                    "Which way a Gradient runs, on the toolbar: Across (default) cuts the tube "
+                        + "into slices at right angles to the line and runs from the bottom of "
+                        + "each slice to its top, so it follows every bend; Along from start "
+                        + "(teal cube) to end (orange); Inside out from line to skin; Outside in "
+                        + "from skin to line.",
+                    "While painting with Gradient, look at a line and LMB its grey cog for the "
+                        + "same choices and Rendering (the eye). There, Gradient angle puts a pink "
+                        + "plane across the line with a T (top) and a B "
+                        + "(bottom) cube on a ring: drag either round the ring to choose which "
+                        + "way the Across gradient runs ({link}: 15-degree steps). The angle "
+                        + "tool goes away when you paint or click anything else.",
+                    "Also on Rendering, Show as gradient draws the line in the palette's "
+                        + "colours, live, until "
+                        + "you turn it off or reset its look.",
                     "Place in air (on by default) means a tube floating in the sky needs no "
                         + "scaffolding.",
                     "Face and Single modes respect the tube too, like any shape - and from "

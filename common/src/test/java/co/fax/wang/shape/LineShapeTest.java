@@ -411,6 +411,113 @@ class LineShapeTest {
         assertEquals(0, l.gimbalY.distanceTo(back.gimbalY), 1e-12);
     }
 
+    /** A level tube along +X that tapers from radius 2 to radius 5. */
+    private static LineShape taperedTube(boolean solid) {
+        LineCurve c = new LineCurve(new Vec3(0.5, 20.5, 0.5), new Vec3(30.5, 20.5, 0.5));
+        c.nodes.get(0).r = 2;
+        c.nodes.get(1).r = 5;
+        LineShape l = new LineShape(c);
+        l.profile = LineProfile.CIRCLE;
+        l.solid = solid;
+        return l;
+    }
+
+    private static List<BlockPos> cellsOf(LineShape l) {
+        List<BlockPos> cells = new java.util.ArrayList<>();
+        for (long k : l.cellKeys()) cells.add(BlockPos.of(k));
+        return cells;
+    }
+
+    @Test
+    void acrossGradientRunsBottomToTopOfEverySliceHoweverThickTheTubeIs() {
+        for (boolean solid : new boolean[]{true, false}) {
+            LineShape l = taperedTube(solid);
+            List<BlockPos> cells = cellsOf(l);
+            double[] ts = l.sliceFracs(cells);
+            // Per column of cells along the line: the lowest cell starts the gradient and the
+            // highest ends it, at the thin end just as at the thick end.
+            for (int x : new int[]{3, 15, 27}) {
+                double lowT = -1, highT = -1;
+                int lowY = Integer.MAX_VALUE, highY = Integer.MIN_VALUE;
+                for (int i = 0; i < cells.size(); i++) {
+                    BlockPos c = cells.get(i);
+                    if (c.getX() != x || c.getZ() != 0) continue;
+                    if (c.getY() < lowY) {
+                        lowY = c.getY();
+                        lowT = ts[i];
+                    }
+                    if (c.getY() > highY) {
+                        highY = c.getY();
+                        highT = ts[i];
+                    }
+                }
+                assertTrue(highY > lowY, "cells at x=" + x);
+                assertTrue(lowT < 0.12, "bottom at x=" + x + " solid=" + solid + " was " + lowT);
+                assertTrue(highT > 0.88, "top at x=" + x + " solid=" + solid + " was " + highT);
+            }
+            for (double t : ts) assertTrue(t >= 0 && t <= 1);
+        }
+    }
+
+    @Test
+    void gradientAngleChoosesWhichWayIsTop() {
+        LineShape l = taperedTube(true);
+        List<BlockPos> cells = cellsOf(l);
+        l.gradAngle = Math.PI / 2; // a quarter turn round a line along +X: top is now +Z
+        double[] ts = l.sliceFracs(cells);
+        for (int i = 0; i < cells.size(); i++) {
+            BlockPos c = cells.get(i);
+            if (c.getX() != 15 || c.getY() != 20) continue;
+            if (c.getZ() >= 3) assertTrue(ts[i] > 0.75, "z=" + c.getZ() + " was " + ts[i]);
+            if (c.getZ() <= -3) assertTrue(ts[i] < 0.25, "z=" + c.getZ() + " was " + ts[i]);
+        }
+        l.gradAngle = Math.PI; // upside down
+        ts = l.sliceFracs(cells);
+        for (int i = 0; i < cells.size(); i++) {
+            BlockPos c = cells.get(i);
+            if (c.getX() == 15 && c.getZ() == 0 && c.getY() >= 23) assertTrue(ts[i] < 0.25);
+        }
+    }
+
+    @Test
+    void acrossGradientFollowsALineThatTurnsUpwards() {
+        // Level, then curving up to vertical: "top" stays the frame's normal, so on the upright
+        // stretch the gradient runs sideways across the tube, not up along it.
+        LineCurve c = new LineCurve(new Vec3(0.5, 20.5, 0.5), new Vec3(20.5, 40.5, 0.5));
+        c.nodes.get(0).out = new Vec3(12, 0, 0);
+        c.nodes.get(1).in = new Vec3(0, -12, 0);
+        c.nodes.get(0).r = 3;
+        c.nodes.get(1).r = 3;
+        LineShape l = new LineShape(c);
+        l.profile = LineProfile.CIRCLE;
+        List<BlockPos> cells = cellsOf(l);
+        double[] ts = l.sliceFracs(cells);
+        double lo = 1, hi = 0;
+        for (int i = 0; i < cells.size(); i++) {
+            BlockPos p = cells.get(i);
+            if (p.getY() != 38 || p.getZ() != 0) continue; // one level through the upright end
+            lo = Math.min(lo, ts[i]);
+            hi = Math.max(hi, ts[i]);
+        }
+        assertTrue(lo < 0.15 && hi > 0.85, "the whole gradient crosses the upright stretch: " + lo + " … " + hi);
+    }
+
+    @Test
+    void gradientAngleAndPreviewAreSavedAndTurnWithTheLine() {
+        LineShape l = bentTube();
+        l.gradAngle = 0.7;
+        l.gradPreview = true;
+        LineShape back = ShapeStore.decodeLine(ShapeStore.encodeLine(l));
+        assertEquals(0.7, back.gradAngle, 1e-12);
+        assertTrue(back.gradPreview);
+        // A rigid turn carries the gradient's top with the line.
+        int mid = l.samples().size() / 2;
+        Vec3 top = l.sliceTop(mid);
+        Vec3 axis = new Vec3(0.3, 1, 0.2).normalize();
+        l.turnFrom(l.pose(), l.curve.centre(), axis, 0.9);
+        assertEquals(0, LineCurve.turn(top, axis, 0.9).distanceTo(l.sliceTop(mid)), 1e-6);
+    }
+
     @Test
     void turnedGimbalIsSavedWithTheLine() {
         LineShape l = bentTube();

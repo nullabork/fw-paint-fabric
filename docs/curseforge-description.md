@@ -241,8 +241,14 @@ and editable. Painting that begins inside a shape stays inside it.
   its own size and twist**, easing smoothly between nodes — drag a node's green size or blue
   twist cube (Ctrl: all nodes, right-click resets) to taper it into a tentacle; Ctrl+scroll on a
   node resizes it. One toolbar behind the cog sweeps a **circle, square, triangle or star** along
-  the curve — Shell or Solid — picks the gradient direction (across from the side you aim in,
-  along start → end, inside out, or outside in) and **Flip**s start and end. **3D Fill inside the
+  the curve — Shell or Solid — picks the gradient direction (across: bottom to top of every
+  slice cut at right angles to the line, so it follows each bend; along start → end; inside
+  out; or outside in) and **Flip**s start and end. On the Rendering page, **Show as gradient**
+  draws the line in your gradient palette's blocks, live, and **Gradient angle** gives a pink
+  plane with **T** and **B** grips to choose which way is top. While painting with Gradient,
+  the line's cog offers the same options without leaving your paint mode. **Physics → Gravity**
+  drops the line so it falls, tumbles and settles like a branch on a hill — a natural resting
+  place before you paint (Undo drop puts it back). **3D Fill inside the
   tube grows from the spot you aim at** (even mid-air) and stays inside it. The white **move**
   cube, the cog and a blue **rotate** cube ride together beside the line, sliding along it to
   stay a few blocks from where you stand, side by side. **Rotate** puts two rings round the

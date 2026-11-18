@@ -337,6 +337,7 @@ public final class ShapeMarkers {
             saveCurrent();
         }
         if (saveDelay > 0 && --saveDelay == 0) saveCurrent();
+        LineMarkers.tickPhysics(mc); // a dropped line keeps falling whatever is in hand
 
         boolean screenOpen = mc.gui.screen() != null;
         // Controls respond whenever the paint tool is in hand — the marker modes are only
@@ -639,7 +640,9 @@ public final class ShapeMarkers {
     /** The open marker's toolbar for this tick, or null when it's gone / not editable now. */
     private static MarkerToolbar.Spec specFor(Object owner, Minecraft mc, PlacementMode pm, boolean groupMode) {
         if (owner == null) return null;
-        if (owner instanceof LineShape l) return pm == PlacementMode.MARKER_LINE ? LineMarkers.toolbarSpec(l) : null;
+        if (owner instanceof LineShape l) {
+            return pm == PlacementMode.MARKER_LINE ? LineMarkers.toolbarSpec(l) : LineMarkers.paintSpec(l, pm);
+        }
         if (owner instanceof RingShape s) return shapes.contains(s) ? ringSpec(s) : null;
         if (owner == BoxMarkers.OWNER) return BoxMarkers.toolbarSpec(mc);
         if (owner instanceof GroupMarkers.Owner g) return groupMode ? GroupMarkers.toolbarSpec(g, mc) : null;
