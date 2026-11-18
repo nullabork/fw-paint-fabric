@@ -64,6 +64,12 @@ final class Gizmo {
     static final String[] GIMBAL_ICON = {
             "..XXX..", ".X.X.X.", "X..X..X", "XXXXXXX", "X..X..X", ".X.X.X.", "..XXX.."};
 
+    /** The gradient-angle grips: T marks the top of the gradient, B the bottom. */
+    static final String[] T_ICON = {
+            "XXXXXXX", "XXXXXXX", "...X...", "...X...", "...X...", "...X...", "...X..."};
+    static final String[] B_ICON = {
+            "XXXXX..", "X....X.", "X....X.", "XXXXX..", "X....X.", "X....X.", "XXXXX.."};
+
     /** Size of the small control cubes (size / twist / move / cog), half-extent in blocks. */
     static final double CTRL_HALF = 0.25;
 

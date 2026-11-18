@@ -66,6 +66,9 @@ public final class ShapeStore {
         MarkerStyle style;
         /** The rotate gimbal's two ring axes, [xx,xy,xz, yx,yy,yz]; absent → world X and Y. */
         double[] gimbal;
+        /** Across-gradient "top" angle in radians (0 = the frame normal), and the gradient preview toggle. */
+        double gradAngle;
+        boolean gradPreview;
     }
 
     /** A stored line back to a shape (legacy end-only sizes spread over the nodes); null if < 2 nodes. */
@@ -91,6 +94,8 @@ public final class ShapeStore {
             if (g.name().equals(sl.gradient)) l.gradient = g; // unknown/missing → default
         }
         if (sl.style != null) l.style = sl.style;
+        if (Double.isFinite(sl.gradAngle)) l.gradAngle = sl.gradAngle;
+        l.gradPreview = sl.gradPreview;
         if (sl.gimbal != null && sl.gimbal.length >= 6) {
             Vec3 gx = new Vec3(sl.gimbal[0], sl.gimbal[1], sl.gimbal[2]);
             Vec3 gy = new Vec3(sl.gimbal[3], sl.gimbal[4], sl.gimbal[5]);
@@ -122,6 +127,8 @@ public final class ShapeStore {
         sl.solid = l.solid;
         sl.gradient = l.gradient.name();
         sl.style = stored(l.style);
+        sl.gradAngle = l.gradAngle;
+        sl.gradPreview = l.gradPreview;
         Vec3 gx = l.gimbalX, gy = l.gimbalY;
         boolean turned = gx.distanceToSqr(new Vec3(1, 0, 0)) > 1e-12 || gy.distanceToSqr(new Vec3(0, 1, 0)) > 1e-12;
         sl.gimbal = turned ? new double[]{gx.x, gx.y, gx.z, gy.x, gy.y, gy.z} : null;

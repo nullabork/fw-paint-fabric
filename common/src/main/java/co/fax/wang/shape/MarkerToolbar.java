@@ -111,6 +111,8 @@ final class MarkerToolbar {
     private static int hover = -1;
     /** The open toolbar shows its Rendering page ({@link StylePage}) instead of the marker's options. */
     private static boolean stylePage;
+    /** The open toolbar shows its Physics page (gravity) instead of the marker's options. */
+    private static boolean physicsPage;
     // Layout of the frame (camera-dependent): button centres, size, leader end.
     private static final List<Vec3> centres = new ArrayList<>();
     private static double size;
@@ -135,6 +137,7 @@ final class MarkerToolbar {
         spec = s;
         hover = -1;
         stylePage = false;
+        physicsPage = false;
         if (s != null && s.title() != null) MarkerText.say(s.title());
     }
 
@@ -151,6 +154,19 @@ final class MarkerToolbar {
     /** Switch the open toolbar between the marker's options and its Rendering page. */
     static void showStyle(boolean on) {
         stylePage = on;
+        physicsPage = false;
+        hover = -1;
+    }
+
+    /** Whether the open toolbar is on its Physics page. */
+    static boolean physicsPage() {
+        return physicsPage;
+    }
+
+    /** Switch the open toolbar between the marker's options and its Physics page. */
+    static void showPhysics(boolean on) {
+        physicsPage = on;
+        stylePage = false;
         hover = -1;
     }
 
@@ -159,6 +175,7 @@ final class MarkerToolbar {
         spec = null;
         hover = -1;
         stylePage = false;
+        physicsPage = false;
         centres.clear();
     }
 

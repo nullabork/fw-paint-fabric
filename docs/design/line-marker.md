@@ -128,13 +128,52 @@ Performance (measured with `FWPAINT_PERF`, see `DebugRender`):
 
 The tube is a region like boxes and rings: `ShapeMarkers.contains` and `segmentFor` include it.
 Gradients use one ramp per line; each line picks its direction (`LineGradient`, second button
-row): **Across** (default — cells projected on the view direction at the click, near side = 0),
+row): **Across** (default — per slice: each cell goes to its nearest curve sample, its height is
+measured along that slice's "top" (the untwisted frame normal turned by the line's `gradAngle`),
+and 0 … 1 runs from the lowest to the highest cell within a block either side of that slice along
+the line; `LineShape.sliceFracs`. It no longer depends on where you look),
 **Along** (arc-length fraction start → end), **Inside out** / **Outside in** (distance to the
 nearest curve sample over the local radius). 3D Fill
 inside a tube is the ordinary growing fill (centre = the aimed block, or the air cell at reach),
 contained by the tube; with a Gradient it colours cells by the line's direction mode, normalised
 over the whole tube, and may grow through all of it. With Place in air on, no scaffolding is
 needed.
+
+While a painting mode is active with Gradient picked, lines offer their gradient options without
+being editable: looking into a tube brings out its cog, which opens a one-row toolbar
+(`LineMarkers.paintSpec`) — the four directions and **Rendering**. The direction buttons also sit on the
+middle row of the Line-mode toolbar; the two below are on the Rendering page (lines only).
+
+- **Show as gradient** (`gradPreview`, saved; cleared by Reset): the tube's outside cell faces are drawn with the
+  texture of the active palette's block for each cell's gradient position (Automatic segments,
+  which have no block yet, in their flat colour); 69% opaque until the line's face opacity is set (`GradientPreview`, rebuilt when the
+  tube, mode, angle or palette changes; tubes over 60 000 cells keep the plain tint).
+- **Angle** (transient): a pink plane cuts the line 2.5 blocks along from the cluster, ringed, with
+  **T** and **B** grips on the ring; dragging one sets `gradAngle` (saved; modifier = 15° steps),
+  and turns Across on. Any other click, painting included, puts the tool away. A rigid turn of
+  the line carries `gradAngle` with it.
+
+### Physics (gravity)
+
+The Line-mode toolbar's **Physics** button (bottom row) swaps in a page: Back · **Gravity** ·
+**Undo drop**. Gravity finds a natural resting place for the marker before it is painted; it
+moves the marker only and places nothing.
+
+- `LinePhysics` treats the line as one rigid body: a ball at each end and every tube radius (min
+  0.75 blocks) between, radius = tube radius + 0.5 (bare line 0.5), mass ∝ r³. Per substep (1/60 s,
+  three a tick): gravity 22 blocks/s², a little drag, one deepest contact per ball against the
+  block cubes it overlaps, six rounds of normal + friction impulses (no bounce), then a
+  translation-only push out of remaining overlap. It rests after 12 ticks slow and touching.
+- Ground = any block with a collision shape (so not water, plants or air), read client-side.
+- A body with a ball centre inside a block is lifted a block at a time (up to 384) before it is
+  let go ("pops up").
+- Each tick the line is set to its pose at the grab turned and shifted to the body
+  (`turnFrom` + translate), so tube profile, gimbal and gradient angle ride along. Nodes are not
+  re-snapped to the grid.
+- Ends: at rest (saved); Gravity pressed again (left where it is); grabbed by a drag or ring
+  (caught); 45 s without settling (left); or falling 16 below the world's floor, e.g. over
+  unloaded chunks (put back). **Undo drop** restores the pose from before the last drop (kept in
+  memory only, not across restarts).
 
 ### Persistence
 

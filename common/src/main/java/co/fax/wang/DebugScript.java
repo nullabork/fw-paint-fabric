@@ -37,10 +37,11 @@ import java.util.regex.Pattern;
  * cmd &lt;command&gt;             run a chat command (no slash): tp, fill, setblock, time, gamemode…
  * origin X Y Z              later "$x+3" / "$y" / "$z-1" are measured from here
  * look X Y Z                aim the camera at a point (eyes on it)
- * aim cog | control K | button K | ring K DEG
+ * aim cog | control K | button K | ring K DEG | grip T|B [DEG]
  *                           aim at the open (else last touched) marker's cog, its control K,
  *                           or button K of its open toolbar; or the point DEG degrees round
  *                           gimbal ring K (0 green, 1 red) of the line in rotate mode
+ * drop                      turn gravity on for the line made last
  * turn DYAW DPITCH          turn the camera by degrees
  * mode NAME | paint NAME    placement mode / paint type (enum names)
  * set FIELD VALUE           a config field (boolean, int, double, enum, string), for this run
@@ -185,11 +186,17 @@ public final class DebugScript {
                 oz = Integer.parseInt(a[3]);
             }
             case "aim" -> {
-                Vec3 p = "ring".equals(a[1])
+                Vec3 p = "grip".equals(a[1])
+                        ? co.fax.wang.shape.LineMarkers.debugGripPoint("T".equalsIgnoreCase(a[2]),
+                                a.length > 3 ? d(a[3]) : Double.NaN)
+                        : "ring".equals(a[1])
                         ? co.fax.wang.shape.LineMarkers.debugRingPoint(Integer.parseInt(a[2]), d(a[3]))
                         : ShapeMarkers.debugAimPoint(mc, a[1], a.length > 2 ? Integer.parseInt(a[2]) : 0);
                 if (p == null) LOG.warn("TOUR script: nothing to aim at for '{}'", line);
                 else mc.player.lookAt(EntityAnchorArgument.Anchor.EYES, p);
+            }
+            case "drop" -> {
+                if (!co.fax.wang.shape.LineMarkers.debugDrop()) LOG.warn("TOUR script: no line to drop");
             }
             case "cmd" -> mc.player.connection.sendCommand(line.substring(4).strip());
             case "look" -> mc.player.lookAt(EntityAnchorArgument.Anchor.EYES,

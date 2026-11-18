@@ -70,7 +70,27 @@ public final class LineMarkers {
     private static final long DOUBLE_CLICK_MS = 350;
 
     /** What the crosshair is on; SIZE / TWIST carry their node's index. */
-    private enum Kind { NODE, HANDLE_IN, HANDLE_OUT, SIZE, TWIST, MOVE, COG, ROTATE, GIMBAL, BODY }
+    private enum Kind { NODE, HANDLE_IN, HANDLE_OUT, SIZE, TWIST, MOVE, COG, ROTATE, GIMBAL, GRAD_T, GRAD_B, BODY }
+
+    /** The gradient-angle tool: its plane, ring and the T / B grips. */
+    private static final int ANGLE = 0xFFFF5FC8, ANGLE_PLANE = 0x38FF5FC8;
+    /** The angle ring sits this far outside the tube, this far along the line from the cog. */
+    private static final double ANGLE_MARGIN = 1, ANGLE_ALONG = 2.5;
+    /** How see-through the gradient look is until the line's face opacity is set. */
+    private static final int PREVIEW_ALPHA = 0xB0;
+    /** Physics page: the button that opens it (a weight on the ground), gravity, and undo. */
+    private static final String[] PHYSICS_GLYPH = {
+            "..XXX..", "..XXX..", ".XXXXX.", ".XXXXX.", "XXXXXXX", ".......", "XXXXXXX"};
+    private static final String[] GRAVITY_GLYPH = {
+            "...X...", "...X...", "...X...", "X..X..X", ".X.X.X.", "..XXX..", "...X..."};
+    private static final String[] BACK_GLYPH = {
+            ".......", "..X....", ".X.....", "XXXXXXX", ".X.....", "..X....", "......."};
+    /** A drop gives up after this many ticks (it is left where it has got to). */
+    private static final int DROP_MAX_TICKS = 20 * 45;
+    /** A buried line is lifted at most this far to find open air. */
+    private static final int POP_UP_LIMIT = 384;
+    private static final String[] ANGLE_GLYPH = {
+            "XXXXXXX", "...X...", "...X...", ".......", "XXXX...", "X..XX..", "XXXXX.."};
 
     /** The gimbal rings sit this far outside the line's furthest reach. */
     private static final double RING_MARGIN = 1;
@@ -134,6 +154,18 @@ public final class LineMarkers {
     private static Vec3 turnGrab, turnOn;
     private static double turnOnRadius;
     private static long lastSlideNanos;
+    /** The line whose gradient-angle tool is out, or null. It goes away when you do anything else. */
+    private static LineShape angling;
+    /** The slice the angle tool sits on (held still while a grip is dragged). */
+    private static int angleSample;
+    /** A line falling under gravity: the body, and the line as it was when let go. */
+    private record Drop(LinePhysics body, LineShape.Pose from, int[] ticks) {}
+
+    private static final java.util.Map<LineShape, Drop> drops = new java.util.IdentityHashMap<>();
+    /** Where each line was before its last drop (Undo drop puts it back). Forgotten with the line. */
+    private static final java.util.Map<LineShape, LineShape.Pose> beforeDrop = new java.util.WeakHashMap<>();
+    /** This tick is a painting mode with Gradient picked: lines show a cog for their gradient options. */
+    private static boolean paintOptions;
 
     // ---- queries ------------------------------------------------------------------------------
 
@@ -214,6 +246,8 @@ public final class LineMarkers {
         aimed = null;
         dragLine = null;
         rotating = null;
+        angling = null;
+        drops.clear();
     }
 
     /** Delete a line (MMB, or the toolbar's bin). */
@@ -223,6 +257,8 @@ public final class LineMarkers {
         if (aimed != null && aimed.line == l) aimed = null;
         if (dragLine == l) dragLine = null;
         if (rotating == l) rotating = null;
+        if (angling == l) angling = null;
+        drops.remove(l);
         MarkerText.say("Line removed");
         ShapeMarkers.saveLines();
     }
@@ -235,19 +271,26 @@ public final class LineMarkers {
      */
     static void updateAim(Minecraft mc, PlacementMode pm, boolean handles) {
         boolean create = pm == PlacementMode.MARKER_LINE;
+        paintOptions = handles && gradientPainting(pm);
         if (!create) pendingStart = null;
-        if (!handles || (!create && !debugHold)) {
+        if (!handles || (!create && !paintOptions && !debugHold)) {
             if (dragLine != null && !debugHold) { // released by leaving: finish the drag properly
                 snapOnRelease(dragLine);
                 ShapeMarkers.saveLines();
             }
             aimed = null;
             dragLine = null;
+            angling = null;
             return;
         }
+        if (angling != null && !lines.contains(angling)) angling = null;
         // The move / cog / rotate cluster follows where you stand (held by a drag or open toolbar).
         Vec3 eye = Raycast.eye(mc);
         for (LineShape l : lines) l.aimControls(eye, dragLine == l || MarkerToolbar.isOpen(l));
+        if (!create && !debugHold) {
+            computePaintAim(mc);
+            return;
+        }
         computeAim(mc);
         if (aimed != null && dragLine == null) {
             if (selected != aimed.line) selNode = -1;
@@ -277,7 +320,7 @@ public final class LineMarkers {
     private static boolean tickInner(Minecraft mc, PlacementMode pm, boolean owns,
                                      boolean attack, boolean attackEdge, boolean use, boolean useEdge, boolean pickEdge) {
         boolean create = pm == PlacementMode.MARKER_LINE;
-        if (!create && !debugHold) return false;
+        if (!create && !debugHold) return paintOptions && paintTick(mc, owns, attack, attackEdge, useEdge);
 
         boolean saveNeeded = false;
         boolean consumed = false;
@@ -300,6 +343,8 @@ public final class LineMarkers {
         }
 
         if (attackEdge && dragLine == null) {
+            // Doing anything else puts the gradient-angle tool away.
+            if (aimed == null || !isGrip(aimed.kind)) angling = null;
             if (aimed != null && aimed.kind != Kind.COG) { // the cog is ShapeMarkers' (toolbar)
                 consumed = true;
                 ShapeMarkers.touch(aimed.line);
@@ -337,6 +382,7 @@ public final class LineMarkers {
                                 : "Line rotate off");
                     }
                     case GIMBAL -> beginTurn(mc, aimed);
+                    case GRAD_T, GRAD_B -> beginAngle(aimed);
                     default -> beginDrag(mc, aimed, false);
                 }
             } else if (aimed == null) {
@@ -357,7 +403,7 @@ public final class LineMarkers {
             MarkerText.say("Line cancelled");
             consumed = true;
         }
-        if (pickEdge && aimed != null && dragLine == null && aimed.kind != Kind.GIMBAL) {
+        if (pickEdge && aimed != null && dragLine == null && aimed.kind != Kind.GIMBAL && !isGrip(aimed.kind)) {
             consumed = true;
             LineShape l = aimed.line;
             int last = l.curve.nodes.size() - 1;
@@ -375,6 +421,43 @@ public final class LineMarkers {
         }
         if (saveNeeded) ShapeMarkers.saveLines();
         return consumed || attackEdge;
+    }
+
+    /** True for the gradient-angle tool's two grips. */
+    private static boolean isGrip(Kind k) {
+        return k == Kind.GRAD_T || k == Kind.GRAD_B;
+    }
+
+    /** A painting mode (not a marker mode) with Gradient picked: when lines offer their gradient options. */
+    private static boolean gradientPainting(PlacementMode pm) {
+        return pm.places() && co.fax.wang.config.ConfigManager.get().activePaintType == co.fax.wang.PaintType.GRADIENT;
+    }
+
+    /**
+     * Lines while painting with Gradient: nothing can be reshaped, but the gradient-angle grips
+     * drag, and any other click (painting included) puts the angle tool away. True when a line
+     * used this tick's clicks.
+     */
+    private static boolean paintTick(Minecraft mc, boolean owns, boolean attack, boolean attackEdge, boolean useEdge) {
+        if (dragLine != null) {
+            if (attack) {
+                applyDrag(mc);
+            } else {
+                dragLine = null;
+                ShapeMarkers.saveLines();
+            }
+            return true;
+        }
+        if (!owns) return false;
+        if (attackEdge && aimed != null && isGrip(aimed.kind)) {
+            beginAngle(aimed);
+            return true;
+        }
+        if ((attackEdge || useEdge) && angling != null) {
+            angling = null;
+            MarkerText.say("Gradient angle put away");
+        }
+        return false;
     }
 
     /**
@@ -434,7 +517,7 @@ public final class LineMarkers {
             return true;
         }
         if (dragLine == null) return false;
-        if (dragKind == Kind.GIMBAL) return true; // a ring drag has no depth to push
+        if (dragKind == Kind.GIMBAL || isGrip(dragKind)) return true; // a ring drag has no depth to push
         Vec3 anchor = controlPos(dragLine, dragKind, dragIndex);
         Vec3 away = anchor.subtract(Raycast.eye(mc));
         if (away.lengthSqr() < 1e-6) return true;
@@ -490,16 +573,199 @@ public final class LineMarkers {
 
     // ---- toolbar -------------------------------------------------------------------------------
 
-    /** The line's toolbar: profile · shell | solid, then the gradients · flip · rendering · delete · help. */
+    /**
+     * The gradient buttons, shared by both toolbars: the four directions. (Seeing the gradient
+     * on the line and setting its angle live on the Rendering page.)
+     */
+    private static void gradientButtons(LineShape l, List<MarkerToolbar.Button> row) {
+        LineGradient[] gs = LineGradient.values();
+        for (int i = 0; i < gs.length; i++) {
+            LineGradient g = gs[i];
+            String what = switch (g) {
+                case ACROSS -> "across the line, bottom to top of every slice (Angle sets which way is top)";
+                case ALONG -> "from the start node to the end node";
+                case INSIDE_OUT -> "from the line out to the skin";
+                case OUTSIDE_IN -> "from the skin in to the line";
+            };
+            row.add(new MarkerToolbar.Button(MarkerToolbar.pixels(GRADIENT_GLYPHS[i], 0.08), l.gradient == g, false,
+                    "Gradient " + g.label.toLowerCase(java.util.Locale.ROOT) + ": " + what
+                            + (l.gradient == g ? " (on)" : ""), () -> {
+                        // Only changes how a later Gradient fill runs — the tube itself is unchanged.
+                        l.gradient = g;
+                        if (g != LineGradient.ACROSS && angling == l) angling = null;
+                        changed(l, "Line gradient: " + g.label.toLowerCase(java.util.Locale.ROOT));
+                    }));
+        }
+    }
+
+    /**
+     * The gradient-angle toggle (on the Rendering page, beside Show as gradient): brings out the
+     * pink plane with its T / B grips, or puts it away.
+     */
+    static MarkerToolbar.Button angleButton(LineShape l) {
+        return new MarkerToolbar.Button(MarkerToolbar.pixels(ANGLE_GLYPH, 0.085), angling == l, false,
+                "Gradient angle: choose which way is top for the across gradient" + (angling == l ? " (on)" : ""), () -> {
+                    if (angling == l) {
+                        angling = null;
+                        MarkerText.say("Gradient angle put away");
+                        return;
+                    }
+                    angling = l;
+                    angleSample = angleSampleFor(l);
+                    if (l.gradient != LineGradient.ACROSS) {
+                        l.gradient = LineGradient.ACROSS; // the angle only means something across the line
+                        ShapeMarkers.saveLines();
+                    }
+                    ShapeMarkers.touch(l);
+                    MarkerText.say("Gradient angle — drag T (top) or B (bottom) round the ring · "
+                            + MarkerText.mod() + " 15° steps");
+                });
+    }
+
+    /**
+     * The toolbar a line's cog opens while painting with Gradient: how the gradient runs through
+     * it, and its Rendering page (the line can't be reshaped from here). Null when that isn't what is going on.
+     */
+    static MarkerToolbar.Spec paintSpec(LineShape l, PlacementMode pm) {
+        if (!lines.contains(l) || !gradientPainting(pm)) return null;
+        if (MarkerToolbar.stylePage()) {
+            Vec3[] sb = l.bounds();
+            return new MarkerToolbar.Spec(null, StylePage.rows(l, l.style, TUBE_FILL, TUBE_EDGE, () -> {
+                ShapeMarkers.touch(l);
+                ShapeMarkers.saveLines();
+            }), cluster(l)[1], sb[0], sb[1], List.of());
+        }
+        List<MarkerToolbar.Button> row = new ArrayList<>();
+        gradientButtons(l, row);
+        row.add(StylePage.openButton(l.style));
+        row.add(new MarkerToolbar.Button(MarkerToolbar.QUESTION, false, false,
+                "Help: how lines work", () -> Minecraft.getInstance()
+                        .setScreenAndShow(co.fax.wang.GradientScreen.atHelpTopic("Marker line"))));
+        Vec3[] b = l.bounds();
+        return new MarkerToolbar.Spec(null, List.of(row), cluster(l)[1], b[0], b[1], List.of());
+    }
+
+    /** The Physics page: Back · Gravity (drop the line, or stop it falling) · Undo drop. */
+    private static List<MarkerToolbar.Button> physicsRow(LineShape l) {
+        List<MarkerToolbar.Button> row = new ArrayList<>();
+        row.add(new MarkerToolbar.Button(MarkerToolbar.pixels(BACK_GLYPH, 0.085), false, false,
+                "Back to this line's options", () -> MarkerToolbar.showPhysics(false)));
+        boolean falling = drops.containsKey(l);
+        row.add(new MarkerToolbar.Button(MarkerToolbar.pixels(GRAVITY_GLYPH, 0.085), falling, false,
+                falling ? "Gravity (on): the line is falling · LMB stop it where it is"
+                        : "Gravity: let the line fall, tumble and settle where it would come to rest "
+                                + "(a buried line pops up first)",
+                () -> {
+                    if (drops.containsKey(l)) stopDrop(l, "Line: gravity off — left where it was");
+                    else startDrop(Minecraft.getInstance(), l);
+                }));
+        row.add(new MarkerToolbar.Button(MarkerToolbar.REDO, false, false,
+                beforeDrop.containsKey(l) ? "Undo drop: put the line back where it was before gravity"
+                        : "Undo drop: nothing to undo yet", () -> undoDrop(l)));
+        return row;
+    }
+
+    // ---- gravity ---------------------------------------------------------------------------------
+
+    /** What gravity collides with: any block with a collision shape (so not water, grass or air). */
+    private static LinePhysics.Solid ground(Minecraft mc) {
+        BlockPos.MutableBlockPos at = new BlockPos.MutableBlockPos();
+        return (x, y, z) -> {
+            if (mc.level == null) return false;
+            at.set(x, y, z);
+            return !mc.level.getBlockState(at).getCollisionShape(mc.level, at).isEmpty();
+        };
+    }
+
+    /** Let {@code l} go: remember where it was, lift it clear if it is buried, and start it falling. */
+    private static void startDrop(Minecraft mc, LineShape l) {
+        LinePhysics body = LinePhysics.of(l);
+        if (body == null || mc.level == null) return;
+        LineShape.Pose from = l.pose();
+        beforeDrop.put(l, from);
+        int rose = body.popUp(ground(mc), POP_UP_LIMIT);
+        drops.put(l, new Drop(body, from, new int[1]));
+        if (rotating == l) rotating = null;
+        if (angling == l) angling = null;
+        ShapeMarkers.touch(l);
+        MarkerText.say(rose > 0 ? "Line: gravity on — lifted " + rose + " blocks clear of the ground, now falling"
+                : "Line: gravity on — falling");
+    }
+
+    /** End {@code l}'s fall where it is (no-op when it isn't falling); {@code msg} is said if given. */
+    private static void stopDrop(LineShape l, String msg) {
+        if (drops.remove(l) == null) return;
+        ShapeMarkers.saveLines();
+        if (msg != null) MarkerText.say(msg);
+    }
+
+    private static void undoDrop(LineShape l) {
+        LineShape.Pose from = beforeDrop.remove(l);
+        if (from == null) return;
+        drops.remove(l);
+        l.turnFrom(from, l.curve.centre(), new Vec3(0, 1, 0), 0);
+        changed(l, "Line: put back where it was before gravity");
+    }
+
+    /** Put {@code l} where its falling body is now. */
+    private static void applyDrop(LineShape l, Drop d) {
+        l.turnFrom(d.from, d.body.start, d.body.axis(), d.body.angle());
+        l.curve.translate(d.body.shift());
+        l.markDirty();
+    }
+
+    /** Every falling line moves on a tick; one that has settled, or can't, stops. */
+    static void tickPhysics(Minecraft mc) {
+        if (drops.isEmpty() || mc.level == null || mc.isPaused()) return;
+        LinePhysics.Solid world = ground(mc);
+        double floor = mc.level.getMinY() - 16;
+        for (var it = drops.entrySet().iterator(); it.hasNext(); ) {
+            var e = it.next();
+            LineShape l = e.getKey();
+            Drop d = e.getValue();
+            if (!lines.contains(l)) {
+                it.remove();
+                continue;
+            }
+            d.body.tick(world);
+            if (d.body.bottom() < floor) {
+                // Nothing under it (the void, or chunks that aren't loaded): don't lose the line.
+                it.remove();
+                l.turnFrom(d.from, l.curve.centre(), new Vec3(0, 1, 0), 0);
+                beforeDrop.remove(l);
+                ShapeMarkers.saveLines();
+                MarkerText.say("Line: nothing to land on — put back where it was");
+                continue;
+            }
+            applyDrop(l, d);
+            boolean rest = d.body.atRest();
+            if (rest || ++d.ticks[0] >= DROP_MAX_TICKS) {
+                it.remove();
+                ShapeMarkers.saveLines();
+                MarkerText.say(rest ? "Line: came to rest" : "Line: still moving after 45 s — left where it is");
+            }
+        }
+    }
+
+    /** Dev-only ({@link co.fax.wang.DebugScript}'s {@code drop}): start gravity on the last line made. */
+    public static boolean debugDrop() {
+        if (lines.isEmpty()) return false;
+        startDrop(Minecraft.getInstance(), lines.get(lines.size() - 1));
+        return true;
+    }
+
+    /** The line's toolbar: profile · shell | solid, then the gradients · preview · angle · flip, then rendering · delete · help. */
     static MarkerToolbar.Spec toolbarSpec(LineShape l) {
         if (!lines.contains(l)) return null;
-        List<MarkerToolbar.Button> top = new ArrayList<>(), bottom = new ArrayList<>();
-        List<List<MarkerToolbar.Button>> rows = List.of(top, bottom);
+        List<MarkerToolbar.Button> top = new ArrayList<>(), middle = new ArrayList<>(), bottom = new ArrayList<>();
+        List<List<MarkerToolbar.Button>> rows = List.of(top, middle, bottom);
         if (MarkerToolbar.stylePage()) {
             rows = StylePage.rows(l, l.style, TUBE_FILL, TUBE_EDGE, () -> {
                 ShapeMarkers.touch(l);
                 ShapeMarkers.saveLines();
             });
+        } else if (MarkerToolbar.physicsPage()) {
+            rows = List.of(physicsRow(l));
         }
         for (LineProfile p : PROFILES) {
             MarkerToolbar.Icon icon = p == LineProfile.NONE ? MarkerToolbar.LINE_BARE : MarkerToolbar.outline(p.outline(1));
@@ -523,29 +789,15 @@ public final class LineMarkers {
                     l.markDirty();
                     changed(l, "Line: solid tube");
                 }));
-        LineGradient[] gs = LineGradient.values();
-        for (int i = 0; i < gs.length; i++) {
-            LineGradient g = gs[i];
-            String what = switch (g) {
-                case ACROSS -> "from the side you aim into, across to the far side";
-                case ALONG -> "from the start node to the end node";
-                case INSIDE_OUT -> "from the line out to the skin";
-                case OUTSIDE_IN -> "from the skin in to the line";
-            };
-            bottom.add(new MarkerToolbar.Button(MarkerToolbar.pixels(GRADIENT_GLYPHS[i], 0.08), l.gradient == g, false,
-                    "Gradient " + g.label.toLowerCase(java.util.Locale.ROOT) + ": " + what
-                            + (l.gradient == g ? " (on)" : ""), () -> {
-                        // Only changes how a later Gradient fill runs — the tube itself is unchanged.
-                        l.gradient = g;
-                        changed(l, "Line gradient: " + g.label.toLowerCase(java.util.Locale.ROOT));
-                    }));
-        }
-        bottom.add(new MarkerToolbar.Button(MarkerToolbar.FLIP, false, false,
+        gradientButtons(l, middle);
+        middle.add(new MarkerToolbar.Button(MarkerToolbar.FLIP, false, false,
                 "Flip: swap the start and end nodes", () -> {
                     l.reverse();
                     changed(l, "Line flipped — it now starts at the other end");
                 }));
         bottom.add(StylePage.openButton(l.style));
+        bottom.add(new MarkerToolbar.Button(MarkerToolbar.pixels(PHYSICS_GLYPH, 0.085), drops.containsKey(l), false,
+                "Physics: drop this line onto the ground with gravity", () -> MarkerToolbar.showPhysics(true)));
         bottom.add(new MarkerToolbar.Button(MarkerToolbar.BIN, false, true,
                 "Delete this line (same as MMB)", () -> remove(l)));
         bottom.add(new MarkerToolbar.Button(MarkerToolbar.QUESTION, false, false,
@@ -593,6 +845,15 @@ public final class LineMarkers {
     static String hint() {
         if (aimed == null) return null;
         LineShape l = aimed.line;
+        if (isGrip(aimed.kind)) {
+            String which = aimed.kind == Kind.GRAD_T ? "top" : "bottom";
+            return dragLine == l
+                    ? "Gradient " + which + " · angle " + Math.round(Math.toDegrees(l.gradAngle)) + "° · "
+                            + MarkerText.mod() + " 15° steps"
+                    : "Gradient " + which + " · drag round the ring to set which way the gradient runs · "
+                            + MarkerText.mod() + " 15° steps";
+        }
+        if (paintOptions) return aimed.kind == Kind.COG ? "Cog · LMB gradient options for this line" : null;
         String mod = MarkerText.mod(), alt = MarkerText.axis();
         int last = l.curve.nodes.size() - 1;
         return switch (aimed.kind) {
@@ -620,6 +881,7 @@ public final class LineMarkers {
                     : (turnTilt ? "Rotate ring · tilted " : "Rotate ring · turned ")
                             + Math.round(Math.toDegrees(turnBy)) + "° · " + mod + " 15° steps";
             case BODY -> "Line · dbl-click add a node · MMB delete line";
+            case GRAD_T, GRAD_B -> null; // (answered above)
         };
     }
 
@@ -633,6 +895,7 @@ public final class LineMarkers {
     private static void beginDrag(Minecraft mc, Aim a, boolean radial) {
         Vec3 target = controlPos(a.line, a.kind, a.index);
         if (target == null) return;
+        stopDrop(a.line, null); // taking hold of a falling line catches it
         dragLine = a.line;
         dragKind = a.kind;
         dragIndex = a.index;
@@ -656,6 +919,10 @@ public final class LineMarkers {
     private static void applyDrag(Minecraft mc) {
         if (dragKind == Kind.GIMBAL) {
             applyTurn(mc);
+            return;
+        }
+        if (isGrip(dragKind)) {
+            applyAngle(mc);
             return;
         }
         if (dragRadial) {
@@ -751,6 +1018,7 @@ public final class LineMarkers {
      */
     private static void beginTurn(Minecraft mc, Aim a) {
         LineShape l = a.line;
+        stopDrop(l, null);
         Vec3 eye = Raycast.eye(mc), look = Raycast.look(mc), ringAxis = ringAxis(l, a.index);
         turnCentre = l.curve.centre();
         turnRadius = ringRadius(l);
@@ -792,6 +1060,108 @@ public final class LineMarkers {
         turnBy = by;
         if (turnTilt) dragLine.tiltGimbalFrom(turnPose, dragIndex, by);
         else dragLine.turnFrom(turnPose, turnCentre, turnAxis, by);
+    }
+
+    // ---- gradient angle -------------------------------------------------------------------------
+
+    /**
+     * Where the angle tool sits for {@code l}: the slice a little way along the line from its
+     * control cluster (so the two never sit on top of each other), towards the longer end.
+     */
+    private static int angleSampleFor(LineShape l) {
+        List<LineCurve.Sample> ss = l.samples();
+        if (ss.isEmpty()) return 0;
+        int at = l.controlSample();
+        double s = ss.get(at).s(), total = ss.get(ss.size() - 1).s();
+        double want = total - s >= s ? s + ANGLE_ALONG : s - ANGLE_ALONG;
+        return l.sampleAtArc(Math.max(0, Math.min(total, want)));
+    }
+
+    /** The slice the angle tool is on right now: held while a grip is dragged, else following the cluster. */
+    private static int angleSlice(LineShape l) {
+        int last = l.samples().size() - 1;
+        if (!(dragLine == l && isGrip(dragKind)) && !MarkerToolbar.isOpen(l)) angleSample = angleSampleFor(l);
+        return Math.max(0, Math.min(last, angleSample));
+    }
+
+    private static double angleRadius(LineShape l, int i) {
+        return (l.profile == LineProfile.NONE ? 0 : l.radiusAt(i) + 0.5) + ANGLE_MARGIN;
+    }
+
+    /** The T (top) or B (bottom) grip's position. */
+    private static Vec3 gripPos(LineShape l, boolean top) {
+        int i = angleSlice(l);
+        Vec3 dir = l.sliceTop(i);
+        return l.samples().get(i).pos().add(dir.scale(top ? angleRadius(l, i) : -angleRadius(l, i)));
+    }
+
+    /** Grab a gradient-angle grip: it follows the crosshair round the ring until release. */
+    private static void beginAngle(Aim a) {
+        angleSample = angleSlice(a.line);
+        dragLine = a.line;
+        dragKind = a.kind;
+        dragIndex = 0;
+        dragRadial = false;
+        lockAxis = null;
+        ShapeMarkers.touch(a.line);
+    }
+
+    /**
+     * The grabbed grip goes to the spot on the ring nearest the crosshair; the gradient's top is
+     * wherever T then is (B is always straight across from it).
+     */
+    private static void applyAngle(Minecraft mc) {
+        LineShape l = dragLine;
+        int i = Math.max(0, Math.min(l.samples().size() - 1, angleSample));
+        LineCurve.Sample s = l.samples().get(i);
+        double at = Gizmo.rayCircle(Raycast.eye(mc), Raycast.look(mc), s.pos(), s.tan(), angleRadius(l, i))[2];
+        Vec3[] uv = Gizmo.planeAxes(s.tan());
+        Vec3 d = uv[0].scale(Math.cos(at)).add(uv[1].scale(Math.sin(at)));
+        double a = Math.atan2(d.dot(s.b()), d.dot(s.n()));
+        if (dragKind == Kind.GRAD_B) a += Math.PI;
+        if (Gradient.modifierDown()) a = Math.rint(a / TURN_STEP) * TURN_STEP;
+        l.gradAngle = Math.IEEEremainder(a, 2 * Math.PI);
+    }
+
+    /**
+     * The gradient-angle tool: a pink plane cutting the line at right angles, a ring round it,
+     * and the T / B grips on the ring joined by a line — the gradient runs from B to T.
+     */
+    private static void drawAngleTool(SubmitNodeCollector col, PoseStack ps, Vec3 cam, LineShape l, Vec3[] axes) {
+        int i = angleSlice(l);
+        LineCurve.Sample s = l.samples().get(i);
+        double r = angleRadius(l, i), w = 0.03 + r * 0.002;
+        Vec3 c = s.pos(), t = gripPos(l, true), b = gripPos(l, false);
+        Vec3[] uv = Gizmo.planeAxes(s.tan());
+        Gizmo.twoPass(col, ps, cam, e -> {
+            int n = 32;
+            for (int k = 0; k < n; k++) {
+                double a0 = 2 * Math.PI * k / n, a1 = 2 * Math.PI * (k + 1) / n;
+                Vec3 p0 = c.add(uv[0].scale(Math.cos(a0) * r)).add(uv[1].scale(Math.sin(a0) * r));
+                Vec3 p1 = c.add(uv[0].scale(Math.cos(a1) * r)).add(uv[1].scale(Math.sin(a1) * r));
+                Gizmo.quad(e, ANGLE_PLANE, c, p0, p1, p1);
+                if (!e.ghost()) Gizmo.quad(e, ANGLE_PLANE, p1, p1, p0, c); // seen from either side
+            }
+            Gizmo.circle(e, c, s.tan(), r, w, ANGLE);
+            Gizmo.segmentRibbon(e, b, t, w, ANGLE);
+            Gizmo.controlCube(e, t, CTRL_HALF, isAimed(l, Kind.GRAD_T, 0) ? Gizmo.AIMED : ANGLE, Gizmo.T_ICON, axes);
+            Gizmo.controlCube(e, b, CTRL_HALF, isAimed(l, Kind.GRAD_B, 0) ? Gizmo.AIMED : ANGLE, Gizmo.B_ICON, axes);
+        });
+    }
+
+    /**
+     * Dev-only ({@link co.fax.wang.DebugScript}'s {@code aim grip T|B DEG}): where the T or B grip
+     * of the line whose angle tool is out would be with the gradient angle at {@code deg} (NaN =
+     * where it is now), or null when no angle tool is out.
+     */
+    public static Vec3 debugGripPoint(boolean top, double deg) {
+        if (angling == null) return null;
+        if (Double.isNaN(deg)) return gripPos(angling, top);
+        double keep = angling.gradAngle;
+        angling.gradAngle = Math.toRadians(deg);
+        Vec3 p = gripPos(angling, top);
+        angling.gradAngle = keep;
+        return p;
     }
 
     /**
@@ -891,6 +1261,43 @@ public final class LineMarkers {
         return t.lengthSqr() < 1e-12 ? new Vec3(1, 0, 0) : t.normalize();
     }
 
+    /**
+     * Aiming while painting with Gradient: only the gradient-angle grips and a shown cog can be
+     * picked; looking into a tube targets its line (so its cog comes out) without owning clicks.
+     */
+    private static void computePaintAim(Minecraft mc) {
+        if (dragLine != null) {
+            aimed = new Aim(dragLine, dragKind, dragIndex, 0);
+            return;
+        }
+        Vec3 eye = Raycast.eye(mc), dir = Raycast.look(mc);
+        Aim best = null;
+        if (angling != null) {
+            best = closer(best, angling, Kind.GRAD_T, 0, Gizmo.rayCube(eye, dir, gripPos(angling, true), CTRL_HALF));
+            best = closer(best, angling, Kind.GRAD_B, 0, Gizmo.rayCube(eye, dir, gripPos(angling, false), CTRL_HALF));
+        }
+        for (LineShape l : lines) {
+            if (ShapeMarkers.cogShown(l)) {
+                best = closer(best, l, Kind.COG, 0, Gizmo.rayCube(eye, dir, l.controls(eye)[1], CTRL_HALF));
+            }
+        }
+        if (best == null) {
+            LineShape into = tubeLookedInto(mc);
+            if (into == null) {
+                double bestGap = BODY_PICK;
+                for (LineShape l : lines) {
+                    LineCurve.RayHit h = LineCurve.closestToRay(l.samples(), eye, dir);
+                    if (h != null && h.distance() < bestGap && h.rayT() < Raycast.REACH) {
+                        bestGap = h.distance();
+                        into = l;
+                    }
+                }
+            }
+            if (into != null) best = new Aim(into, Kind.BODY, 0, 0);
+        }
+        aimed = best;
+    }
+
     private static void computeAim(Minecraft mc) {
         if (dragLine != null) {
             aimed = new Aim(dragLine, dragKind, dragIndex, 0);
@@ -898,6 +1305,10 @@ public final class LineMarkers {
         }
         Vec3 eye = Raycast.eye(mc), dir = Raycast.look(mc);
         Aim best = null;
+        if (angling != null) {
+            best = closer(best, angling, Kind.GRAD_T, 0, Gizmo.rayCube(eye, dir, gripPos(angling, true), CTRL_HALF));
+            best = closer(best, angling, Kind.GRAD_B, 0, Gizmo.rayCube(eye, dir, gripPos(angling, false), CTRL_HALF));
+        }
         for (LineShape l : lines) {
             boolean sel = l == selected;
             List<LineCurve.Node> ns = l.curve.nodes;
@@ -1022,9 +1433,11 @@ public final class LineMarkers {
         Vec3 eye = Raycast.eye(mc);
         for (LineShape l : lines) {
             boolean editing = handles && pm == PlacementMode.MARKER_LINE;
-            if (editing) l.slideControls(dt);
+            // Painting with Gradient: no editing, but the line's cog (gradient options) and angle tool show.
+            boolean options = handles && !editing && gradientPainting(pm);
+            if (editing || options) l.slideControls(dt);
             boolean sel = editing && l == selected;
-            boolean cog = editing && ShapeMarkers.cogShown(l);
+            boolean cog = (editing || options) && ShapeMarkers.cogShown(l);
             l.ensureCells(false); // stale tubes rebuild in the background; the last one keeps drawing
             // The tube's edges go white only while it's looked at (crosshair in it, or on one of
             // its parts) — a selected line elsewhere in view keeps the plain amber edges.
@@ -1034,9 +1447,10 @@ public final class LineMarkers {
                     l.style.ghost(looked ? TUBE_GHOST_SELECTED : TUBE_GHOST, !looked));
             // Twice: depth-tested (weaves through terrain), then a faint on-top ghost so the
             // line and its controls stay readable — and grabbable — behind blocks.
-            Vec3[] cluster = editing ? l.controls(eye) : null;
+            Vec3[] cluster = editing || options ? l.controls(eye) : null;
             Gizmo.twoPass(col, ps, cam, e -> drawParts(e, l, sel, editing, cog, axes, cluster));
             if (editing && l == rotating) drawGimbal(col, ps, cam, l);
+            if ((editing || options) && l == angling && !l.samples().isEmpty()) drawAngleTool(col, ps, cam, l, axes);
         }
         if (dragLine != null && lockAxis != null && dragOrigin != null) {
             // Alt axis lock: the track the dragged node slides on, coloured by axis.
@@ -1082,7 +1496,10 @@ public final class LineMarkers {
     private static void drawParts(Gizmo.Em e, LineShape l, boolean sel, boolean editing, boolean cog, Vec3[] axes,
                                   Vec3[] cluster) {
         drawCurve(e, l.samples(), 0.035, sel ? LINE_SELECTED : LINE);
-        if (!editing) return; // outside Line mode: just the line (and its tube)
+        if (!editing) { // outside Line mode: just the line (and its tube), plus its cog while painting a gradient
+            if (cog) Gizmo.cog(e, cluster[1], isAimed(l, Kind.COG, 0), axes);
+            return;
+        }
         List<LineCurve.Node> ns = l.curve.nodes;
         for (int i = 0; i < ns.size(); i++) {
             // Start and end nodes in the start / end colours, so the paint direction shows.
@@ -1155,10 +1572,40 @@ public final class LineMarkers {
         if (fv.length == 0 && ev.length == 0) return;
         var o = l.renderOrigin();
         float ox = (float) (o.getX() - cam.x), oy = (float) (o.getY() - cam.y), oz = (float) (o.getZ() - cam.z);
-        BlockSkin.Skin found = BlockSkin.of(l.style.block);
+        // Gradient preview: the tube's faces in the active palette's colours replace its tint / block look.
+        GradientPreview.Faces gp = l.gradPreview ? GradientPreview.of(l) : null;
+        BlockSkin.Skin found = gp != null ? null : BlockSkin.of(l.style.block);
         BlockSkin.Skin skin = found != null && blockFaces(fv) <= BlockSkin.MAX_FACES ? found : null;
-        int fill = skin != null ? 0 : l.style.face(TUBE_FILL);
+        int fill = skin != null || gp != null ? 0 : l.style.face(TUBE_FILL);
         boolean through = l.style.facesThrough;
+        if (gp != null) {
+            // See-through unless the line's face opacity says otherwise (100% = solid blocks).
+            int alpha = l.style.faceOpacity == MarkerStyle.UNSET ? PREVIEW_ALPHA : l.style.blockAlpha();
+            float gx = (float) (gp.origin().getX() - cam.x), gy = (float) (gp.origin().getY() - cam.y),
+                    gz = (float) (gp.origin().getZ() - cam.z);
+            Vec3 camLocal = new Vec3(-gx, -gy, -gz);
+            for (GradientPreview.Group g : alpha == 0 ? List.<GradientPreview.Group>of() : gp.groups()) {
+                int[] c = g.cells();
+                ps.pushPose();
+                ps.translate(gx, gy, gz);
+                if (g.skin() != null) {
+                    // The segment's own block texture on each of its cells.
+                    BlockSkin.submit(col, ps, g.skin(), alpha, through, camLocal, sink -> {
+                        for (int i = 0; i < c.length; i += 4) BlockSkin.cell(sink, c[i], c[i + 1], c[i + 2], c[i + 3]);
+                    });
+                } else {
+                    // No block to show (an Automatic segment): its flat colour.
+                    int argb = (alpha << 24) | (g.color() & 0xFFFFFF);
+                    col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(), (pose, vc) -> {
+                        for (int i = 0; i < c.length; i += 4) {
+                            BlockSkin.cell((f, w, a0, a1, b0, b1) -> flatFace(pose, vc, f, w, a0, b0, argb),
+                                    c[i], c[i + 1], c[i + 2], c[i + 3]);
+                        }
+                    });
+                }
+                ps.popPose();
+            }
+        }
         col.submitCustomGeometry(ps, RenderTypes.debugFilledBox(), (pose, vc) -> {
             long t0 = PERF ? System.nanoTime() : 0;
             if (fill >>> 24 != 0 && !through) {
@@ -1203,6 +1650,20 @@ public final class LineMarkers {
             }
             if (PERF) perfEmitNanos += System.nanoTime() - t0;
         });
+    }
+
+    /** One untextured block-cell face (as {@link BlockSkin#cell} reports it) in a flat colour. */
+    private static void flatFace(PoseStack.Pose pose, com.mojang.blaze3d.vertex.VertexConsumer vc,
+                                 int face, float w, int a, int b, int argb) {
+        int axis = TubeBuild.axisOf(face);
+        int pa = axis == 0 ? 1 : 0, pb = axis == 2 ? 1 : 2;
+        float[] p = new float[3];
+        p[axis] = w;
+        for (int k = 0; k < 4; k++) {
+            p[pa] = a + ((k == 1 || k == 2) ? 1 : 0);
+            p[pb] = b + (k >= 2 ? 1 : 0);
+            vc.addVertex(pose, p[0], p[1], p[2]).setColor(argb);
+        }
     }
 
     /** How many block squares the merged face rectangles {@code fv} cover. */

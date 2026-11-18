@@ -17,7 +17,7 @@ import java.util.Map;
  * palette content so nothing samples textures per frame. Display only — chaos, variation and
  * step-length wobble are left out.
  */
-final class PalettePreview {
+public final class PalettePreview {
 
     private PalettePreview() {}
 
@@ -51,6 +51,31 @@ final class PalettePreview {
 
     private static int segmentAt(Palette p, double t, double[] bounds) {
         return PaletteMath.indexFor(PaletteMath.curved(p.curve, t), bounds);
+    }
+
+    /**
+     * One palette segment for an in-world preview: its block's item id (null for an Automatic
+     * segment, which has no block until it is painted) and its flat colour.
+     */
+    public record Band(String block, int color) {}
+
+    /**
+     * The palette's gradient as {@code n} positions, start first, each naming the segment it
+     * falls in (the same bands the strip draws; one {@link Band} object per segment). Empty when
+     * the palette has no segments.
+     */
+    public static Band[] bands(Palette p, int n) {
+        int[] colors = colorsFor(p);
+        if (colors.length == 0 || n <= 0) return new Band[0];
+        Band[] segs = new Band[colors.length];
+        for (int i = 0; i < segs.length; i++) {
+            PaletteSegment s = p.segments.get(i);
+            segs[i] = new Band(s.isAutomatic() || s.block == null || s.block.isEmpty() ? null : s.block, colors[i]);
+        }
+        double[] bounds = PaletteMath.segmentBounds(colors.length, p.curve, p.stops);
+        Band[] out = new Band[n];
+        for (int i = 0; i < n; i++) out[i] = segs[segmentAt(p, (i + 0.5) / n, bounds)];
+        return out;
     }
 
     /** The gradient as a horizontal strip, start on the left. */

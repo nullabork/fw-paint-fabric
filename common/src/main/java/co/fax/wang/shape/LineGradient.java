@@ -5,7 +5,10 @@ package co.fax.wang.shape;
  * floating buttons; Solid and Noise ignore it.
  */
 public enum LineGradient {
-    /** From the side of the tube you aimed into, across to the far side (the default). */
+    /**
+     * Across the line: in every slice at right angles to it, from the bottom of the tube to the
+     * top, "top" being the line's gradient angle (the default; see {@link LineShape#sliceFracs}).
+     */
     ACROSS("Across"),
     /** From the start node (turquoise) to the end node (amber), along the curve. */
     ALONG("Along"),
