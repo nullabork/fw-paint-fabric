@@ -111,7 +111,6 @@ public final class DebugScript {
             waitTicks = 5;
             afterWait.add(() -> {
                 ShapeMarkers.clearAll();
-                MarkerManager.clearAll();
             });
             return;
         }
@@ -139,7 +138,6 @@ public final class DebugScript {
         for (KeyMapping k : keys(mc)) k.setDown(false);
         mc.setScreenAndShow(null);
         ShapeMarkers.clearAll();
-        MarkerManager.clearAll();
         mc.options.pauseOnLostFocus = pauseOnLostFocus;
         // Put the config back as it was (mode / paint / set changes were only for the run).
         if (savedConfig != null) {
@@ -195,6 +193,16 @@ public final class DebugScript {
                 if (p == null) LOG.warn("TOUR script: nothing to aim at for '{}'", line);
                 else mc.player.lookAt(EntityAnchorArgument.Anchor.EYES, p);
             }
+            case "break", "mine" -> {
+                // The vanilla hand-breaking path (first hit / held), so the loader's attack hook runs.
+                net.minecraft.core.BlockPos at = net.minecraft.core.BlockPos.containing(d(a[1]), d(a[2]), d(a[3]));
+                boolean ok = "break".equals(a[0]) ? mc.gameMode.startDestroyBlock(at, net.minecraft.core.Direction.SOUTH)
+                        : mc.gameMode.continueDestroyBlock(at, net.minecraft.core.Direction.SOUTH);
+                LOG.info("TOUR script: {} {} -> {}", a[0], at, ok);
+            }
+            case "dig" -> {
+                if (!co.fax.wang.shape.LineMarkers.debugDig(a[1])) LOG.warn("TOUR script: no marker to set dig on");
+            }
             case "drop" -> {
                 if (!co.fax.wang.shape.LineMarkers.debugDrop()) LOG.warn("TOUR script: no line to drop");
             }
@@ -224,7 +232,6 @@ public final class DebugScript {
             }
             case "clear" -> {
                 ShapeMarkers.clearAll();
-                MarkerManager.clearAll();
             }
             case "screen" -> DebugTour.openStop(mc, a[1]);
             case "close" -> mc.setScreenAndShow(null);

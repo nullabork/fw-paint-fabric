@@ -70,7 +70,7 @@ final class WheelHistory {
                 if (cfg.activePaintType != PaintType.SOLID) Gradient.setPaintType(PaintType.SOLID);
                 Gradient.setSolidMatch(SolidMatch.valueOf(p.value));
             }
-            case MODE -> Gradient.setPlacementMode(PlacementMode.valueOf(p.value));
+            case MODE -> Gradient.setPlacementMode(PlacementMode.byName(p.value));
             case OPTION -> {
                 String[] kv = p.value.split("=", 2);
                 if (kv.length == 2 && !kv[1].equals(optionState(kv[0]))) toggle(kv[0]);
@@ -96,7 +96,7 @@ final class WheelHistory {
             case BLOCK -> cfg.activePaintType == PaintType.SOLID && cfg.solidMatch == SolidMatch.SELECTED
                     && cfg.solidBlock.equals(p.value);
             case MATCH -> cfg.activePaintType == PaintType.SOLID && cfg.solidMatch.name().equals(p.value);
-            case MODE -> cfg.placementMode.name().equals(p.value);
+            case MODE -> cfg.placementMode == PlacementMode.byName(p.value);
             case OPTION -> {
                 String[] kv = p.value.split("=", 2);
                 yield kv.length == 2 && kv[1].equals(optionState(kv[0]));

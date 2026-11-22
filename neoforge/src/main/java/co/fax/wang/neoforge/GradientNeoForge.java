@@ -2,7 +2,7 @@ package co.fax.wang.neoforge;
 
 import co.fax.wang.Gradient;
 import co.fax.wang.HudOverlay;
-import co.fax.wang.MarkerManager;
+import co.fax.wang.shape.ShapeMarkers;
 import co.fax.wang.PaintPlacer;
 import co.fax.wang.config.ConfigManager;
 import net.minecraft.client.Minecraft;
@@ -58,6 +58,13 @@ public class GradientNeoForge {
         if (mc.level != null && Gradient.toolEngaged()) {
             event.setCanceled(true);
             event.setSwingHand(false);
+        } else if (mc.level != null && event.isAttack()
+                && mc.hitResult instanceof net.minecraft.world.phys.BlockHitResult hit
+                && hit.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK
+                && ShapeMarkers.digBlocked(hit.getBlockPos())) {
+            // A marker's dig mode forbids breaking this block (fires for the click and while held).
+            event.setCanceled(true);
+            event.setSwingHand(false);
         }
     }
 
@@ -79,7 +86,7 @@ public class GradientNeoForge {
     static void onSubmitCustomGeometry(SubmitCustomGeometryEvent event) {
         var col = event.getSubmitNodeCollector();
         var cam = event.getLevelRenderState().cameraRenderState.pos;
-        MarkerManager.render(col, cam);
+        ShapeMarkers.render(col, cam);
         PaintPlacer.renderPreview(col, cam);
     }
 

@@ -582,8 +582,8 @@ public class WheelScreen extends Screen {
             case WheelHistory.OPTION -> "Options";
             case WheelHistory.MODE -> {
                 for (PlacementMode.Group group : PlacementMode.groups()) {
-                    if (PlacementMode.valueOf(p.value) != PlacementMode.DISABLED
-                            && group.modes().contains(PlacementMode.valueOf(p.value))) yield group.title();
+                    if (PlacementMode.byName(p.value) != PlacementMode.DISABLED
+                            && group.modes().contains(PlacementMode.byName(p.value))) yield group.title();
                 }
                 yield null;
             }

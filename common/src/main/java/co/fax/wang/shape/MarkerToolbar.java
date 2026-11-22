@@ -96,7 +96,7 @@ final class MarkerToolbar {
 
     // ---- state -----------------------------------------------------------------------------
 
-    private static final double BTN = 0.8, GAP = 0.15, CLEAR = 2;
+    private static final double BTN = 0.8, GAP = 0.15;
     /** Gap between the cog and the bar beside it (scaled with distance like the buttons). */
     private static final double NEAR = 0.25;
     private static final int BG = 0xC0202020, BG_HOVER = 0xE0505050;
@@ -260,8 +260,8 @@ final class MarkerToolbar {
         double w = 0;
         for (List<Button> row : spec.rows()) w = Math.max(w, row.size() * size + (row.size() - 1) * gap);
         // Right next to the cog (on screen: above, below, right, left of it — the first that hides
-        // no control), so opening it never means flying off to find it. Only when all four would
-        // cover a control does it go clear of the whole marker, above or below its bounds.
+        // no control, else the one that hides the fewest), so opening it never means flying off to
+        // find it. The cog sits between you and the marker, so some control is often behind.
         Vec3 cog = spec.cog();
         double near = Gizmo.CTRL_HALF + NEAR * scale;
         Vec3 up = ax[1], right = ax[0];
@@ -270,14 +270,14 @@ final class MarkerToolbar {
                 {cog.add(up.scale(-near - h / 2)), up.scale(h / 2)},
                 {cog.add(right.scale(near + w / 2)), right.scale(-w / 2)},
                 {cog.add(right.scale(-near - w / 2)), right.scale(w / 2)},
-                {new Vec3(cog.x, spec.max().y + CLEAR + h / 2, cog.z), up.scale(-h / 2)},
-                {new Vec3(cog.x, spec.min().y - CLEAR - h / 2, cog.z), up.scale(h / 2)},
         };
         Vec3[] pick = tries[0];
+        int fewest = Integer.MAX_VALUE;
         for (Vec3[] t : tries) {
-            if (!blocksControl(eye, t[0], ax, w / 2, h / 2)) {
+            int hidden = controlsBehind(eye, t[0], ax, w / 2, h / 2);
+            if (hidden < fewest) {
+                fewest = hidden;
                 pick = t;
-                break;
             }
         }
         Vec3 c = pick[0];
@@ -306,16 +306,17 @@ final class MarkerToolbar {
         return new Vec3[]{right, right.cross(f).normalize(), f};
     }
 
-    /** True when a bar centred at {@code c} would sit between the eye and a control. */
-    private static boolean blocksControl(Vec3 eye, Vec3 c, Vec3[] ax, double hw, double hh) {
+    /** How many controls a bar centred at {@code c} would sit in front of, seen from the eye. */
+    private static int controlsBehind(Vec3 eye, Vec3 c, Vec3[] ax, double hw, double hh) {
+        int n = 0;
         for (Vec3 p : spec.controls()) {
             Vec3 d = p.subtract(eye);
             double len = d.length();
             if (len < 1e-6) continue;
             double t = Gizmo.rayBillboard(eye, d.scale(1 / len), c, ax, hw + 0.2, hh + 0.2);
-            if (t >= 0 && t < len) return true;
+            if (t >= 0 && t < len) n++;
         }
-        return false;
+        return n;
     }
 
     // ---- rendering ---------------------------------------------------------------------------

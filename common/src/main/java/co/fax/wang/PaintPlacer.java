@@ -104,7 +104,7 @@ public final class PaintPlacer {
     }
 
     private static final List<Column> columns = new ArrayList<>();
-    private static boolean markerDriven; // Face flood came from the start-marker plane
+    private static boolean markerDriven; // the stroke's columns grow inside a marker (a shape or tube)
     private static int layerCooldown;
 
     // 3D fill state.
@@ -252,7 +252,7 @@ public final class PaintPlacer {
     private static boolean startsOutsideMarker(Minecraft mc, GradientConfig cfg, PlacementMode pm,
                                                BlockPos clicked, Direction d) {
         if (!cfg.onlyInsideMarkers) return false;
-        if (!co.fax.wang.shape.ShapeMarkers.any() && MarkerManager.endMarkers.isEmpty()) return false;
+        if (!co.fax.wang.shape.ShapeMarkers.any()) return false;
         BlockPos front = clicked.relative(d);
         if (inMarker(front)) return false;
         if (pm == PlacementMode.FILL3D) {
@@ -559,8 +559,7 @@ public final class PaintPlacer {
         for (int k = firstAir; k <= SCAN_LIMIT; k++) {
             BlockPos p = base.relative(dir, k);
             var state = mc.level.getBlockState(p);
-            if (boundary < 0 && (MarkerManager.endMarkers.contains(p)
-                    || (inRegion && !co.fax.wang.shape.ShapeMarkers.contains(p))
+            if (boundary < 0 && ((inRegion && !co.fax.wang.shape.ShapeMarkers.contains(p))
                     || !Gradient.emptyCell(state))) {
                 boundary = k;
             }
@@ -575,21 +574,9 @@ public final class PaintPlacer {
         List<BlockPos> bases;
         markerDriven = false;
         if (mode.isFace()) {
-            BlockPos seed = findMarkerBehind(clicked, dir);
-            if (seed != null) {
-                bases = planeMarkers(seed, dir);
-                markerDriven = true;
-            } else {
-                bases = floodFaces(mc, clicked, dir, mode == PlacementMode.FACE_TARGET);
-            }
+            bases = floodFaces(mc, clicked, dir, mode == PlacementMode.FACE_TARGET);
         } else if (mode == PlacementMode.FACE_PERP) {
-            BlockPos seed = findMarkerBehind(clicked, dir);
-            if (seed != null) {
-                bases = perpRun(mc, seed, dir, p -> MarkerManager.startMarkers.contains(p));
-                markerDriven = true;
-            } else {
-                bases = perpRun(mc, clicked, dir, perpBase(mc, clicked, dir));
-            }
+            bases = perpRun(mc, clicked, dir, perpBase(mc, clicked, dir));
         } else {
             bases = List.of(clicked);
         }
@@ -600,6 +587,7 @@ public final class PaintPlacer {
             if (first <= 0) continue;
             Column col = new Column(base, first, 0);
             col.inRegion = co.fax.wang.shape.ShapeMarkers.contains(base.relative(dir, first));
+            if (col.inRegion) markerDriven = true; // painting inside a marker: its columns can level
             if (type == PaintType.GRADIENT) {
                 col.progress = GradientCaches.columnProgress(mode, base.relative(dir, first - 1), dir);
                 // Resolve this column's ramp: start anchor = the block the column grows from,
@@ -633,7 +621,7 @@ public final class PaintPlacer {
     }
 
     /**
-     * Advance columns one cell; obstruction, an end marker, lost reach, or (gradient, outside
+     * Advance columns one cell; obstruction, the marker's edge, lost reach, or (gradient, outside
      * markers) a finished gradient kills a column. With "fill voids first" on, an in-marker face
      * fill advances only the most-behind columns until every front is level.
      */
@@ -653,11 +641,8 @@ public final class PaintPlacer {
             Column c = it.next();
             if (level && c.next > minNext) continue; // waits for the lower columns to catch up
             BlockPos cell = c.base.relative(dir, c.next);
-            // An end marker bounds the column even in air; a marker on a block is also caught by
-            // the air check like any obstruction. A shape/box region bounds it the same way:
-            // the column stays on the side of the region boundary it started on.
-            if (MarkerManager.endMarkers.contains(cell)
-                    || (co.fax.wang.shape.ShapeMarkers.any()
+            // A marker bounds the column: it stays on the side of the marker's skin it started on.
+            if ((co.fax.wang.shape.ShapeMarkers.any()
                             && co.fax.wang.shape.ShapeMarkers.contains(cell) != c.inRegion)
                     || !Gradient.emptyCell(mc.level.getBlockState(cell)) || outOfReach(mc, cell)) {
                 it.remove();
@@ -726,7 +711,6 @@ public final class PaintPlacer {
         boolean regionOnly = co.fax.wang.shape.ShapeMarkers.contains(clicked.relative(dir));
         Set<Block> skip = paintBlocksToSkip(mc);
         return p -> wall(mc, p) && !wall(mc, p.relative(dir))
-                && !MarkerManager.endMarkers.contains(p.relative(dir))
                 && (!regionOnly || co.fax.wang.shape.ShapeMarkers.contains(p.relative(dir)))
                 && !outOfReach(mc, p.relative(dir))
                 && (p.equals(clicked) || !skip.contains(mc.level.getBlockState(p).getBlock()));
@@ -850,7 +834,6 @@ public final class PaintPlacer {
                     if (skip.contains(ns.getBlock())) continue; // already painted
                     BlockPos front = n.relative(dir);
                     if (wall(mc, front)) continue; // face not exposed on this plane
-                    if (MarkerManager.endMarkers.contains(front)) continue;   // marker right on the face
                     if (regionOnly && !co.fax.wang.shape.ShapeMarkers.contains(front)) continue;
                     if (outOfReach(mc, front)) continue;
                     seen.add(n);
@@ -918,8 +901,7 @@ public final class PaintPlacer {
      */
     private static void beginGrowth(Minecraft mc, BlockPos seed) {
         growCooldown = HOLD_DELAY; // a beat after the first shell, so a tap can stay one shell
-        spaceConstrained = !MarkerManager.startMarkers.isEmpty()
-                || co.fax.wang.shape.ShapeMarkers.any();
+        spaceConstrained = co.fax.wang.shape.ShapeMarkers.any();
         startedInSpace = spaceConstrained && fillStartsInSpace(mc, center, seed);
         co.fax.wang.shape.LineShape line = co.fax.wang.shape.ShapeMarkers.lineContaining(seed);
         if (type == PaintType.GRADIENT && line != null) {
@@ -955,7 +937,6 @@ public final class PaintPlacer {
                 if (visited.contains(n)) continue;
                 if (n.distSqr(center) > r2) continue;
                 if (!Gradient.emptyCell(mc.level.getBlockState(n))) continue; // walls block the fill
-                if (MarkerManager.endMarkers.contains(n)) continue; // end markers bound it even in air
                 if (spaceConstrained && inSpace(n) != startedInSpace) continue;
                 if (outOfReach(mc, n)) continue;
                 visited.add(n);
@@ -986,27 +967,6 @@ public final class PaintPlacer {
     }
 
     /**
-     * A start marker is a cube whose constraining space extends out from all six faces: a cell is
-     * in the marker space when it lies on an axis line through any start marker, within the
-     * marker-distance setting. A fill that starts inside stays inside; one that starts outside
-     * never enters.
-     */
-    private static boolean inMarkerSpace(BlockPos cell) {
-        int maxDist = Math.max(1, ConfigManager.get().maxMarkerDistance);
-        for (BlockPos m : MarkerManager.startMarkers) {
-            int same = (cell.getX() == m.getX() ? 1 : 0)
-                    + (cell.getY() == m.getY() ? 1 : 0)
-                    + (cell.getZ() == m.getZ() ? 1 : 0);
-            if (same < 2) continue;
-            // Two coordinates match, so the Manhattan distance is the offset along the free axis.
-            int dist = Math.abs(cell.getX() - m.getX()) + Math.abs(cell.getY() - m.getY())
-                    + Math.abs(cell.getZ() - m.getZ());
-            if (dist <= maxDist) return true;
-        }
-        return false;
-    }
-
-    /**
      * Whether a 3D fill centred on {@code center} belongs inside marker space / a shape: its
      * start cell is in space, or the centre touches an empty in-space cell. The second case
      * catches a one-block gap at a jagged shape edge — the crosshair easily lands on the
@@ -1021,23 +981,17 @@ public final class PaintPlacer {
         return false;
     }
 
-    /** Marker space OR a shape/box region — the combined containment the 3D fill respects. */
+    /** Inside a marker (a shape or a line's tube): the containment the 3D fill respects. */
     private static boolean inSpace(BlockPos cell) {
-        return inMarkerSpace(cell) || co.fax.wang.shape.ShapeMarkers.contains(cell);
+        return co.fax.wang.shape.ShapeMarkers.contains(cell);
     }
 
     // ---- in-marker noise region fill ----------------------------------------------------------------
 
     /** The classic noise fill: flood the marked region the crosshair points into, all at once. */
     private static boolean tryNoiseRegionFill(Minecraft mc) {
-        boolean haveMarkers = !MarkerManager.startMarkers.isEmpty()
-                && !MarkerManager.endMarkers.isEmpty();
-        boolean haveRegions = co.fax.wang.shape.ShapeMarkers.any();
-        if (!haveMarkers && !haveRegions) return false;
-        int maxDist = Math.max(1, ConfigManager.get().maxMarkerDistance);
-        FloodFill.Region region = (x, y, z) ->
-                (haveMarkers && NoisePlacer.inMarkedSegment(x, y, z, maxDist))
-                || (haveRegions && co.fax.wang.shape.ShapeMarkers.contains(new BlockPos(x, y, z)));
+        if (!co.fax.wang.shape.ShapeMarkers.any()) return false;
+        FloodFill.Region region = (x, y, z) -> co.fax.wang.shape.ShapeMarkers.contains(new BlockPos(x, y, z));
         FloodFill.AirTest air = (x, y, z) ->
                 Gradient.emptyCell(mc.level.getBlockState(new BlockPos(x, y, z)));
         int[][] seed = NoisePlacer.raycastSeed(mc, region, air);
@@ -1184,21 +1138,9 @@ public final class PaintPlacer {
     private record Seg(BlockPos s, BlockPos e, int index, int length) {}
 
     private static Seg segmentForCell(BlockPos cell) {
-        int maxDist = Math.max(1, ConfigManager.get().maxMarkerDistance);
-        for (BlockPos e : MarkerManager.endMarkers) {
-            for (BlockPos s : MarkerManager.startMarkers) {
-                int dx = e.getX() - s.getX(), dy = e.getY() - s.getY(), dz = e.getZ() - s.getZ();
-                int axes = (dx != 0 ? 1 : 0) + (dy != 0 ? 1 : 0) + (dz != 0 ? 1 : 0);
-                if (axes != 1) continue; // must be a single-axis line
-                int length = Math.abs(dx) + Math.abs(dy) + Math.abs(dz);
-                if (length > maxDist) continue;
-                int i = segIndex(s, Integer.signum(dx), Integer.signum(dy), Integer.signum(dz), cell);
-                if (i > 0 && i < length) return new Seg(s, e, i, length);
-            }
-        }
-        // Shape/box regions: inside one, the segment runs from the region's start plane to its
-        // end plane (box: corner A's side → corner B's; rings: base plane → extrusion far end).
-        co.fax.wang.shape.RingShape.Segment rs = co.fax.wang.shape.ShapeMarkers.segmentFor(cell);
+        // Inside a marker the segment runs from its start (a shape's bottom face, a line's first
+        // node) to its end.
+        co.fax.wang.shape.LineShape.Segment rs = co.fax.wang.shape.ShapeMarkers.segmentFor(cell);
         if (rs != null) return new Seg(rs.start(), rs.end(), rs.index(), rs.length());
         return null;
     }
@@ -1259,22 +1201,14 @@ public final class PaintPlacer {
             switch (pm) {
                 case SINGLE -> addFrontPreview(mc, b, d);
                 case FACE, FACE_TARGET -> {
-                    BlockPos seed = findMarkerBehind(b, d);
-                    List<BlockPos> bases = (seed != null) ? planeMarkers(seed, d)
-                            : floodFaces(mc, b, d, pm == PlacementMode.FACE_TARGET);
-                    for (BlockPos base : bases) addFrontPreview(mc, base, d);
+                    for (BlockPos base : floodFaces(mc, b, d, pm == PlacementMode.FACE_TARGET)) addFrontPreview(mc, base, d);
                 }
                 case FACE_PERP -> {
-                    BlockPos seed = findMarkerBehind(b, d);
-                    List<BlockPos> bases = (seed != null)
-                            ? perpRun(mc, seed, d, p -> MarkerManager.startMarkers.contains(p))
-                            : perpRun(mc, b, d, perpBase(mc, b, d));
-                    for (BlockPos base : bases) addFrontPreview(mc, base, d);
+                    for (BlockPos base : perpRun(mc, b, d, perpBase(mc, b, d))) addFrontPreview(mc, base, d);
                 }
                 case FILL3D -> {
                     // Same side rule as the fill itself: only faces the fill will grow through.
-                    boolean constrained = !MarkerManager.startMarkers.isEmpty()
-                            || co.fax.wang.shape.ShapeMarkers.any();
+                    boolean constrained = co.fax.wang.shape.ShapeMarkers.any();
                     boolean inside = constrained && fillStartsInSpace(mc, b, b.relative(d));
                     for (Direction dd : Direction.values()) {
                         if (!wall(mc, b.relative(dd)) && (!constrained || inSpace(b.relative(dd)) == inside)) {
@@ -1347,63 +1281,15 @@ public final class PaintPlacer {
 
     // ---- shared column helpers ----------------------------------------------------------------------
 
-    /** The first start marker on the clicked column's axis, behind the face (or the block itself). */
-    private static BlockPos findMarkerBehind(BlockPos clicked, Direction dir) {
-        for (int k = 0; k <= SCAN_LIMIT; k++) {
-            BlockPos p = clicked.relative(dir.getOpposite(), k);
-            if (MarkerManager.startMarkers.contains(p)) return p;
-        }
-        return null;
-    }
-
     /**
-     * Offset (≥1) of the first air cell out from {@code base} along {@code dir}, or -1. An end
-     * marker on the way means the column already reached its end — re-clicking the face must not
-     * resume it on the far side of the marker, so a crossed column doesn't seed at all.
+     * Offset (≥1) of the first air cell out from {@code base} along {@code dir}, or -1.
      */
     private static int firstAirOffset(Minecraft mc, BlockPos base, Direction dir) {
         for (int k = 1; k <= SCAN_LIMIT; k++) {
             BlockPos p = base.relative(dir, k);
-            if (MarkerManager.endMarkers.contains(p)) return -1;
             if (Gradient.emptyCell(mc.level.getBlockState(p))) return k;
         }
         return -1;
-    }
-
-    /**
-     * The start markers connected to {@code seed} (touching, directly or transitively — diagonals
-     * count) that lie in the same plane perpendicular to {@code dir}. Markers at a different
-     * height/offset along the direction axis are not part of the shared face and are left out.
-     */
-    private static List<BlockPos> planeMarkers(BlockPos seed, Direction dir) {
-        Direction.Axis axis = dir.getAxis();
-        int plane = seed.get(axis);
-        Set<BlockPos> inPlane = new HashSet<>();
-        for (BlockPos p : MarkerManager.startMarkers) {
-            if (p.get(axis) == plane) inPlane.add(p);
-        }
-        List<BlockPos> out = new ArrayList<>();
-        ArrayDeque<BlockPos> bfs = new ArrayDeque<>();
-        Set<BlockPos> seen = new HashSet<>();
-        bfs.add(seed);
-        seen.add(seed);
-        while (!bfs.isEmpty()) {
-            BlockPos p = bfs.poll();
-            out.add(p);
-            for (int dx = -1; dx <= 1; dx++) {
-                for (int dy = -1; dy <= 1; dy++) {
-                    for (int dz = -1; dz <= 1; dz++) {
-                        if (dx == 0 && dy == 0 && dz == 0) continue;
-                        BlockPos n = p.offset(dx, dy, dz);
-                        if (!seen.contains(n) && inPlane.contains(n)) {
-                            seen.add(n);
-                            bfs.add(n);
-                        }
-                    }
-                }
-            }
-        }
-        return out;
     }
 
     private static BlockPos findSupport(Minecraft mc, BlockPos cell) {

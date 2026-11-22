@@ -11,7 +11,7 @@ import net.minecraft.world.phys.Vec3;
 /**
  * Shared in-world face overlay: a translucent tint over one block face plus a thin arrow along
  * its normal, showing which way something will project off that face. Used blue by the auto end
- * marker preview ({@link MarkerManager}) and green by the paint placement preview
+ * marker preview and green by the paint placement preview
  * ({@link PaintPlacer}). Geometry is emitted in block-local coordinates — the caller's pose is
  * translated to the block, camera-relative.
  */

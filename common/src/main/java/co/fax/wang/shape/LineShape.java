@@ -43,6 +43,24 @@ public final class LineShape {
     public double gradAngle;
     /** Draw the tube in the colours a Gradient fill would give it, instead of its plain tint. */
     public boolean gradPreview;
+    /**
+     * A Shape-tool marker rather than a line: a straight run between two nodes (its bottom and
+     * top faces) with one profile all the way, edited by its faces and sides instead of by
+     * bending. Everything else (rotating, gradients, the look, gravity) is the line's.
+     */
+    public boolean shape;
+    /** A shape that swells from a point at each end to the full profile half way: a sphere or egg. */
+    public boolean ball;
+    /** How deep the profile is (along the frame's b) for its width (along n): 1 = even, else an oval / slab. */
+    public double stretch = 1;
+    /** Wall thickness of a hollow tube, in blocks (1 = the classic one-block skin). */
+    public double wall = 1;
+    /** A hollow tube's ends are closed. Off leaves it an open pipe. */
+    public boolean capped = true;
+    /** The picture swept along the line when its profile is {@link LineProfile#CUSTOM}; null until one is drawn. */
+    public ProfileDrawing drawn;
+    /** A shape's width / depth may shrink to a single block. */
+    public static final double SHAPE_MIN_RADIUS = 0;
     /** A new tube's radius (and what right-clicking a size cube resets to). */
     public static final double DEFAULT_RADIUS = LineCurve.DEFAULT_RADIUS;
     /** Size-cube drags keep a node's radius within this. */
@@ -68,6 +86,42 @@ public final class LineShape {
 
     public LineShape(LineCurve curve) {
         this.curve = curve;
+    }
+
+    /**
+     * A new Shape-tool box filling the cells from {@code a} to {@code b} (both included): a
+     * square profile standing upright, bottom face to top face.
+     */
+    public static LineShape box(BlockPos a, BlockPos b) {
+        return prism(a, b, Direction.Axis.Y, false);
+    }
+
+    /**
+     * A box-shaped shape filling the cells from {@code a} to {@code b}, its line running along
+     * {@code axis} from the low side to the high side ({@code down}: the other way). Its width is
+     * across the frame's normal there (X for an upright one, else Y) and its depth the third axis.
+     */
+    public static LineShape prism(BlockPos a, BlockPos b, Direction.Axis axis, boolean down) {
+        Direction.Axis ua = axis == Direction.Axis.Y ? Direction.Axis.X : Direction.Axis.Y;
+        Direction.Axis va = axis == Direction.Axis.Z ? Direction.Axis.X : Direction.Axis.Z;
+        double[] lo = new double[3], hi = new double[3];
+        for (Direction.Axis ax : Direction.Axis.values()) {
+            lo[ax.ordinal()] = Math.min(a.get(ax), b.get(ax));
+            hi[ax.ordinal()] = Math.max(a.get(ax), b.get(ax)) + 1;
+        }
+        double[] p0 = new double[3], p1 = new double[3];
+        for (int k = 0; k < 3; k++) p0[k] = p1[k] = (lo[k] + hi[k]) / 2;
+        p0[axis.ordinal()] = down ? hi[axis.ordinal()] : lo[axis.ordinal()];
+        p1[axis.ordinal()] = down ? lo[axis.ordinal()] : hi[axis.ordinal()];
+        LineShape l = new LineShape(new LineCurve(new Vec3(p0[0], p0[1], p0[2]), new Vec3(p1[0], p1[1], p1[2])));
+        double eu = (hi[ua.ordinal()] - lo[ua.ordinal()]) / 2, ev = (hi[va.ordinal()] - lo[va.ordinal()]) / 2;
+        l.setAllRadii(eu - 0.5);
+        l.stretch = ev / eu;
+        l.shape = true;
+        l.profile = LineProfile.SQUARE;
+        l.solid = true;
+        l.gradient = LineGradient.ALONG; // bottom to top
+        return l;
     }
 
     /** The curve or a parameter changed: samples and cells must be rebuilt. */
@@ -184,7 +238,8 @@ public final class LineShape {
             });
 
     private TubeBuild.Params snapshot() {
-        return new TubeBuild.Params(curve.copy(), profile, solid);
+        return new TubeBuild.Params(curve.copy(), profile, solid, stretch, wall, capped, ball, shape,
+                drawn == null ? null : drawn.copy());
     }
 
     private void apply(TubeBuild.Result r, long forVersion) {
@@ -233,6 +288,35 @@ public final class LineShape {
         return builtVersion != version;
     }
 
+    /**
+     * What the marker does to digging (breaking blocks by hand). INSIDE: while any of it is
+     * within your reach, only blocks in the marker break. OUTSIDE: blocks in the marker never
+     * break. See {@link ShapeMarkers#digBlocked}.
+     */
+    public enum Dig { OFF, INSIDE, OUTSIDE }
+
+    public Dig dig = Dig.OFF;
+
+    /** True when one of the marker's cells is within {@code reach} of {@code eye} (measured to the block, as reach is). */
+    public boolean cellInReach(Vec3 eye, double reach) {
+        ensureCells(true);
+        var cells = built.cells();
+        if (cells.isEmpty()) return false;
+        int r = (int) Math.ceil(reach) + 1;
+        int ex = (int) Math.floor(eye.x), ey = (int) Math.floor(eye.y), ez = (int) Math.floor(eye.z);
+        for (int x = ex - r; x <= ex + r; x++) {
+            double dx = Math.max(0, Math.max(x - eye.x, eye.x - (x + 1)));
+            for (int y = ey - r; y <= ey + r; y++) {
+                double dy = Math.max(0, Math.max(y - eye.y, eye.y - (y + 1)));
+                for (int z = ez - r; z <= ez + r; z++) {
+                    double dz = Math.max(0, Math.max(z - eye.z, eye.z - (z + 1)));
+                    if (dx * dx + dy * dy + dz * dz <= reach * reach && cells.containsKey(BlockPos.asLong(x, y, z))) return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public boolean contains(BlockPos cell) {
         if (builtVersion != version) perfForced++;
         ensureCells(true);
@@ -252,15 +336,18 @@ public final class LineShape {
     }
 
     /** Gradient segment for a selected cell: start → end along the curve, by arc length. */
-    public RingShape.Segment segmentFor(BlockPos cell) {
+    public Segment segmentFor(BlockPos cell) {
         double f = fracOf(cell);
         if (f < 0) return null;
         List<LineCurve.Node> ns = curve.nodes;
         int len = Math.max(1, (int) Math.round(length()));
         int idx = (int) Math.max(0, Math.min(len, Math.round(f * len)));
-        return new RingShape.Segment(BlockPos.containing(ns.get(0).p),
+        return new Segment(BlockPos.containing(ns.get(0).p),
                 BlockPos.containing(ns.get(ns.size() - 1).p), idx, len);
     }
+
+    /** A cell's place on a start to end run: {@code index} of {@code length} steps from {@code start}. */
+    public record Segment(BlockPos start, BlockPos end, int index, int length) {}
 
     // ---- gradient direction -------------------------------------------------------------------
 
@@ -413,7 +500,7 @@ public final class LineShape {
                 best = i;
             }
         }
-        double r = profile == LineProfile.NONE ? 1 : Math.max(0.5, radiusAt(best));
+        double r = profile == LineProfile.NONE ? 1 : Math.max(0.5, skinAt(best));
         return Math.min(1, Math.sqrt(bestD) / r);
     }
 
@@ -442,6 +529,66 @@ public final class LineShape {
         return built.cells().keySet();
     }
 
+    // ---- the skin ----------------------------------------------------------------------------
+
+    /** The profile's half-width (along n') at sample {@code i}: 0 for a bare line, less towards a ball's ends. */
+    public double halfWidth(int i) {
+        if (profile == LineProfile.NONE || (profile == LineProfile.CUSTOM && (drawn == null || drawn.isEmpty()))) return 0;
+        double e = radiusAt(i) + 0.5;
+        if (ball) {
+            double f = frac(i);
+            e *= Math.sqrt(Math.max(0, 1 - (2 * f - 1) * (2 * f - 1)));
+        }
+        return e;
+    }
+
+    /** The furthest the skin gets from the line at sample {@code i} (a square's corner counts as its side). */
+    public double skinAt(int i) {
+        return halfWidth(i) * Math.max(1, stretch);
+    }
+
+    /** How far the skin is from the line at sample {@code i}, going in direction {@code d} (unit, across the line). */
+    public double rimAlong(int i, Vec3 d) {
+        double e = halfWidth(i);
+        if (e <= 0) return 0;
+        Vec3[] f = rotatedFrame(i);
+        double cu = Math.abs(d.dot(f[0])), cv = Math.abs(d.dot(f[1])), ev = e * stretch;
+        return switch (profile) {
+            case CIRCLE -> 1 / Math.sqrt(cu * cu / (e * e) + cv * cv / (ev * ev));
+            case SQUARE -> Math.min(cu < 1e-9 ? Double.MAX_VALUE : e / cu, cv < 1e-9 ? Double.MAX_VALUE : ev / cv);
+            default -> Math.max(e, ev);
+        };
+    }
+
+    /** The sample half way along (where a shape's side handles sit). */
+    public int midSample() {
+        return sampleAtArc(length() / 2);
+    }
+
+    /** A shape's height: the distance between its two faces. */
+    public double height() {
+        List<LineCurve.Node> ns = curve.nodes;
+        return ns.get(0).p.distanceTo(ns.get(ns.size() - 1).p);
+    }
+
+    /** A shape's width handle: on its side half way up, along n'. */
+    public Vec3 widthNode() {
+        int i = midSample();
+        return samples().get(i).pos().add(rotatedFrame(i)[0].scale(halfWidth(i)));
+    }
+
+    /** A shape's depth handle: on its side half way up, along b'. */
+    public Vec3 depthNode() {
+        int i = midSample();
+        return samples().get(i).pos().add(rotatedFrame(i)[1].scale(halfWidth(i) * stretch));
+    }
+
+    /** A hollow shape's wall handle: on the inside of its wall, opposite the width handle. */
+    public Vec3 wallNode() {
+        int i = midSample();
+        return samples().get(i).pos().add(rotatedFrame(i)[0].scale(-Math.max(0, halfWidth(i) - wall)));
+    }
+
     // ---- control positions ------------------------------------------------------------------
 
     /** Size cube of main node {@code node}: on the profile rim along n'. */
@@ -456,77 +603,129 @@ public final class LineShape {
         return samples().get(i).pos().add(rotatedFrame(i)[1].scale(curve.nodes.get(node).r + 0.5));
     }
 
-    // The move / cog / rotate cubes ride together beside the line. They slide along it to stay
-    // within easy reach of where you stand, and line up side by side across your view — both
-    // from your POSITION only, never from where you look, so they hold still under the crosshair.
+    // The move / cog / rotate cubes ride together just off the marker's skin, at the spot nearest
+    // where you stand, and line up side by side across your view. All of it comes from your
+    // POSITION only, never from where you look, so they hold still under the crosshair.
 
-    /** The cluster keeps between these distances of the eye; outside them it slides to IDEAL. */
-    static final double CTRL_NEAR = 2.5, CTRL_FAR = 5.5, CTRL_IDEAL = 4;
-    /** A new spot must be at least this much nearer to CTRL_IDEAL than the current one to move there. */
-    static final double CTRL_GAIN = 0.3;
+    /** The cluster keeps at least NEAR from the eye; inside a tube it floats IDEAL in from you. */
+    static final double CTRL_NEAR = 2.5, CTRL_IDEAL = 4;
+    /** A new spot must be at least this much better than the current one to move there. */
+    static final double CTRL_GAIN = 0.1;
     /** Centre-to-centre spacing of the three cubes. */
     static final double CTRL_SPACING = 0.8;
     /** Where the cluster is along the line and where it is heading, in sample-index units; -1 = unplaced. */
     private double ctrlAt = -1, ctrlGoal = -1;
+    /** The cluster floats this far off the skin. */
+    static final double CTRL_OFF = 1.5;
+    /** A shape's cluster keeps this far from its two faces (so it is not down on the ground). */
+    static final double CTRL_END = 1.0;
+    /** Where you stood when a drag or open toolbar took hold of the cluster: it stays on that side. */
+    private Vec3 heldEye;
 
-    /** Beside sample {@code i}, clear of the tube. */
-    private Vec3 besideSample(int i) {
-        double r = profile == LineProfile.NONE ? 0 : radiusAt(i) + 0.5;
-        return samples().get(i).pos().add(rotatedFrame(i)[0].scale(-(r + 1.5)));
-    }
-
-    private Vec3 besideAt(double at) {
-        int last = samples().size() - 1;
-        at = Math.max(0, Math.min(last, at));
-        int i = (int) Math.floor(at), j = Math.min(last, i + 1);
-        return i == j ? besideSample(i) : LineCurve.lerp(besideSample(i), besideSample(j), at - i);
+    /** Is {@code eye} inside the tube? (Beyond an end, or with no profile, it is not.) */
+    private boolean eyeInside(Vec3 eye) {
+        List<LineCurve.Sample> ss = samples();
+        if (ss.isEmpty()) return false;
+        int k = nearestSample(eye, (int) Math.round(Math.max(0, ctrlAt)));
+        LineCurve.Sample s = ss.get(k);
+        Vec3 e = eye.subtract(s.pos());
+        double along = e.dot(s.tan()), pad = shape ? 0 : 0.5;
+        if ((k == 0 && along < -pad) || (k == ss.size() - 1 && along > pad)) return false;
+        Vec3 d = e.subtract(s.tan().scale(along));
+        double away = d.length();
+        return away < 1e-3 ? halfWidth(k) > 0 : away < rimAlong(k, d.scale(1 / away));
     }
 
     /**
-     * Choose where the cluster should sit for someone standing at {@code eye}: it stays where it
-     * is while that is between CTRL_NEAR and CTRL_FAR away, else it heads for the spot along the
-     * line that is CTRL_IDEAL away (or the nearest spot, when the whole line is further). Walking
-     * up to it pushes it on ahead; walking off past it brings it round to your other side.
+     * Beside sample {@code i}: CTRL_OFF off the skin on the side {@code eye} is on, so the cluster
+     * comes round the tube with you and is never left underneath it or under the ground. With
+     * the eye {@code inside} the tube (a big box you are working in), it floats CTRL_IDEAL in
+     * from you towards the middle instead, and never out through the far wall.
+     */
+    private Vec3 besideSample(int i, Vec3 eye, boolean inside) {
+        LineCurve.Sample s = samples().get(i);
+        Vec3 d = eye.subtract(s.pos());
+        d = d.subtract(s.tan().scale(d.dot(s.tan())));
+        double away = d.length();
+        d = away < 1e-3 ? rotatedFrame(i)[0].scale(-1) : d.scale(1 / away);
+        double rim = rimAlong(i, d);
+        double off;
+        if (inside && away < rim) {
+            double along = eye.subtract(s.pos()).dot(s.tan());
+            double gap = Math.sqrt(Math.max(0, CTRL_IDEAL * CTRL_IDEAL - along * along));
+            double far = Math.max(0, rimAlong(i, d.scale(-1)) - CTRL_OFF); // how far past the line it may go
+            off = Math.max(-far, Math.min(Math.max(0, rim - CTRL_OFF), away - gap));
+        } else if (away < rim) {
+            off = rim + CTRL_OFF;
+        } else {
+            // Standing right against the skin: it comes in close to the skin rather than end up behind you.
+            off = Math.max(rim + 0.3, Math.min(rim + CTRL_OFF, away - 1));
+        }
+        return s.pos().add(d.scale(off));
+    }
+
+    private Vec3 besideAt(double at, Vec3 eye, boolean inside) {
+        int last = samples().size() - 1;
+        at = Math.max(0, Math.min(last, at));
+        int i = (int) Math.floor(at), j = Math.min(last, i + 1);
+        return i == j ? besideSample(i, eye, inside)
+                : LineCurve.lerp(besideSample(i, eye, inside), besideSample(j, eye, inside), at - i);
+    }
+
+    /** The samples the cluster may sit beside: all of a line; a shape's, short of its two faces. */
+    private int[] ctrlRange() {
+        int n = samples().size();
+        if (!shape) return new int[]{0, n - 1};
+        double len = length(), m = Math.min(CTRL_END, len / 2);
+        int lo = sampleAtArc(m), hi = sampleAtArc(len - m);
+        return lo <= hi ? new int[]{lo, hi} : new int[]{midSample(), midSample()};
+    }
+
+    /**
+     * Choose where the cluster should sit for someone standing at {@code eye}: beside the spot of
+     * the marker nearest them, but no nearer than CTRL_NEAR (standing right by it, the cluster
+     * sits a little way along instead of in your face). It follows as you walk.
      * {@code hold} keeps the goal (a drag or an open toolbar is using the cluster).
      */
     public void aimControls(Vec3 eye, boolean hold) {
         int n = samples().size();
         if (n == 0) return;
-        if (ctrlGoal >= 0 && ctrlGoal <= n - 1) {
-            if (hold) return;
-            double d = besideAt(ctrlGoal).distanceTo(eye);
-            if (d >= CTRL_NEAR && d <= CTRL_FAR) return;
-        }
-        int cur = ctrlGoal < 0 ? n / 2 : (int) Math.round(Math.min(n - 1, ctrlGoal));
-        boolean tooNear = ctrlGoal >= 0 && besideAt(cur).distanceTo(eye) < CTRL_NEAR;
-        int nearest = 0;
-        double nearestD = Double.MAX_VALUE;
+        if (!hold) heldEye = null;
+        else if (heldEye == null) heldEye = eye;
+        if (hold && ctrlGoal >= 0 && ctrlGoal <= n - 1) return;
+        boolean inside = eyeInside(eye);
+        int[] range = ctrlRange();
+        int lo = range[0], hi = range[1];
+        int cur = ctrlGoal < 0 ? -1 : (int) Math.round(Math.max(lo, Math.min(hi, ctrlGoal)));
+        int nearest = lo;
         double[] dist = new double[n];
-        for (int i = 0; i < n; i++) {
-            dist[i] = besideSample(i).distanceTo(eye);
-            if (dist[i] < nearestD) {
-                nearestD = dist[i];
-                nearest = i;
-            }
+        for (int i = lo; i <= hi; i++) {
+            dist[i] = besideSample(i, eye, inside).distanceTo(eye);
+            if (dist[i] < dist[nearest]) nearest = i;
         }
-        // Too near: stay on the side it is on. Too far: prefer the other side of you (ahead).
-        boolean wantAfter = tooNear == (cur >= nearest);
-        int best = cur;
-        double bestScore = Double.MAX_VALUE;
-        for (int i = 0; i < n; i++) {
-            double score = Math.abs(dist[i] - CTRL_IDEAL) + ((i >= nearest) == wantAfter ? 0 : 0.75)
-                    + Math.abs(i - cur) * 1e-4;
+        // The nearest spot is too near: one a little way along on either side will do, so stay
+        // on the side the cluster is already on.
+        boolean sided = cur >= 0 && dist[nearest] < CTRL_NEAR;
+        int best = nearest;
+        double bestScore = Double.MAX_VALUE, curScore = Double.MAX_VALUE;
+        for (int i = lo; i <= hi; i++) {
+            double score = (dist[i] >= CTRL_NEAR ? dist[i] : 1000 - dist[i])
+                    + (sided && (i >= nearest) != (cur >= nearest) ? 0.75 : 0);
+            if (i == cur) curScore = score;
             if (score < bestScore) {
                 bestScore = score;
                 best = i;
             }
         }
-        // Only move for a real gain. When no spot along the line is in range (it is all too far,
-        // or all too near) the side preference above would otherwise pick the other side of you
-        // on every call, and the cluster would jiggle between two spots while you stand still.
-        if (ctrlGoal >= 0 && Math.abs(dist[cur] - CTRL_IDEAL) <= Math.abs(dist[best] - CTRL_IDEAL) + CTRL_GAIN) return;
+        // Only move for a real gain, so it does not jiggle between two equally good spots.
+        if (cur >= 0 && ctrlGoal >= lo && ctrlGoal <= hi && curScore <= bestScore + CTRL_GAIN) return;
         ctrlGoal = best;
         if (ctrlAt < 0) ctrlAt = best;
+    }
+
+    /** The line was moved by {@code by} while the cluster is held: the cluster goes with it. */
+    public void shiftHeld(Vec3 by) {
+        if (heldEye != null) heldEye = heldEye.add(by);
     }
 
     /** Slide the cluster toward its goal ({@code dt} seconds since the last call). */
@@ -541,12 +740,42 @@ public final class LineShape {
     }
 
     /**
+     * Looking at a shape end on (standing on top of a box, or over a flat disc): the cluster
+     * sits on that face, CTRL_OFF off it, a little towards its middle from you. Null when
+     * {@code eye} is not over one of the shape's two faces.
+     */
+    private Vec3 faceSpot(Vec3 eye) {
+        if (!shape || ball) return null;
+        List<LineCurve.Node> ns = curve.nodes;
+        Vec3 a = ns.get(0).p, b = ns.get(ns.size() - 1).p;
+        double len = a.distanceTo(b);
+        if (len < 1e-6) return null;
+        Vec3 t = b.subtract(a).scale(1 / len);
+        double along = eye.subtract(a).dot(t);
+        boolean top = along > len;
+        if (!top && along >= 0) return null;
+        Vec3 face = top ? b : a, out = top ? t : t.scale(-1);
+        int idx = top ? samples().size() - 1 : 0;
+        Vec3 e = eye.subtract(face);
+        double h = e.dot(out);
+        Vec3 lat = e.subtract(out.scale(h));
+        double away = lat.length();
+        Vec3 dir = away < 1e-3 ? rotatedFrame(idx)[0] : lat.scale(1 / away);
+        if (away >= rimAlong(idx, dir)) return null;
+        double up = Math.min(CTRL_OFF, Math.max(0.3, h - 1));
+        double shift = Math.sqrt(Math.max(0, CTRL_NEAR * CTRL_NEAR - (h - up) * (h - up)));
+        return face.add(lat).add(dir.scale(-shift)).add(out.scale(up));
+    }
+
+    /**
      * The move, cog and rotate cubes for someone standing at {@code eye}: {move, cog, rotate},
      * side by side across their view (level with the horizon), so no one hides another.
      */
     public Vec3[] controls(Vec3 eye) {
         if (ctrlAt < 0) aimControls(eye, false);
-        Vec3 c = besideAt(Math.max(0, ctrlAt));
+        if (heldEye != null) eye = heldEye; // held: it stays where it was when taken hold of
+        Vec3 c = faceSpot(eye);
+        if (c == null) c = besideAt(Math.max(0, ctrlAt), eye, eyeInside(eye));
         Vec3 f = c.subtract(eye);
         Vec3 right = new Vec3(-f.z, 0, f.x); // f × up
         right = right.lengthSqr() < 1e-6 ? new Vec3(1, 0, 0) : right.normalize();
@@ -561,7 +790,7 @@ public final class LineShape {
         double best = 0;
         List<LineCurve.Sample> ss = samples();
         for (int i = 0; i < ss.size(); i++) {
-            double r = profile == LineProfile.NONE ? 0 : radiusAt(i) + 0.5;
+            double r = skinAt(i) * (profile == LineProfile.SQUARE ? Math.sqrt(2) : 1);
             best = Math.max(best, ss.get(i).pos().distanceTo(c) + r);
         }
         return best;
@@ -615,7 +844,7 @@ public final class LineShape {
         List<LineCurve.Sample> ss = samples();
         for (int i = 0; i < ss.size(); i++) {
             Vec3 p = ss.get(i).pos();
-            double r = profile == LineProfile.NONE ? 0.2 : radiusAt(i) + 0.5;
+            double r = profile == LineProfile.NONE ? 0.2 : skinAt(i);
             x0 = Math.min(x0, p.x - r);
             y0 = Math.min(y0, p.y - r);
             z0 = Math.min(z0, p.z - r);

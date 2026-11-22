@@ -16,18 +16,6 @@ public final class NoisePlacer {
 
     private static final double REACH = 6.0;
 
-    /** True if (x,y,z) lies strictly between some colinear start→end marker pair within maxDist. */
-    static boolean inMarkedSegment(int x, int y, int z, int maxDist) {
-        for (BlockPos s : MarkerManager.startMarkers) {
-            for (BlockPos e : MarkerManager.endMarkers) {
-                if (betweenColinear(s.getX(), s.getY(), s.getZ(), e.getX(), e.getY(), e.getZ(), x, y, z, maxDist)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
     /** Whether (cx,cy,cz) is strictly between a colinear (single-axis) start/end pair within maxDist. */
     static boolean betweenColinear(int sx, int sy, int sz, int ex, int ey, int ez,
                                    int cx, int cy, int cz, int maxDist) {

@@ -38,9 +38,9 @@ handles. A fresh line is two nodes with zero handles = a straight line.
 2. A live straight preview follows the aim; the second left-click sets the end.
    Right-click cancels a half-made line.
 
-### Editing (Marker line mode only, paint tool in hand)
+### Editing (the marker modes — Line / Spline or Shape — paint tool in hand)
 
-Outside Marker line mode a line only shows (curve + tube, no nodes, handles or buttons) and
+Outside the marker modes a line only shows (curve + tube, no nodes, handles or buttons) and
 keeps constraining painting; clicks pass straight through it, so it can't be nudged by accident.
 
 
@@ -106,11 +106,21 @@ Performance (measured with `FWPAINT_PERF`, see `DebugRender`):
 - **Twist nodes** at each end: drag around the end to rotate the profile there; the twist is
   interpolated between the ends.
 - **Move node** beside the line: drag to move the whole line (drag-plane rules).
-- **Control cluster**: the move node, the cog and the rotate node ride together beside the line.
-  They slide along it to stay 2.5–5.5 blocks from where the player stands (heading for 4), and
-  line up side by side across the player's view, level with the horizon. Both depend only on the
-  player's position, never on where they look, so the cluster holds still under the crosshair. A
-  drag or the line's open toolbar holds it in place.
+- **Control cluster**: the move node, the cog and the rotate node ride together 1.5 blocks off
+  the tube's skin, on the side the player stands (the direction from the line to the eye, across
+  the line), so they come round the tube with the player and are never underneath it or under
+  the ground. A player inside the tube (a big shape) gets them 4 blocks in from where they
+  stand instead, never out through the far wall. Along the line they sit beside the spot
+  nearest the player and follow as the player walks; only when that would be nearer than 2.5
+  blocks do they sit a little way along instead (on the side they were already on). Standing
+  right against the skin pulls them in to 0.3 off it, so they are never behind the player. A
+  shape's cluster keeps a block clear of its two faces (off the ground), and a player over one
+  of a shape's faces (standing on a box, above a flat disc) gets it on that face. They line up
+  side by side across the player's view, level with the horizon. All of it depends only on the
+  player's position, never on where they look, so the cluster holds still under the crosshair.
+  A drag or the open toolbar holds it where it was when taken hold of; while the line is being
+  moved the held cluster moves rigidly with it, so an axis-locked move stays exactly on its
+  axis.
 - **Rotate node** (blue, globe icon): LMB toggles rotate mode for that line. Two gimbal rings are
   drawn round the whole line (radius = the line's furthest reach + 1), centred on the average of
   its nodes: green turns about the gimbal's Y axis, red about its X axis; a ring goes white under
@@ -178,3 +188,69 @@ moves the marker only and places nothing.
 ### Persistence
 
 Lines save with the other shapes in `fw-paint-shapes.json` (per world + dimension).
+
+## Drawn profile
+
+A fifth profile, **Drawn**: the line sweeps a picture the player draws out of block cells.
+
+- The picture (`ProfileDrawing`) is flat and one block thick, and lives in the world where it
+  was drawn: an origin cell, the axis its plane faces, and (a, b) cell offsets. Moving or turning
+  the line never moves it.
+- Picking Drawn with nothing drawn goes straight into editing; otherwise the toolbar's pencil
+  toggles editing. While editing the picture shows (translucent cells), a white frame marks the
+  cell the next click changes, and clicks on nothing draw instead of making a new marker:
+  LMB-drag draws (rubs out when the stroke starts on a drawn cell), RMB-drag rubs out. Line
+  controls still take the aim first.
+- The first cell fixes the plane: the cell in front of the clicked face, flat against that
+  face (in the open: at Marker reach, facing the player). Later clicks take the cell in front
+  of the aimed face when that is in the picture's layer, else where the crosshair crosses the
+  layer's mid-plane.
+- The picture remembers which way was up and right for the drawer (`top`, `right`): up and
+  the right of the way they faced for a wall; away from them and to their right on a floor,
+  like paper on a table.
+- Swept: the picture is centred on the line (middle of its bounding box) and set across the
+  line's first slice by `ProfileDrawing.orient`; the frame carries that along the line. A line
+  running through the picture's plane sweeps it exactly as drawn, whichever way the line
+  runs. A line running along the plane stands it up: top goes up (for a line straight up a
+  wall picture, the way the drawer faced), right stays right; when the drawer's right runs
+  along the line it reads the right way round looking from the line's start. It is scaled so
+  half its longer side is the node radius + ½. At that natural size one
+  cell is one block. Drawing more keeps every node's proportion to the picture. Per-node sizes
+  scale it (blocky when enlarged); twist, shell / solid, caps and gradients work as for any
+  profile. Limits: 96 cells across, 8192 cells.
+
+## Shapes (the Shape tool)
+
+A shape is a `LineShape` with `shape = true`: a straight two-node line whose nodes are its
+bottom and top **faces** (the tube stops exactly on them, no half-block overshoot), with one
+profile all the way. It reuses the line's control cluster, rotate gimbal, gradient modes and
+angle tool, Rendering page, gravity, saving and paint constraint. Only its handles differ.
+
+- **Creation** (Shape mode): LMB a corner cell, LMB the opposite corner (a wire box previews);
+  RMB cancels. The result is an upright box: square profile, filled, gradient Along.
+- **Kinds** (toolbar): Box (square), Cylinder (circle), Triangle, Star, Sphere (circle + `ball`:
+  the profile swells from nothing at each face to full size half way, so a taller one is an
+  egg). Hollow / Filled; hollow has **Capped** (off = open ends) and a wall thickness.
+- **Size**: `r` (both nodes) is the half-width along the frame normal, `stretch` the depth for
+  that width. Handles sit half way up: Width, Depth, and (hollow) Wall on the inside of the
+  wall. Dragging Width or Depth changes that side only (oval / slab); the modifier keeps the
+  proportions. The faces drag along the shape's own axis (height, at least 1). On release
+  sizes snap to whole blocks and a move lands a whole number of blocks from where it began.
+  Scroll: a face ±1 height; modifier+scroll or a side handle ±1 width; the wall handle ±1.
+  RMB a side handle makes width and depth equal; RMB the wall handle resets it to 1.
+- **Selection**: looking into a marker selects it, unless the selected one is also in the way of
+  the crosshair. MMB on a control, or anywhere in the selected shape, deletes it.
+- **Old saves**: the box and rings of earlier versions are converted on load (`ShapeStore`):
+  the box to a box shape along its gradient axis; a ring to a round or square tube along its
+  axis, hollow with the band as its wall and uncapped.
+- **Dig mode** (`LineShape.dig`, lines and shapes; the pick on the toolbar steps Off → Inside →
+  Outside; saved as `dig`): limits breaking blocks by hand, whatever is held and whatever the
+  placement mode. `ShapeMarkers.digVerdict`: a block in any Outside marker never breaks. Inside
+  markers count only while one of their cells is within block reach of the eye (measured to the
+  block, like reach); then a block breaks only if it is in an Inside marker. "In" is the
+  marker's cells, so a hollow shape is its walls. Hooks: Fabric `AttackBlockCallback` (first
+  hit, and held in creative; survival re-enters it when the target changes); NeoForge
+  `InputEvent.InteractionKeyMappingTriggered` on attack with a block under the crosshair. It is
+  client side: it stops this player's own breaking, nothing else.
+- **Known limits**: gravity treats a shape as a chain of balls along its axis, so a wide flat
+  shape settles as if it were round.

@@ -86,7 +86,7 @@ public final class Gradient {
         while (cyclePaletteKey.consumeClick()) {
             cyclePalette();
         }
-        MarkerManager.tick(client);
+        co.fax.wang.shape.ShapeMarkers.tick(client);
         PaintPlacer.tick(client);
     }
 

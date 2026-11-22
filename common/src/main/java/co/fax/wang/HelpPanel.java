@@ -205,7 +205,7 @@ public final class HelpPanel {
                     + "normal play. Two: everything you'd ever switch lives on one wheel - hold "
                     + "{wheel}, hover a wedge to fan it out, click an option, release. WHAT you "
                     + "paint (Paint: Solid, Gradient, Noise, Pattern) and WHERE blocks go "
-                    + "(Place: Blocks, Markers, Shapes) are two independent choices, and the "
+                    + "(Place: Blocks, Markers) are two independent choices, and the "
                     + "HUD in the top-left always shows both.",
                 "1. Press {open}, go to Settings and click any item in the Paint tool list.  "
                     + "2. Hold that item. Hold {wheel}, hover Paint, click Solid.  "
@@ -215,10 +215,10 @@ public final class HelpPanel {
                     + "to keep going.",
                 "Every input: {open} opens and closes this screen. {wheel} (hold) is the wheel - "
                     + "everything is on it. {palette} steps to the next palette, pattern or "
-                    + "block. RMB paints. LMB puts start markers and shape points and drags "
+                    + "block. RMB paints. LMB puts shape and line points and drags "
                     + "controls. MMB deletes the marker piece you aim at; {clear}+MMB deletes the "
-                    + "whole line or block-marker group. {clear} is the Modifier: the other way, "
-                    + "both ends, all nodes. Hold {axis} to lock a marker drag to one axis. "
+                    + "whole line. {clear} is the Modifier: the other way, "
+                    + "all nodes. Hold {axis} to lock a marker drag to one axis. "
                     + "Scroll on a shape pushes or pulls it; {clear}+scroll grows or shrinks it.",
                 "Settings › Keys & gestures lists all of these as currently bound; rebind them "
                     + "under Options › Controls › Key Binds › FW Paint (this manual always "
@@ -236,8 +236,8 @@ public final class HelpPanel {
                 + "double-click blocks (or the Auto rows) into the strip and Save - it's stored, "
                 + "put in use and selected. {palette} in-game steps to your next palette.",
             "3. On the Place tab (or the wheel's Place ring), pick a Mode: Blocks (Single, Face "
-                + "any, Face target, Face perp, 3D Fill), Markers (Marker, Marker draw, Off) or "
-                + "Shapes (Box, Ring, Line). The Options beside it apply to the selected mode.",
+                + "any, Face target, Face perp, 3D Fill) or Markers (Shape, Line / Spline, Off). "
+                + "The Options beside it apply to the selected mode.",
             "4. Aim at a block face and RMB to paint (hold to keep going). Markers are optional - "
                 + "they bound what you paint and anchor Auto segments. Any paint works with any "
                 + "mode, with or without markers.",
@@ -264,7 +264,7 @@ public final class HelpPanel {
                 + "gradient palettes (Gradient and Noise), your patterns (Pattern), or with "
                 + "Solid the match modes - hover This block to fan your inventory's blocks "
                 + "(colour-sorted) onto the next ring and click one.",
-            "Place: Blocks, Markers and Shapes fan out the modes. Options holds the toggles - "
+            "Place: Blocks and Markers fan out the modes. Options holds the toggles - "
                 + "Don't match palette, Fill voids first, Place in air, and Perp snap (click "
                 + "it to switch 45°/90°). Off turns the tool off. Lit = on; grey = doesn't "
                 + "apply to the current mode.",
@@ -290,7 +290,7 @@ public final class HelpPanel {
 
         t("Placement modes", "Single, Face any, Face target, Face perp, 3D Fill - where blocks go (Place tab or the {wheel} wheel).",
             List.of(
-                "The Blocks modes paint; the Markers and Shapes modes draw markers instead, and "
+                "The Blocks modes paint; the Markers modes make shapes and lines instead, and "
                     + "Off leaves your clicks alone. The green face tint and arrow show exactly "
                     + "which faces the next click will grow from, and in which direction.",
                 "Fluids count as empty space: paint under water or lava - columns grow through "
@@ -303,35 +303,29 @@ public final class HelpPanel {
                 "Plants that vanilla lets you place into - hanging roots, grass, vines, "
                     + "snow layers - count as solid: painting keeps them and works around "
                     + "them. Only air, water and lava count as empty.",
-                "Markers never block painting - they only constrain it: columns stop at end "
-                    + "markers (even ones floating in air), and 3D fills that start inside marker "
-                    + "space stay inside it. A 3D fill on a block touching an empty marked/shape "
+                "Markers never block painting - they only constrain it: a column stops where it "
+                    + "would leave the marker it started in, and a 3D fill that starts inside a "
+                    + "marker stays inside it. A 3D fill on a block touching an empty marker "
                     + "cell counts as inside - so a one-block gap at a jagged edge fills from any "
                     + "face of its neighbour.",
-                "Inside a shape (Box, Ring, Line tube), its inside wall counts as a block face "
+                "Inside a marker (a shape or a line's tube), its inside wall counts as a block face "
                     + "once it's within reach: aim at it and every mode selects that face and "
                     + "its neighbours just like real blocks, growing back into the shape."),
             t("Single", "One column out of the clicked face.", List.of(
                 "Aim at a block face and hold RMB: a single column grows straight out of that "
-                    + "face, one block at a time, until it hits something (a block, an end "
-                    + "marker, or the edge of your reach).",
-                "Re-clicking a half-built column continues it from its first air gap. A column "
-                    + "that already reached its end marker stays finished.")),
+                    + "face, one block at a time, until it hits something (a block, a "
+                    + "marker's skin, or the edge of your reach).",
+                "Re-clicking a half-built column continues it from its first air gap.")),
             t("Face any", "The whole connected surface grows at once.", List.of(
                 "Click a face and every connected, reachable block on the same plane with an "
                     + "exposed face extrudes together - click the top of a wall to make it taller, "
                     + "its side to make it thicker. Each column shows a green face + arrow first, "
-                    + "so you can see the whole selection before you click.",
-                "With a start marker behind the clicked column, the selection is the connected "
-                    + "group of start markers in that plane instead (one hold builds the whole "
-                    + "marked wall), and it can't grab faces outside the marker group.")),
+                    + "so you can see the whole selection before you click.")),
             t("Face target", "Face any, limited to the block type you click.", List.of(
                 "Works like Face any, but the selection only spreads across blocks of the same "
                     + "type as the one you click - click a stone floor and only the stone gets "
                     + "the green preview and grows; dirt, grass, or planks beside it are left "
-                    + "alone.",
-                "With a start marker behind the clicked column the marker group decides the "
-                    + "selection, exactly like Face any.")),
+                    + "alone.")),
             t("Face perp", "A 1-block-wide run, snapped to 45 or 90 degrees.", List.of(
                 "Like Face any, but instead of the whole surface it selects a single-block-wide "
                     + "line through the block you click, crossing your view - perpendicular to "
@@ -339,15 +333,13 @@ public final class HelpPanel {
                     + "45 lets you paint diagonal, stair-stepped runs, including up-diagonals "
                     + "across walls.",
                 "The run extends both ways from the click while faces stay exposed and in "
-                    + "reach; end markers stop it like everything else. With a start marker "
-                    + "behind the clicked block, only the marked blocks along the run are "
-                    + "selected - never the whole marker plane.",
+                    + "reach.",
                 "Works with every paint type - solid lines, gradient runs, noise streaks, or "
                     + "pattern strips.")),
             t("3D Fill", "A blob of blocks growing around the clicked block.", List.of(
                 "The block you click is the centre: tap RMB to wrap its open sides in the first "
                     + "shell, hold to grow the fill layer by layer. It only spreads through "
-                    + "connected air, so walls, end markers, and start-marker space contain it.",
+                    + "connected air, so walls and the marker it started in contain it.",
                 "Works with all four paint types: Solid fills with one block, Gradient makes a "
                     + "sphere-ish blend from the centre outward, Noise fills with the noise "
                     + "field, Pattern stacks the drawing in planes out of the clicked face. "
@@ -369,7 +361,7 @@ public final class HelpPanel {
                     + "anti-cheat flags that - blocks then wait until a neighbour is placed.",
                 "Only place inside markers (every placing mode; off by default): a click that "
                     + "would start outside every marker while right against one - the outer skin "
-                    + "of a box, ring or tube, or the blocks beside a start-to-end run - places "
+                    + "of a shape or tube - places "
                     + "nothing, so a slip never spreads a blob over the outside. Clicks away from "
                     + "markers paint as normal. The HUD says Outside the marker: nothing placed.",
                 "Perp snap 45° | 90° (Face perp, and the planes patterns paint on): the angle "
@@ -390,149 +382,98 @@ public final class HelpPanel {
                     + "ring. Your paint tool then behaves like a plain item until you pick a "
                     + "mode again."))),
 
-        t("Markers", "Turquoise start and amber end blocks that aim and bound every tool.",
+        t("Markers", "Shapes and lines: regions you make, then drag, turn and reshape, that bound and steer painting.",
             List.of(
-                "Pick Marker on the Place tab or the wheel (Place › Markers). LMB marks start "
-                    + "blocks (turquoise), RMB marks end blocks (amber). LMB-drag marks a straight "
-                    + "line locked to one axis. A drag that starts on an already-marked block "
-                    + "erases the run instead of adding.",
-                "MMB deletes the smallest piece you aim at - a single block marker (or a line's "
-                    + "middle node), otherwise the whole marker. {clear}+MMB deletes the whole "
-                    + "block-marker group (or the whole line). Both work in any mode with the "
-                    + "tool in hand.",
-                "One grammar for every marker and shape: LMB puts points and drags controls. RMB "
-                    + "places an end marker in the Marker modes, does a control's quick action, "
-                    + "and cancels something half-made. {clear} (the Modifier) means the other "
-                    + "way, both ends, or all. Scroll pushes or pulls along the axis; "
-                    + "{clear}+scroll grows or shrinks. Hold {axis} to lock any marker drag to "
+                "Pick Shape or Line / Spline on the Place tab (Markers) or the wheel (Place › "
+                    + "Markers). Markers aren't blocks - they bound painting: painting that "
+                    + "begins inside a marker stays inside it, and gradients run through it the "
+                    + "way its toolbar says. Both kinds are edited in either marker mode; the "
+                    + "mode only decides what a click on nothing makes.",
+                "A shape and a line work the same way, so knowing one is knowing the other: the "
+                    + "same cog and toolbar, the same move and rotate cubes, the same gradient "
+                    + "choices, Rendering page and Physics.",
+                "One grammar for every marker: LMB puts points and drags controls. RMB does a "
+                    + "control's quick action and cancels something half-made. MMB deletes the "
+                    + "smallest piece you aim at (a line's middle node, otherwise the marker). "
+                    + "{clear} (the Modifier) means the other way, or all of it. Scroll pushes "
+                    + "or pulls; {clear}+scroll grows or shrinks. Hold {axis} to lock a drag to "
                     + "one axis. Aiming at a control shows its keys on the action bar.",
-                "Markers aren't real blocks: block markers reach out to the Marker reach setting "
-                    + "(Place tab), and shapes place and edit at sight range - far beyond "
-                    + "block-placing range.",
-                "Markers are remembered per world and dimension. Clear all markers (N) on the "
-                    + "Place tab removes them all, shapes included."),
-            t("Marker groups", "Touching starts on one plane, plus their ends - with a cog toolbar.", List.of(
-                "Start markers that touch on one plane form a group together with their end "
-                    + "markers. While you drag starts the action bar counts them: \"Marker · N "
-                    + "starts set - RMB the end, or paint\".",
-                "A grey cog shows on the group you look at and the last one you touched. LMB the "
-                    + "cog opens its toolbar; LMB it again or anywhere else closes it. Hover a "
-                    + "button to see its name on the action bar.",
-                "Re-place ends: runs Auto end marker for this group, even if the setting is off. "
-                    + "Flip: swaps its starts and ends. Delete ends: removes just the ends. "
-                    + "Delete group: the same as {clear}+MMB. ?: opens this page.")),
-            t("Marker draw", "A freehand marker pencil.", List.of(
-                "Hold LMB and sweep the crosshair to spatter start markers over whatever it "
-                    + "touches; hold RMB for end markers (they only stick where a start marker "
-                    + "lines up within Marker reach).",
-                "With Auto end marker on, every start in the stroke scans along the face the "
-                    + "stroke began on - brushing across a block's side mid-sweep won't fire an "
-                    + "end marker off sideways.",
-                "A stroke that begins on a marked block erases instead of drawing; {clear}+MMB "
-                    + "removes a whole group at once.")),
-            t("Start markers", "Where painting begins.", List.of(
-                "Gradient and Noise: a start marker's block is the first block of the gradient - "
-                    + "the fill runs from it toward an end marker.",
-                "Face modes: clicking a face whose column has a start marker behind it extrudes "
-                    + "every connected start marker in that plane together, so one hold builds a "
-                    + "whole wall.",
-                "3D Fill: start markers define a space (lines out of all six faces, up to "
-                    + "Marker reach). A fill that starts inside that space never leaves it, and "
-                    + "one that starts outside never enters it.")),
-            t("End markers", "Where painting stops.", List.of(
-                "An end marker must line up straight with a start marker, within Marker reach of "
-                    + "it - the pair defines a start-to-end line.",
-                "Gradient and Noise: the end marker's block is the last block of the gradient.",
-                "In every placement mode an end marker acts like a solid block - a column or a "
-                    + "3D fill stops at it and never passes it, even when the marker floats in "
-                    + "air.")),
-            t("Auto end marker", "Start clicks place the matching end for you (Place tab).", List.of(
-                "With Auto end marker on, placing a start marker scans outward from the face "
-                    + "you clicked: click the top face of a floor block and it scans straight up, "
-                    + "click the side of a wall block and it scans out sideways.",
-                "The first non-air block it finds becomes the end marker. If there is only air "
-                    + "within Marker reach, the end marker is dropped at max distance instead.",
-                "Dragging a line of start markers works too - every start in the line scans along "
-                    + "the face the drag began on, giving you a matching line of ends in one "
-                    + "sweep. A group's Re-place ends button runs the same scan on demand.",
-                "While it's on and the tool is in Marker mode, the face you're pointing at is "
-                    + "tinted blue with a small arrow showing which way the scan will go. Blocks "
-                    + "that are already start markers don't show it (dragging over them erases "
-                    + "instead), and during a drag the arrows run down the whole line.")),
-            t("Marker reach", "How far markers reach.", List.of(
-                "The Place tab slider sets the max distance between a start and its end marker, "
-                    + "the auto end marker's scan range, and the reach of a start marker's "
-                    + "constraint space in 3D Fill.",
-                "Shape points aimed at nothing - a Box corner, a Ring centre, a Line node in the "
-                    + "sky - land at Marker reach."))),
-
-        t("Shapes", "Box, Ring and Line: regions you draw, then drag, scroll and reshape.",
-            List.of(
-                "Pick Box, Ring or Line on the Place tab (Shapes) or the wheel (Place › Shapes). "
-                    + "Shapes aren't blocks - they bound painting: painting that begins inside a "
-                    + "shape stays inside it, and gradients run from its start to its end.",
                 "Controls are coloured by what dragging them does: Start teal, End orange, Move "
                     + "white, Size green, Turn blue, Bend pink, and the grey cog for Options.",
-                "Every shape has a grey cog, shown on the shape you look at and the last one you "
-                    + "touched. LMB the cog to open its toolbar; LMB it again or anywhere else "
-                    + "closes it, and it hides while you drag. Delete on every toolbar is the "
-                    + "same as MMB; hovering a button names it on the action bar; ? opens its "
-                    + "Help page.",
-                "Rendering (the eye on a box, ring or line toolbar) swaps the buttons for that "
-                    + "marker's look; the arrow goes back. Filled squares colour its faces, "
-                    + "hollow squares its edge lines (click the lit one again for the default); "
-                    + "the lighter / heavier pairs set face and edge opacity in 10% steps. Show "
-                    + "as block opens a filterable block list and draws the marker with that "
-                    + "block's textures - a preview only, nothing is placed. The last two "
-                    + "buttons choose whether faces and edge lines still show where blocks are "
-                    + "in front of them (edges do by default, faces don't). The look is saved "
+                "Three cubes ride together just off the marker's surface, on the side you stand: "
+                    + "white Move, the grey cog, blue Rotate. They slide along it to stay a few "
+                    + "blocks from you and come round it as you walk, so they are never left "
+                    + "underneath or under the ground. Standing inside a big shape, they float "
+                    + "a few blocks in front of you instead.",
+                "LMB the cog to open the toolbar; LMB it again or anywhere else closes it, and it "
+                    + "hides while you drag. Hovering a button names it on the action bar; ? "
+                    + "opens its Help page.",
+                "Rendering (the eye on a toolbar) swaps the buttons for that marker's look; the "
+                    + "arrow goes back. Filled squares colour its faces, hollow squares its edge "
+                    + "lines (click the lit one again for the default); the lighter / heavier "
+                    + "pairs set face and edge opacity in 10% steps. Show as block opens a "
+                    + "filterable block list and draws the marker with that block's textures; "
+                    + "Show as gradient draws it in your gradient palette's blocks; Gradient "
+                    + "angle sets which way is top for the Across gradient. Previews only, "
+                    + "nothing is placed. The last two buttons choose whether faces and edge "
+                    + "lines still show where blocks are in front of them. The look is saved "
                     + "with the marker.",
-                "While you make one, the action bar walks you through it (\"FW Paint · Ring · "
-                    + "step 2 of 3 - LMB the outer radius (works over air) · RMB cancels\"), "
-                    + "then says \"Ring set\", \"Ring cancelled\" or \"Ring removed\".",
-                "Look at any part of a shape and its edges turn white: it can then be scrolled "
-                    + "along its axis, MMB'd away, or edited via its controls. A faint ghost "
-                    + "outline always shows through terrain, so a shape moved underground stays "
-                    + "findable and targetable - controls included. Several shapes can exist at "
-                    + "once."),
-            t("Marker box", "Box: two LMB corners mark a whole region; drag its faces to resize.", List.of(
-                "In Box mode, LMB a block for the first corner - the START side (teal) - and the "
-                    + "box preview follows your aim; LMB the opposite corner - the END side "
-                    + "(orange) - to set it. RMB cancels. A corner aimed at nothing goes at "
-                    + "Marker reach. The face of the first click sets the initial gradient axis.",
-                "Drag a green face handle to resize the box. Drag the white centre cube to move "
-                    + "it (hold {axis}: along one axis); scroll moves it too. {clear}+scroll "
-                    + "resizes the face you aim at; RMB a face grows it by 1, {clear}+RMB shrinks "
-                    + "it by 1.",
-                "The cog's toolbar: gradient along X, Y or Z · Flip (start on the other side) · "
-                    + "Delete · ?.",
-                "Gradients inside the box run from the start plane to the end plane, and painting "
-                    + "that begins inside the box stays inside it. MMB deletes it.")),
-            t("Shape markers", "Ring: a round or square donut region - a cylinder with the wall thickness you draw.", List.of(
-                "In Ring mode, three LMB clicks make a ring: the CENTRE (the clicked face sets "
-                    + "the ring's plane - that base plane is the gradient START side), then the "
-                    + "outer radius, then the inner radius (both work over open air). The same "
-                    + "spot twice gives a one-block-wide outline; different radii give a band - "
-                    + "the wall thickness. The centre can go in open air too: a level ring at "
-                    + "Marker reach. RMB cancels a part-placed ring.",
-                "Rings start round; switch Circle / Square on the ring's toolbar. Drag the white "
-                    + "centre to move it, drag a green radius control to resize the band "
-                    + "(dragging the inner past the outer just swaps them), drag a square's blue "
-                    + "corners to turn it freely. Hold {axis} to lock centre and radius drags to "
-                    + "an axis. Controls respond whenever the tool is in hand - just aim at one.",
-                "RMB a control to extrude the ring one layer along its plane's normal ({clear}+RMB "
-                    + "extrudes the other way). Scroll while looking at it to push or pull it "
-                    + "along that axis; {clear}+scroll grows or shrinks it a layer per notch.",
-                "The cog's toolbar: Circle · Square · Flip (once extruded: the gradient starts "
-                    + "from the far end) · Delete · ?.",
-                "Painting into a ring is restricted to its band: a Face click inside it selects "
-                    + "exactly the ring's faces, columns stop at the extrusion's far end, and "
-                    + "gradients run from the base plane (start) to the far side (end) - so a "
-                    + "tall extruded ring paints as a giant gradient cylinder with exactly the "
-                    + "wall thickness you drew.")),
+                "Look into a marker and its edges turn white and its handles come out. A faint "
+                    + "ghost outline always shows through terrain, so a marker moved underground "
+                    + "stays findable and grabbable. Several markers can exist at once.",
+                "Markers are remembered per world and dimension. Clear all markers (N) on the "
+                    + "Place tab removes them all. Boxes and rings made with earlier versions "
+                    + "come back as shapes."),
+            t("Marker reach", "How far away a point lands when you aim at nothing.", List.of(
+                "The Place tab slider. A shape's corner or a line's node aimed at the open sky "
+                    + "lands this far from you.")),
+            t("Marker dig", "TL;DR: the pick on a marker's cog toolbar limits what you can break to the marker's shape.",
+                List.of(
+                "LMB the pick button on a shape's or line's toolbar to step it: Off, Dig inside, "
+                    + "Dig outside.",
+                "Dig inside: while any part of the marker is within your reach, you can only "
+                    + "break blocks that are inside it - dig a tunnel, a dome or a pit exactly "
+                    + "the marker's shape. Walk out of reach of it and you dig as normal.",
+                "Dig outside: blocks inside the marker can't be broken at all - clear away "
+                    + "everything round it and what is in the marker is left standing.",
+                "Inside means the highlighted blocks: for a hollow shape or a shell tube that is "
+                    + "only its walls. It applies to breaking by hand with any tool or item, in "
+                    + "survival and creative, and is saved with the marker. The action bar says "
+                    + "which marker stopped you.",
+                "With several markers: a block in any Dig outside marker is kept; near Dig inside "
+                    + "markers, a block inside any one of them breaks.")),
+            t("Marker shape", "TL;DR: LMB one corner, LMB the opposite corner, then its cog turns the box into anything.",
+                List.of(
+                "1. Pick Shape on the wheel (Place › Markers).",
+                "2. LMB a block face for one corner, LMB another for the opposite corner (a "
+                    + "preview box follows your aim; aimed at the sky a corner lands at Marker "
+                    + "reach). RMB cancels. You get a box, standing upright.",
+                "3. LMB the grey cog. Top row: Box, Cylinder, Triangle, Star, Sphere - each keeps "
+                    + "the size you have. Then Hollow or Filled, and for a hollow one Capped "
+                    + "(closed ends) or open like a pipe.",
+                "4. Drag to resize: the teal and orange cubes are the bottom and top faces "
+                    + "(height); the two green cubes on the side are width and depth. Dragging "
+                    + "one side squashes a cylinder into an oval or a box into a slab; hold "
+                    + "{link} to resize both together and keep the proportions. A hollow shape "
+                    + "has a third, paler green cube on the inside of its wall: drag it to "
+                    + "thicken the wall. Sizes land on whole blocks when you let go.",
+                "5. Scroll on a face makes it a block taller or shorter; {clear}+scroll on a face "
+                    + "or side grows or shrinks the whole profile; scroll on the wall cube "
+                    + "thickens it. RMB a side cube makes width and depth equal again.",
+                "6. White cube: drag to move (hold {axis}: one axis). Blue cube: the rotate "
+                    + "rings, exactly as on a line - grab a ring and pull to turn the shape, "
+                    + "{link} for 15-degree steps, {axis}+drag to tilt just that ring.",
+                "Gradients: Along (the default for a shape) runs bottom face to top face, so the "
+                    + "top of the marker is the top of the gradient; Across runs side to side, "
+                    + "with Gradient angle (Rendering page) choosing which side; Inside out and "
+                    + "Outside in run between the middle and the skin. Flip swaps bottom and top.",
+                "Physics › Gravity drops the shape so it settles on the ground like a real "
+                    + "object; Undo drop puts it back.",
+                "MMB a control, or anywhere inside the selected shape, deletes it. A sphere "
+                    + "resized on one side or made taller becomes an egg.")),
             t("Marker line", "TL;DR: LMB start, LMB end, drag the dots, pick a shape on the cog, 3D Fill inside it.",
                 List.of(
-                "1. Pick Line on the wheel (Place › Shapes).",
+                "1. Pick Line / Spline on the wheel (Place › Markers).",
                 "2. LMB a block face for the start, another for the end (aimed at the sky, a "
                     + "point lands at Marker reach). RMB cancels.",
                 "3. Drag the cubes to move the line. Drag the pink balls to bend it.",
@@ -543,8 +484,9 @@ public final class HelpPanel {
                     + "cell), hold RMB.",
                 "Stuck? The ? on the line's toolbar opens this page."),
                 t("Controls cheat sheet", "Every click and key, one line each.", List.of(
-                    "All of this works in Line mode only - in other modes lines just show (and "
-                        + "keep painting inside the tube), so you can't nudge them by accident.",
+                    "All of this works in the marker modes (Line / Spline or Shape) - in the "
+                        + "painting modes lines just show (and keep painting inside the tube), so "
+                        + "you can't nudge them by accident.",
                     "LMB-drag a cube (node): move it. Lands on the block grid when you let go.",
                     "LMB-drag a pink ball (handle): bend the curve that side.",
                     "RMB-drag a pink ball: slide it in or out - same angle, more or less bend.",
@@ -563,7 +505,18 @@ public final class HelpPanel {
                 t("Shapes and tubes", "The toolbar behind the line's cog.", List.of(
                     "Bare, circle, square, triangle, star: sweeps that shape along the line (bare "
                         + "is just the line).",
-                    "Shell (just the skin, default) or Solid (filled in).",
+                    "Drawn profile (the wobbly outline): sweep a shape you draw yourself. The "
+                        + "first time, you go straight into drawing: LMB a block face to start - "
+                        + "the picture is flat against that face, one block thick - then LMB-drag "
+                        + "to draw more cells and RMB-drag to rub out. The tube follows as you "
+                        + "draw, one drawn cell to one block. LMB the pencil on the toolbar when "
+                        + "done, and again any time to change the picture. It stays where you "
+                        + "drew it: moving or turning the line doesn't move it. Each node's size "
+                        + "cube scales the picture there, so it can taper along the line; on tight "
+                        + "bends and big size changes it is blended between nodes, and fine detail "
+                        + "can smear.",
+                    "Shell (just the skin, default) or Solid (filled in). A shell also has "
+                        + "Capped: turn it off to leave the two ends open, like a pipe.",
                     "Across / Along / Inside out / Outside in: which way a gradient runs (see "
                         + "Painting it). Flip swaps the start and end. Delete is the same as "
                         + "{clear}+MMB. ? opens this page.",
@@ -571,8 +524,10 @@ public final class HelpPanel {
                         + "green (diagonal arrow) and blue (curved arrow) cubes show on both ends "
                         + "and on the node you aim at. Different sizes = a taper, like a tentacle.",
                     "White cube (four arrows) beside the line: drag to move the whole thing. It "
-                        + "rides with the grey cog and the blue rotate cube: the three slide along "
-                        + "the line to stay a few blocks from where you stand, side by side.",
+                        + "rides with the grey cog and the blue rotate cube, just off the tube on "
+                        + "the side you stand: the three slide along the line to stay a few blocks "
+                        + "from you and come round it as you walk, so they are never underneath it "
+                        + "or under the ground.",
                     "Blue cube (globe): LMB turns rotate mode on or off. Two rings go round the "
                         + "whole line; grab either anywhere and pull to turn the line about its "
                         + "centre. Hold {link} for 15-degree steps. The rings turn with the line "
@@ -692,8 +647,8 @@ public final class HelpPanel {
                 t("Sizing", "How long a placed gradient runs.", List.of(
                     "Min blocks: the shortest run that realises the segment ratios - it never "
                         + "stretches toward an end block.",
-                    "Fill space: expands to fill from the placed block to the end marker, or the "
-                        + "first solid block when there's no marker.",
+                    "Fill space: expands to fill from the placed block to the edge of the marker "
+                        + "it is in, or the first solid block when there's no marker.",
                     "Set steps: stretches or shrinks the gradient to a fixed number of blocks "
                         + "(the Steps slider shows only for Set steps)."))),
             t("Noise settings", "Only used by Noise paint.", List.of(
@@ -712,7 +667,7 @@ public final class HelpPanel {
                     + "ramp), so a strip of nothing but Auto segments still gives a stable, "
                     + "hand-shaped distribution.",
                 "At the start of the strip it resolves against the block you started painting "
-                    + "on. At the end it scans ahead for an end marker, or the first solid "
+                    + "on. At the end it scans ahead for the edge of the marker, or the first solid "
                     + "block - and if there is nothing to find, it picks the OPPOSITE of your "
                     + "start from the inventory (lightest vs darkest for brightness, the "
                     + "furthest colour for colour), so the ramp still spans. In the middle it "
@@ -789,11 +744,10 @@ public final class HelpPanel {
                     + "clump into organic patches instead of stripes. The order is the palette's "
                     + "strip - its START in the valleys, its END on the peaks - and the noise "
                     + "type, scale, and seed come from the palette's NOISE section.",
-                "Classic region fill: mark a region (start markers on one side, end markers "
-                    + "opposite, rows of air between pairs), switch to 3D Fill, aim into the air "
-                    + "and RMB - the whole region fills at once.",
+                "Classic region fill: make a shape or a line tube, switch to 3D Fill, aim into "
+                    + "it and RMB - the whole marker fills at once.",
                 "Or paint it anywhere: Single columns, Face surfaces, and free 3D blobs all work, "
-                    + "bounded by end markers like every other paint type."),
+                    + "bounded by markers like every other paint type."),
             t("Noise fields", "Smooth randomness over space.", List.of(
                 "A noise field gives every position in the world a value, and nearby positions "
                     + "get similar values - that's why the pattern forms patches. Your palette is "

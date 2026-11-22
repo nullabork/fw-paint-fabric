@@ -59,12 +59,6 @@ public class GradientConfig {
 
     /** "Marker reach": max distance (blocks) allowed between a start and end marker. */
     public int maxMarkerDistance = 64;
-    /**
-     * When on, each placed start marker scans out from the clicked face and drops an end marker on
-     * the first non-air block (or at max marker distance if it's all air). A dragged line of starts
-     * uses the face the drag began on, producing a matching line of ends.
-     */
-    public boolean autoPlaceEnd = false;
 
     // ---- placement behaviour ----------------------------------------------------------------------
 

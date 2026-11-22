@@ -150,7 +150,7 @@ class LineShapeTest {
         l.ensureCells(true);
         assertTrue(l.fracOf(new BlockPos(0, 10, 0)) < 0.1);
         assertTrue(l.fracOf(new BlockPos(9, 10, 0)) > 0.85);
-        RingShape.Segment seg = l.segmentFor(new BlockPos(5, 10, 0));
+        LineShape.Segment seg = l.segmentFor(new BlockPos(5, 10, 0));
         assertNotNull(seg);
         assertEquals(10, seg.length());
         assertEquals(5, seg.index(), 1);
@@ -188,6 +188,33 @@ class LineShapeTest {
                 area += Math.round(w) * Math.round(h);
             }
             assertEquals(exposedFaces(r.cells()), area, 1e-6, prof + ": merged faces must tile the exposed faces");
+        }
+    }
+
+    @Test
+    void aSlopedTubeIsSolidAllTheWayThrough() {
+        // Every cell well inside the tube must be found, at any slope: a missed one becomes a
+        // stray block (and columns of them) inside a hollow tube.
+        double[][] ends = {{42, 13, 0}, {42, 13, 5}, {30, 30, 30}, {7, 40, 3}, {40, 1, 17}};
+        for (double[] e : ends) {
+            Vec3 a = new Vec3(0.5, 10.5, 0.5), b = a.add(e[0], e[1], e[2]);
+            TubeBuild.Result r = TubeBuild.build(new TubeBuild.Params(
+                    withEnds(new LineCurve(a, b), 9, 9, 0, 0), LineProfile.CIRCLE, true));
+            Vec3 dir = b.subtract(a).normalize();
+            double len = b.distanceTo(a);
+            int missing = 0;
+            for (int x = -12; x <= 55; x++) {
+                for (int y = -5; y <= 65; y++) {
+                    for (int z = -12; z <= 45; z++) {
+                        Vec3 d = new Vec3(x + 0.5, y + 0.5, z + 0.5).subtract(a);
+                        double along = d.dot(dir);
+                        if (along < 1 || along > len - 1) continue;
+                        if (d.subtract(dir.scale(along)).length() > 8) continue;
+                        if (!r.cells().containsKey(BlockPos.asLong(x, y, z))) missing++;
+                    }
+                }
+            }
+            assertEquals(0, missing, "holes inside a solid tube towards " + java.util.Arrays.toString(e));
         }
     }
 
@@ -535,7 +562,7 @@ class LineShapeTest {
         l.aimControls(eye, false);
         Vec3[] c = l.controls(eye);
         double d = c[1].distanceTo(eye);
-        assertTrue(d >= LineShape.CTRL_NEAR && d <= LineShape.CTRL_FAR, "cluster " + d + " from the eye");
+        assertTrue(d >= LineShape.CTRL_NEAR - 1e-9 && d <= 4, "cluster " + d + " from the eye");
         // Side by side across the view: evenly spaced on a level line at right angles to eye -> cog.
         Vec3 across = c[2].subtract(c[0]);
         assertEquals(2 * LineShape.CTRL_SPACING, across.length(), 1e-9);
@@ -550,7 +577,7 @@ class LineShapeTest {
         l.aimControls(far, false);
         l.slideControls(10);
         double d2 = l.controls(far)[1].distanceTo(far);
-        assertTrue(d2 >= LineShape.CTRL_NEAR && d2 <= LineShape.CTRL_FAR, "cluster " + d2 + " after walking");
+        assertTrue(d2 >= LineShape.CTRL_NEAR - 1e-9 && d2 <= 4, "cluster " + d2 + " after walking");
     }
 
     @Test
@@ -568,7 +595,7 @@ class LineShapeTest {
 
     @Test
     void controlClusterHoldsStillWhenNoSpotIsInRange() {
-        // The whole line is further than CTRL_FAR, then nearer than CTRL_NEAR: standing still must
+        // The whole line is far away, then nearer than CTRL_NEAR: standing still must
         // not move the cluster from call to call (it used to hop from side to side of you).
         for (Vec3 eye : new Vec3[]{new Vec3(20, 30, 14), new Vec3(20.3, 9.6, 0.5)}) {
             LineShape l = straight(40);

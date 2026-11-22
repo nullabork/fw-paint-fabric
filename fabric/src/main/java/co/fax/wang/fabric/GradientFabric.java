@@ -2,7 +2,7 @@ package co.fax.wang.fabric;
 
 import co.fax.wang.Gradient;
 import co.fax.wang.HudOverlay;
-import co.fax.wang.MarkerManager;
+import co.fax.wang.shape.ShapeMarkers;
 import co.fax.wang.PaintPlacer;
 import co.fax.wang.config.ConfigManager;
 import net.fabricmc.api.ClientModInitializer;
@@ -43,12 +43,15 @@ public class GradientFabric implements ClientModInitializer {
         ClientHotbarScrollEvents.ALLOW.register((inventory, currentSlot, newSlot, scrollX, scrollY) ->
                 !co.fax.wang.shape.ShapeMarkers.onScroll(scrollY));
 
+        // A marker's dig mode can forbid breaking a block (this fires for the first hit and while
+        // mining is held).
         // While the tool is engaged, suppress vanilla left/right click so it doesn't break/use the
         // world. Cancel client-side only (stops the action packet). Fabric's UseBlockCallback also
         // wraps our OWN synthesized placement interaction — shouldCancelClick()'s isPlacing()
         // guard lets that one through instead of cancelling it.
         AttackBlockCallback.EVENT.register((player, level, hand, pos, dir) ->
-                (level.isClientSide() && Gradient.toolEngaged()) ? InteractionResult.FAIL : InteractionResult.PASS);
+                (level.isClientSide() && (Gradient.toolEngaged() || co.fax.wang.shape.ShapeMarkers.digBlocked(pos)))
+                        ? InteractionResult.FAIL : InteractionResult.PASS);
         UseBlockCallback.EVENT.register((player, level, hand, hit) ->
                 (level.isClientSide() && Gradient.shouldCancelClick())
                         ? InteractionResult.FAIL : InteractionResult.PASS);
@@ -59,7 +62,7 @@ public class GradientFabric implements ClientModInitializer {
         LevelRenderEvents.COLLECT_SUBMITS.register(ctx -> {
             var col = ctx.submitNodeCollector();
             var cam = ctx.levelState().cameraRenderState.pos;
-            MarkerManager.render(col, cam);
+            ShapeMarkers.render(col, cam);
             PaintPlacer.renderPreview(col, cam);
         });
 

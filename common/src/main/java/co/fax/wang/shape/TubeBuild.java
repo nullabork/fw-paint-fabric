@@ -36,15 +36,39 @@ final class TubeBuild {
     static final double PATH_STEP = 0.25;
     /** Sample spacing for tubes: slabs widen to cover the gaps, so this can be coarse. */
     static final double TUBE_STEP = 0.5;
-    /** In-plane spacing of the candidate grid: ≤ √½ so every cell a slice cuts gets a point. */
-    static final double GRID = 0.7;
+    /**
+     * Spacing of the candidate points across a slab, and the most between its layers along the
+     * line. A cell is only tested when a candidate lands in it, so the points must be close
+     * enough that every cell with its centre in the slab gets one at any slope: the nearest
+     * point is within half a spacing on each of the slab's three axes, and
+     * √(2·(GRID/2)² + (LAYER/2)²) &lt; ½ keeps that inside the cell. Anything looser leaves holes
+     * in a tilted tube, which a hollow one shows as stray columns through its middle.
+     */
+    static final double GRID = 0.55;
+    static final double LAYER = 0.6;
     /** Safety cap on selected cells so a huge tube can't stall the client. */
     static final int MAX_CELLS = 400_000;
     static final float EXPAND = 0.005f; // lift off surfaces (matches WorldDraw)
     static final float EDGE_W = 0.01f;  // half-width of the edge highlight quads
 
     /** Everything a build reads, copied so the worker never sees a half-edited line. */
-    record Params(LineCurve curve, LineProfile profile, boolean solid) {}
+    record Params(LineCurve curve, LineProfile profile, boolean solid, double stretch, double wall,
+                  boolean capped, boolean ball, boolean flat, ProfileDrawing drawn) {
+        /** A plain line tube: round-number profile, one-block shell, capped, half a block past each end. */
+        Params(LineCurve curve, LineProfile profile, boolean solid) {
+            this(curve, profile, solid, 1, 1, true, false, false, null);
+        }
+
+        /** Nothing to sweep (no profile, or a drawn one with nothing drawn yet): just the line's own cells. */
+        boolean bare() {
+            return profile == LineProfile.NONE || (profile == LineProfile.CUSTOM && (drawn == null || drawn.isEmpty()));
+        }
+
+        /** True when profile-plane point (u, v) is inside the profile at radius r. */
+        boolean inside(double u, double v, double r) {
+            return profile == LineProfile.CUSTOM ? drawn.inside(u, v, r + 0.5) : profile.inside(u, v, r);
+        }
+    }
 
     /** A finished build: cells (→ fraction along the line), geometry relative to origin. */
     record Result(Long2FloatOpenHashMap cells, BlockPos origin, float[] faces, float[] edges, long nanos) {
@@ -55,7 +79,7 @@ final class TubeBuild {
 
     static Result build(Params p) {
         long t0 = System.nanoTime();
-        Long2FloatOpenHashMap cells = p.profile() == LineProfile.NONE
+        Long2FloatOpenHashMap cells = p.bare()
                 ? pathCells(p.curve().sample(PATH_STEP))
                 : tubeCells(p, p.curve().sample(TUBE_STEP));
         BlockPos origin = originOf(cells);
@@ -96,6 +120,19 @@ final class TubeBuild {
     static Long2FloatOpenHashMap tubeCells(Params p, List<LineCurve.Sample> ss) {
         Long2FloatOpenHashMap inside = new Long2FloatOpenHashMap();
         int n = ss.size(), last = n - 1;
+        // Shape extras (all neutral for a plain line): the profile is stretch times as deep (v)
+        // as it is wide (u); a hollow one has walls `wall` thick and may be left open at the ends;
+        // a ball swells from nothing at each end to the full profile half way (a sphere or egg);
+        // flat ends stop exactly on the end nodes instead of half a block past them.
+        double stretch = Math.max(0.05, p.stretch()), wall = Math.max(1, p.wall());
+        boolean ball = p.ball(), capped = p.capped() || ball;
+        double pad = p.flat() ? 0 : 0.5, total = n == 0 ? 0 : ss.get(last).s();
+        // The classic shell (cells with an outside neighbour) is kept for one-block capped walls.
+        boolean classic = wall <= 1 && capped;
+        LongOpenHashSet core = p.solid() || classic ? null : new LongOpenHashSet();
+        if (p.profile() == LineProfile.CUSTOM && p.drawn() != null && n > 0) {
+            p.drawn().orient(ss.get(0).tan(), ss.get(0).n(), ss.get(0).b());
+        }
         for (int i = 0; i < n && inside.size() < MAX_CELLS; i++) {
             LineCurve.Sample s = ss.get(i);
             Vec3 c = s.pos(), t = s.tan();
@@ -105,7 +142,7 @@ final class TubeBuild {
             double th = p.curve().twistAt(s.seg(), s.t()), ct = Math.cos(th), st = Math.sin(th);
             Vec3 nn = s.n().scale(ct).add(s.b().scale(st));
             Vec3 bb = s.b().scale(ct).subtract(s.n().scale(st));
-            double ext = (r + 0.5) * Math.sqrt(2); // farthest profile point (square corner)
+            double ext = (r + 0.5) * Math.sqrt(2) * Math.max(1, stretch); // farthest profile point (square corner)
             // Slab half-thickness: half the distance to each neighbour at the rim, padded.
             double gap = 0;
             for (int j : new int[]{i - 1, i + 1}) {
@@ -115,10 +152,12 @@ final class TubeBuild {
                 gap = Math.max(gap, c.distanceTo(o.pos()) + ext * ang);
             }
             double h = Math.max(0.3, gap * 0.6);
-            double lo = i == 0 ? -0.5 : -h, hi = i == last ? 0.5 : h;
+            double lo = i == 0 ? -pad : -h, hi = i == last ? pad : h;
             int steps = (int) Math.ceil(ext / GRID);
             double lim2 = (ext + 1) * (ext + 1);
-            for (double a = lo; a <= hi + 1e-9; a += GRID) {
+            int layers = Math.max(1, (int) Math.ceil((hi - lo) / LAYER - 1e-9));
+            for (int ia = 0; ia <= layers; ia++) {
+                double a = lo + (hi - lo) * ia / layers; // both faces of the slab, and between
                 double bx = c.x + t.x * a, by = c.y + t.y * a, bz = c.z + t.z * a;
                 for (int iu = -steps; iu <= steps; iu++) {
                     double u = iu * GRID;
@@ -135,16 +174,45 @@ final class TubeBuild {
                         if (along < lo || along > hi) continue;
                         double pu = dx * nn.x + dy * nn.y + dz * nn.z;
                         double pv = dx * bb.x + dy * bb.y + dz * bb.z;
-                        if (p.profile().inside(pu, pv, r)) inside.put(key, (float) fr);
+                        double at = s.s() + along; // how far along the line this cell is
+                        double e = r + 0.5;        // the profile's half-width here
+                        if (ball) {
+                            double f = total <= 0 ? 0.5 : at / total, q = 1 - (2 * f - 1) * (2 * f - 1);
+                            if (q <= 0) continue;
+                            e *= Math.sqrt(q);
+                        }
+                        if (!p.inside(pu, pv / stretch, e - 0.5)) continue;
+                        inside.put(key, (float) fr);
+                        if (core == null) continue;
+                        // The hollow: the same profile `wall` smaller all round (and, capped, not
+                        // within `wall` of either end).
+                        double inU = e - wall, inV = e * stretch - wall;
+                        if (ball) {
+                            double len = total - 2 * wall, f = len <= 0 ? -1 : (at - wall) / len;
+                            double q = 1 - (2 * f - 1) * (2 * f - 1);
+                            if (len <= 0 || q <= 0) continue;
+                            inU = (r + 0.5 - wall) * Math.sqrt(q);
+                            inV = ((r + 0.5) * stretch - wall) * Math.sqrt(q);
+                        } else if (capped && (at < -pad + wall || at > total + pad - wall)) {
+                            continue;
+                        }
+                        if (inU <= 0 || inV <= 0) continue;
+                        if (p.inside(pu, pv * inU / inV, inU - 0.5)) core.add(key);
                     }
                 }
             }
         }
         if (p.solid()) return inside;
-        // Shell: only the cells with an outside face neighbour.
+        // Shell: the cells outside the hollow, and (capped) every cell with an outside face
+        // neighbour, which keeps the skin watertight and closes the ends.
         Long2FloatOpenHashMap shell = new Long2FloatOpenHashMap();
         for (Long2FloatMap.Entry e : inside.long2FloatEntrySet()) {
             long k = e.getLongKey();
+            if (core != null && !core.contains(k)) {
+                shell.put(k, e.getFloatValue());
+                continue;
+            }
+            if (!capped) continue;
             for (Direction dir : Direction.values()) {
                 if (!inside.containsKey(BlockPos.offset(k, dir))) {
                     shell.put(k, e.getFloatValue());

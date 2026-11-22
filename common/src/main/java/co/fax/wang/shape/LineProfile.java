@@ -7,7 +7,9 @@ package co.fax.wang.shape;
  * outline scaled to r.
  */
 public enum LineProfile {
-    NONE, CIRCLE, SQUARE, TRIANGLE, STAR;
+    NONE, CIRCLE, SQUARE, TRIANGLE, STAR,
+    /** The line's own drawn picture (a {@link ProfileDrawing}); the tube builder asks that instead. */
+    CUSTOM;
 
     /** Star inner-vertex radius as a fraction of the outer radius. */
     static final double STAR_INNER = 0.45;
@@ -16,7 +18,7 @@ public enum LineProfile {
     public boolean inside(double u, double v, double r) {
         double e = r + 0.5; // cell centres within half a block of the outline count
         return switch (this) {
-            case NONE -> false;
+            case NONE, CUSTOM -> false;
             case CIRCLE -> u * u + v * v <= e * e;
             case SQUARE -> Math.abs(u) <= e && Math.abs(v) <= e;
             case TRIANGLE, STAR -> insidePolygon(outline(e), u, v);
