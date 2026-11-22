@@ -10,15 +10,12 @@ package co.fax.wang;
  * fully transparent (see the 26.2 GUI notes).
  */
 public enum PlacementMode {
-    MARKER("Marker", "Active: Marker", 0xFFFFAA00),                          // orange
-    MARKER_BOX("Box", "Active: Box", 0xFFFFD24D),             // gold — one-piece box region
-    MARKER_DRAW("Marker draw", "Active: Marker draw", 0xFFFFA07A),          // salmon
-    // Circle and Square merged into Ring (the ring's toolbar switches its outline). Configs
-    // saved with the old names load as Ring — Gson's enum adapter honours the alternates.
-    @com.google.gson.annotations.SerializedName(value = "MARKER_RING",
-            alternate = {"MARKER_CIRCLE", "MARKER_SQUARE"})
-    MARKER_RING("Ring", "Active: Ring", 0xFFFF8A3C),          // orange — circle/square donut region
-    MARKER_LINE("Line", "Active: Line", 0xFFFFE066),          // yellow — curve / swept tube
+    // One Shape tool replaced Box, Ring and the block-marker tools (Marker, Marker draw).
+    // Configs saved with the old names load as Shape: Gson's enum adapter honours the alternates.
+    @com.google.gson.annotations.SerializedName(value = "MARKER_SHAPE",
+            alternate = {"MARKER_BOX", "MARKER_RING", "MARKER_CIRCLE", "MARKER_SQUARE", "MARKER", "MARKER_DRAW"})
+    MARKER_SHAPE("Shape", "Active: Shape", 0xFFFF8A3C),       // orange: box / cylinder / sphere ...
+    MARKER_LINE("Line / Spline", "Active: Line / Spline", 0xFFFFE066), // yellow: curve / swept tube
     SINGLE("Single", "Active: Single", 0xFF55FF55),     // green
     // Persisted by enum name: FACE keeps its name so saved configs stay on it (label only changed).
     FACE("Face any", "Active: Face any", 0xFF55FFFF),   // aqua — every exposed face on the plane
@@ -62,10 +59,9 @@ public enum PlacementMode {
         return this == FACE || this == FACE_TARGET;
     }
 
-    /** True for the marker-selection modes (drag lines, box, freehand, shape regions). */
+    /** True for the marker modes, where shapes and lines are made and edited. */
     public boolean isMarker() {
-        return this == MARKER || this == MARKER_BOX || this == MARKER_DRAW
-                || this == MARKER_RING || this == MARKER_LINE;
+        return this == MARKER_SHAPE || this == MARKER_LINE;
     }
 
     /** A titled group of modes: the Place tab's sections and the wheel's Place ring share these. */
@@ -74,14 +70,31 @@ public enum PlacementMode {
     private static final java.util.List<Group> GROUPS = java.util.List.of(
             new Group("Blocks", "Click a block, paint from it.",
                     java.util.List.of(SINGLE, FACE, FACE_TARGET, FACE_PERP, FILL3D)),
-            new Group("Markers", "Start and end blocks that aim and bound painting.",
-                    java.util.List.of(MARKER, MARKER_DRAW, DISABLED)),
-            new Group("Shapes", "Boxes, rings and lines that shape what gets painted.",
-                    java.util.List.of(MARKER_BOX, MARKER_RING, MARKER_LINE)));
+            new Group("Markers", "Shapes and lines that bound and steer what gets painted.",
+                    java.util.List.of(MARKER_SHAPE, MARKER_LINE, DISABLED)));
 
     /** Every mode exactly once, in the order the Place tab and the wheel show them. */
     public static java.util.List<Group> groups() {
         return GROUPS;
+    }
+
+    /**
+     * The mode saved as {@code name}: a current one, or Shape for the retired marker tools it
+     * replaced (Box, Ring, Marker, Marker draw), which remembered wheel picks can still hold.
+     * Unknown or missing names give Off.
+     */
+    public static PlacementMode byName(String name) {
+        if (name == null) return DISABLED;
+        switch (name) {
+            case "MARKER_BOX", "MARKER_RING", "MARKER_CIRCLE", "MARKER_SQUARE", "MARKER", "MARKER_DRAW" -> {
+                return MARKER_SHAPE;
+            }
+            default -> { }
+        }
+        for (PlacementMode m : values()) {
+            if (m.name().equals(name)) return m;
+        }
+        return DISABLED;
     }
 
     /** The next mode, wrapping. */

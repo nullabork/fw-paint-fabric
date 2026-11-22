@@ -9,7 +9,7 @@ Open source (MIT) — [github.com/nullabork/fw-paint-fabric](https://github.com/
 (natural, blotchy 3D patterns), and **Pattern** (hand-drawn 2D block grids painted as planes) —
 driven by **Palettes** and **Patterns**: named, saved block ramps and drawings you build once and
 reuse everywhere. A **Finder** tab ranks every block in the game by colour. Any paint works
-through any placement mode, with or without markers and shapes. Fluids count as empty space —
+through any placement mode, with or without markers. Fluids count as empty space —
 paint under water or lava exactly as in air. Placement is the legit, multiplayer-safe way
 (normal block-place interactions the server validates), so it works on servers.
 
@@ -33,7 +33,7 @@ The 60-second version:
 4. Release G, aim at any block face, **right-click**. You're painting — hold to keep going.
 
 From there it deepens as far as you like: palettes blend gradients and noise along your build,
-patterns paint hand-drawn grids, and markers + shapes (boxes, rings, lines) aim and bound
+patterns paint hand-drawn grids, and markers (shapes and lines) aim and bound
 everything — a giant gradient cylinder is a two-minute job. Every section of the screen has a
 **?** that opens the matching page of the in-game **Help** tab, a drill-down manual for every
 piece.
@@ -47,10 +47,10 @@ piece.
 | **B** | Next palette, pattern or block (whichever the paint type uses) |
 | **L-Ctrl** | Modifier: the other way · both ends · all nodes (with MMB: delete connected) |
 | **Alt** (hold) | Lock a marker drag to an axis |
-| **Right-click** | Paint (hold to keep going); end markers in marker modes; a control's quick action; cancels a half-made shape |
-| **Left-click** | Start markers and shape points; drag controls; open a shape's cog toolbar |
-| **Middle-click** | Delete the smallest marker piece you aim at — Ctrl+MMB deletes the whole line or marker group |
-| **Scroll** (on a shape) | Push / pull it along its axis — Ctrl+scroll grows / shrinks it |
+| **Right-click** | Paint (hold to keep going); a control's quick action; cancels a half-made marker |
+| **Left-click** | Shape corners and line points; drag controls; open a marker's cog toolbar |
+| **Middle-click** | Delete the smallest marker piece you aim at — Ctrl+MMB deletes the whole line |
+| **Scroll** (on a marker's control) | Push / pull it — Ctrl+scroll grows / shrinks it |
 
 Keys are rebindable under Options → Controls → Key Binds → **FW Paint**; the Settings tab's
 **Keys & gestures** list always shows the live bindings.
@@ -71,7 +71,7 @@ Hover a wedge to fan out its options; click only to choose. **Paint** fans the p
 (Solid / Gradient / Noise / Pattern); **Palette** follows the paint type (your palettes, your
 patterns, or — with Solid paint — the match modes, with **This block** fanning your inventory's
 blocks in colour order); **Place** fans **Blocks** (Single / Face any / Face target / Face perp /
-3D Fill), **Markers** (Marker / Marker draw), **Shapes** (Box / Ring / Line), **Options** (Don't
+3D Fill), **Markers** (Shape / Line / Spline), **Options** (Don't
 match palette, Fill voids first, Place in air, Perp snap 45°/90°) and **Off**. Lit means on;
 grey means it doesn't apply to the current mode. Every ring ends in **More… (K)**, which opens
 the screen on that tab. The wedge holding the current selection shows a blue tint; anything that
@@ -114,7 +114,7 @@ while you work; Save puts the palette in use) and columns in working order:
   a segment to move it, sideways out to remove it, or click it and use ↑ ↓ / Del.
 - **3 How it blends** — **Order** (Colour ↑ / Colour ↓ / Bright ↑ / Bright ↓, or Custom when
   arranged by hand), **Curve** (Linear / Ease in / Ease out / In/out / Step), **Sizing** (Min
-  blocks — shortest run that fits the ratios; Fill space — out to the end marker / first block;
+  blocks — shortest run that fits the ratios; Fill space — out to the marker's edge / first block;
   Set steps — fixed length), **Variation** (Off / ±1–±3 colour-neighbour window + a swap chance —
   cells shimmer to nearby colours from your inventory), **Chaos** (how ragged the bands are) and
   **Step length** (the wobble) — plus a foldable **Noise** section (Smooth / Perlin / Fractal,
@@ -123,7 +123,7 @@ while you work; Save puts the palette in use) and columns in working order:
   move through the noise, and a yellow warning flags Auto segments that touch.
 - **Auto segments** — the crosshatched wildcards: *Auto colour* and *Auto brightness* resolve to
   a real inventory block **when you paint**, deterministically: at the strip's start they read
-  the block you started on; at the end they scan to an end marker or the first solid block — and
+  the block you started on; at the end they scan to the marker's edge or the first solid block — and
   if there's nothing to find, they pick the *opposite* of your start (lightest↔darkest for
   brightness, the furthest colour for colour) so you still get a full ramp. A strip of nothing
   but Autos is a reusable "gradient from whatever I'm standing on".
@@ -157,18 +157,15 @@ advancing fronts while you hold.
 
 - **Single** — one column out of the clicked face; re-clicking continues from its first air gap.
 - **Face any** — the whole connected plane extrudes together: click a wall's top to raise it, its
-  side to thicken it. A start marker behind the clicked column selects the connected marker group
-  instead.
+  side to thicken it.
 - **Face target** — like Face any, but only blocks of the clicked block's type are selected and
   grow (click a stone floor: the stone extrudes, the grass beside it doesn't).
 - **Face perp** — a 1-block-wide run through the clicked block crossing your view (perpendicular
-  to your look), snapped to 45° or 90° — diagonal stair-stepped lines included. Inside markers
-  only the marked blocks along the run are selected.
+  to your look), snapped to 45° or 90° — diagonal stair-stepped lines included.
 - **3D Fill** — a connected blob centred on the clicked block; tap for the first shell, hold to
-  grow. Contained by walls, end markers, and start-marker space.
+  grow. Contained by walls and by the marker it starts in.
 - **Off** — the tool does nothing; clicks work as normal.
-- Everywhere: an **end marker stops a column or fill even floating in air**, and a finished column
-  never resumes past it.
+- Everywhere: a **marker's edge stops a column or fill**, even in open air.
 - Plants you could place into (hanging roots, grass, vines) count as solid and are left alone.
 
 **Options** for the selected mode sit beside the modes (and on the wheel's Place › Options),
@@ -183,79 +180,69 @@ greyed when they don't apply:
   straight into the air, no scaffolding needed (aim at the sky to drop one block at reach); turn
   it off for servers whose anti-cheat flags that.
 - **Only place inside markers** (every placing mode, off by default) — a click on the outside of
-  a box, ring, tube or start-to-end run places nothing, so a slip can't spread a blob over the
+  a shape or tube places nothing, so a slip can't spread a blob over the
   outside. Clicks away from markers paint as normal; the HUD shows a yellow reminder.
 - **Perp snap 45° | 90°** — Face perp runs and pattern planes.
 
 ## Markers
 
-Turquoise **starts** and amber **ends** aim and bound every tool. They aren't real blocks: block
-markers reach to the **Marker reach** setting and shapes place and edit at sight range — far
-beyond block reach. Saved per world and dimension; **Clear all markers** (Place tab) wipes them
-all, shapes included.
+**Shape** and **Line / Spline** — regions you make, then drag, turn and reshape. They aren't
+real blocks: they bound painting (painting that begins inside a marker stays inside it) and
+steer gradients. They place and edit at sight range, far beyond block reach, and are saved per
+world and dimension; **Clear all markers** (Place tab) wipes them. Boxes and rings from earlier
+versions come back as shapes.
 
-- **Marker** — left-click starts, right-click ends; click-drag for straight axis-locked lines; a
-  drag starting on a marked block erases the run instead.
-- **Marker draw** — a freehand pencil: sweep to spatter starts over whatever the crosshair
-  touches, right-click for ends (auto ends scan along the stroke's starting face).
-- **Middle-click deletes the smallest piece you're aiming at** — a single block marker, a line's
-  middle node, otherwise the whole marker — in any mode, tool in hand. **Ctrl+middle-click**
-  deletes the whole block-marker group or the whole line.
-- **Groups** — touching starts on one plane plus their ends get a grey **cog**: left-click it for
-  a toolbar with **Re-place ends** (runs Auto end marker for just this group), **Flip** (swap
-  starts and ends), **Delete ends**, **Delete group** and **?**.
-- **Auto end marker** (Place tab) — each start scans out from the clicked face and marks the
-  first non-air block (all air → Marker reach), with a blue face + arrow preview.
+A shape and a line work the same way, so knowing one is knowing the other. Left-click puts
+points and drags controls, right-click does a control's quick action (or cancels something
+half-made), middle-click deletes, **Ctrl** means the other way / all of it, scroll pushes and
+pulls, Ctrl+scroll grows and shrinks, and **Alt** locks a drag to an axis. Controls are coloured
+by what dragging does — Start teal, End orange, Move white, Size green, Turn blue, Bend pink.
+Three cubes ride together just off the marker's surface **on the side you stand**: white
+**move**, the grey **cog** and blue **rotate**. They slide along it to stay a few blocks from
+you and come round it as you walk, so they are never left underneath it or under the ground.
+The cog opens the marker's toolbar; aiming at a control shows its keys on the action bar. A
+faint ghost outline shows through terrain, so a buried marker stays findable and editable.
+Both kinds are edited in either marker mode; the mode only decides what a click on nothing makes.
 
-## Shapes
-
-**Box**, **Ring** and **Line** — regions you draw, then drag, scroll and reshape. Every shape
-uses the same grammar: left-click puts points and drags controls, right-click does a control's
-quick action (or cancels a half-made shape), middle-click deletes, **Ctrl** means the other way /
-both ends, scroll pushes and pulls, Ctrl+scroll grows and shrinks, and **Alt** locks any drag to
-an axis. Controls are coloured by what dragging does — Start teal, End orange, Move white, Size
-green, Turn blue, Bend pink — and every shape has a grey **cog** (on the one you look at and the
-last one you touched): left-click it for that shape's toolbar, with Delete and a **?** for its
-Help page. Aiming at a control shows its keys on the action bar, and making a shape walks you
-through each step. A faint ghost outline shows through terrain, so a buried shape stays findable
-and editable. Painting that begins inside a shape stays inside it.
-
-- **Box** — left-click one corner (the start), left-click the opposite corner (the end); a corner
-  aimed at nothing goes at Marker reach. Then edit it: drag the green face handles to resize, the
-  white centre cube to move (Alt: one axis), scroll to move, Ctrl+scroll to resize the aimed
-  face, right-click a face to grow it by 1 (Ctrl: shrink). Toolbar: gradient along **X / Y / Z**,
-  **Flip** (start on the other side).
-- **Ring** — donut regions: click a centre (the clicked face sets the plane; that base plane is
-  the gradient start side — it can go in open air too, as a level ring at Marker reach), then the
-  outer and inner radius — apart for a thick wall, the same spot for one-wide. Rings start round;
-  switch **Circle / Square** on the toolbar. Drag the green radius controls to resize, a square's
-  blue corners to turn it, right-click a control to extrude into a cylinder/tube (Ctrl = the
-  other way), scroll to push/pull it, Ctrl+scroll to grow/shrink a layer per notch. **Flip**
-  starts an extruded ring's gradient from the far end. Painting into a ring is restricted to its
-  band — giant gradient cylinders and square donuts with exactly the wall thickness you drew.
-- **Line** — a curve in 3D: click a start and an end (nodes sit on the block grid, so straight
-  lines are easy; points aimed at the sky land at Marker reach). Drag the nodes, pull pink curve
-  handles out to bend it (right-drag one to slide it in/out at the same angle; double-click a
-  node to flip it sharp ↔ smooth); a dragged point keeps its distance from you (scroll mid-drag
-  to push it further or pull it nearer). Double-click the line to add a node. **Every node has
-  its own size and twist**, easing smoothly between nodes — drag a node's green size or blue
-  twist cube (Ctrl: all nodes, right-click resets) to taper it into a tentacle; Ctrl+scroll on a
-  node resizes it. One toolbar behind the cog sweeps a **circle, square, triangle or star** along
-  the curve — Shell or Solid — picks the gradient direction (across: bottom to top of every
+- **Dig mode** — the pick on any marker's toolbar steps Off → **Dig inside** → **Dig outside**.
+  Dig inside: while part of the marker is within your reach, only blocks inside it break, so you
+  mine out exactly its shape (walk out of reach and you dig as normal). Dig outside: blocks
+  inside it can't be broken, so you can clear everything round it and leave its shape standing.
+  Works with any tool, in survival and creative.
+- **Shape** — left-click one corner, left-click the opposite corner: a box. Its toolbar turns it
+  into a **Cylinder, Triangle, Star or Sphere** (each keeps the size you have), **Hollow or
+  Filled**, and — hollow — **Capped** or open like a pipe. Drag the bottom and top faces to
+  change the height, and the two green side cubes for width and depth: dragging one side
+  squashes a cylinder into an oval or a box into a slab, **Ctrl** resizes both and keeps the
+  proportions. A hollow shape has a third cube on the inside of its wall — drag it to thicken
+  the wall. Sizes land on whole blocks. Scroll a face for a block taller or shorter. **Rotate**
+  gives the same two rings as a line, so a shape can sit at any angle. Gradients run bottom to
+  top by default (the top of the marker is the top of the gradient), or across with **Gradient
+  angle**, or inside out / outside in; **Show as gradient** and **Physics → Gravity** work on
+  shapes too.
+- **Line / Spline** — a curve in 3D: click a start and an end (nodes sit on the block grid, so
+  straight lines are easy; points aimed at the sky land at Marker reach). Drag the nodes, pull
+  pink curve handles out to bend it (right-drag one to slide it in/out at the same angle;
+  double-click a node to flip it sharp ↔ smooth); a dragged point keeps its distance from you
+  (scroll mid-drag to push it further or pull it nearer). Double-click the line to add a node.
+  **Every node has its own size and twist**, easing smoothly between nodes — drag a node's green
+  size or blue twist cube (Ctrl: all nodes, right-click resets) to taper it into a tentacle;
+  Ctrl+scroll on a node resizes it. One toolbar behind the cog sweeps a **circle, square,
+  triangle or star** along the curve — or a **Drawn profile**: a shape you draw yourself, block
+  by block, flat against any face (left-drag draws, right-drag rubs out; the pencil reopens it).
+  The picture stays where you drew it and each node's size scales it, so it can taper. Shell or
+  Solid, a shell **Capped** or open, and the gradient direction (across: bottom to top of every
   slice cut at right angles to the line, so it follows each bend; along start → end; inside
-  out; or outside in) and **Flip**s start and end. On the Rendering page, **Show as gradient**
-  draws the line in your gradient palette's blocks, live, and **Gradient angle** gives a pink
-  plane with **T** and **B** grips to choose which way is top. While painting with Gradient,
-  the line's cog offers the same options without leaving your paint mode. **Physics → Gravity**
-  drops the line so it falls, tumbles and settles like a branch on a hill — a natural resting
-  place before you paint (Undo drop puts it back). **3D Fill inside the
-  tube grows from the spot you aim at** (even mid-air) and stays inside it. The white **move**
-  cube, the cog and a blue **rotate** cube ride together beside the line, sliding along it to
-  stay a few blocks from where you stand, side by side. **Rotate** puts two rings round the
+  out; or outside in) with **Flip** for start and end. On the Rendering page, **Show as
+  gradient** draws the line in your gradient palette's blocks, live, and **Gradient angle**
+  gives a pink plane with **T** and **B** grips to choose which way is top. While painting with
+  Gradient, the cog offers the same options without leaving your paint mode. **Physics →
+  Gravity** drops the line so it falls, tumbles and settles like a branch on a hill — a natural
+  resting place before you paint (Undo drop puts it back). **3D Fill inside the tube grows from
+  the spot you aim at** (even mid-air) and stays inside it. **Rotate** puts two rings round the
   whole line: grab either anywhere and pull to turn the line about its centre (Ctrl: 15° steps).
   Alt+drag a ring tilts just that ring, so you can turn the line about any direction.
-  Lines are edited in Line mode only; elsewhere they just show and keep constraining paint.
-- **Shape walls count as block faces** — inside a ring, box or tube, the wall within reach
+- **Marker walls count as block faces** — inside a shape or tube, the wall within reach
   selects like a real block face in every paint mode, so you can paint a shape's skin from the
   inside with no scaffolding.
 
@@ -265,7 +252,7 @@ and editable. Painting that begins inside a shape stays inside it.
 
 ### Rendering: restyle a marker
 
-The **eye** on a box, ring or line toolbar swaps the buttons for that marker's look (the arrow
+The **eye** on a shape or line toolbar swaps the buttons for that marker's look (the arrow
 goes back). The look is saved with the marker; **Reset** puts it back.
 
 - **Colour** — filled squares colour the faces, hollow squares the edge lines; click the lit one
@@ -284,10 +271,10 @@ goes back). The look is saved with the marker; **Reset** puts it back.
 
 ## Gradient painting
 
-The palette in use, blended along your build — between markers or free-hand.
+The palette in use, blended along your build — through a marker or free-hand.
 
-- **Between markers**: mark a start and end, click the face the line runs out of and hold — the
-  palette stretches start→end, Auto segments anchoring to the real marker blocks.
+- **In a marker**: paint inside a shape or a line's tube and the palette runs the way its
+  toolbar says — bottom to top, across, along, or inside out.
 - **Anywhere else**: the gradient grows out of the clicked face, sized by the palette's Sizing.
   **Paint memory** continues a half-finished gradient when re-clicked (cleared when you switch or
   edit palettes, or after the Settings idle timer); a *finished* gradient starts a fresh one on
@@ -302,7 +289,7 @@ The palette in use, blended along your build — between markers or free-hand.
 A seedable 3D noise field: valleys get the start of your palette's strip, peaks the end — with
 the palette's noise type (Smooth / Perlin / Fractal), per-axis Scale, and Seed.
 
-- **Region fill**: bound a region with start/end marker pairs, switch to 3D Fill, right-click an
+- **Region fill**: make a shape or a line tube, switch to 3D Fill, right-click an
   empty spot inside — the whole region floods at once. Or paint anywhere: Single / Face / 3D.
 - The editor's noise preview shows it at real world coordinates starting at your feet — exactly
   what painting that spot would place. Drag the cube to move through the noise.
@@ -334,8 +321,8 @@ Every placeable block in the game ranked by colour — discover blocks beyond yo
   Don't paint or Skip them; **Paint memory** idle time — see above.
 - **HUD** — **Move HUD…** repositions the HUD with a preview of your real HUD.
 - **Keys & gestures** — every input as currently bound, with **Change in Controls…**.
-- Mode options and marker settings (**Marker reach**, **Auto end marker**, **Clear all
-  markers**) live on the **Place** tab.
+- Mode options and marker settings (**Marker reach**, **Clear all markers**) live on the
+  **Place** tab.
 
 ## Requirements
 

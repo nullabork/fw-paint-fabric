@@ -44,7 +44,7 @@ public final class DebugRender {
 
     private DebugRender() {}
 
-    /** Called each client tick from MarkerManager. */
+    /** Called each client tick from ShapeMarkers. */
     public static void tick(Minecraft mc) {
         DebugTour.tick(mc);
         DebugScript.tick(mc);

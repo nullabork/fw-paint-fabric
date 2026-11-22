@@ -15,7 +15,7 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * block boxes with per-face culling, convex-edge highlight lines, one-piece region walls and
  * outlines, and composite-VoxelShape outlines. All geometry is camera-relative — each submit
  * translates a fresh pose by (worldPos - cameraPos), matching how vanilla submits entities so
- * there is no frame drift (same pattern as MarkerManager's own emitters).
+ * there is no frame drift.
  */
 public final class WorldDraw {
 

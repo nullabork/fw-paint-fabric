@@ -99,11 +99,8 @@ public final class PlaceOptions {
             case "FACE_TARGET" -> "Same block only";
             case "FACE_PERP" -> "Run across face";
             case "FILL3D" -> "Blob round click";
-            case "MARKER" -> "Start/end blocks";
-            case "MARKER_DRAW" -> "Drag a run";
             case "DISABLED" -> "Tool does nothing";
-            case "MARKER_BOX" -> "Two corners";
-            case "MARKER_RING" -> "Round/square band";
+            case "MARKER_SHAPE" -> "Box, tube, ball";
             case "MARKER_LINE" -> "Nodes, tubes";
             default -> "";
         };
@@ -117,11 +114,8 @@ public final class PlaceOptions {
             case "FACE_TARGET" -> "Like Face any, but only the block type you click.";
             case "FACE_PERP" -> "A one-block-wide run across the face, along your view.";
             case "FILL3D" -> "A blob growing out around the clicked block.";
-            case "MARKER" -> "Click blocks to mark starts (turquoise) and ends (amber).";
-            case "MARKER_DRAW" -> "A freehand marker pencil: drag a run of start markers.";
             case "DISABLED" -> "The paint tool does nothing; clicks work as normal.";
-            case "MARKER_BOX" -> "Two corners mark a whole box region.";
-            case "MARKER_RING" -> "A round or square donut region with a wall thickness.";
+            case "MARKER_SHAPE" -> "Two corners make a box; its options turn it into a cylinder, sphere and more.";
             case "MARKER_LINE" -> "A curve you bend; give it a shape to make a tube.";
             default -> "";
         };

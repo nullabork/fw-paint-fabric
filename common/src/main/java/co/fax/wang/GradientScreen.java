@@ -1069,20 +1069,17 @@ public class GradientScreen extends Screen {
         right.add(gapRow(4));
 
         right.add(sectionRow(right, "Markers", null,
-                "Marker settings: the auto end marker, how far an end can be from its start, and "
-                        + "clearing every marker and shape.", "Markers"));
-        right.add(toggleRow(new Toggle("Auto end marker", "Drop the end on the first block out.", false,
-                () -> ConfigManager.get().autoPlaceEnd, v -> { ConfigManager.get().autoPlaceEnd = v; ConfigManager.save(); })));
+                "Marker settings: how far away a point aimed at nothing lands, and clearing "
+                        + "every shape and line.", "Markers"));
         right.add(sliderRow(new ValueSlider("Marker reach", distToSlider(cfg.maxMarkerDistance),
                 v -> sliderToDist(v) + " blocks",
                 v -> ConfigManager.get().maxMarkerDistance = sliderToDist(v), ConfigManager::save)));
         right.add(buttonRow(new FlatButton(() -> "Clear all markers (" + markerCount() + ")",
-                FlatButton.Style.DANGER, MarkerManager::clearAll)));
+                FlatButton.Style.DANGER, co.fax.wang.shape.ShapeMarkers::clearAll)));
     }
 
     private static int markerCount() {
-        return MarkerManager.startMarkers.size() + MarkerManager.endMarkers.size()
-                + co.fax.wang.shape.ShapeMarkers.count();
+        return co.fax.wang.shape.ShapeMarkers.count();
     }
 
     /** One group's mode tiles in a grid: name + a few words, selected blue, a stripe of its colour. */
